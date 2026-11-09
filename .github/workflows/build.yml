@@ -122,7 +122,8 @@ jobs:
   # above, zipped, with notes from CHANGELOG.md.
   release:
     name: Release
-    if: github.event_name == 'push'
+    # PR7-O seed: off until PR7-O is its own plugin (stage 1), so CI can't publish PR7-D's 0.70.0 under this repo.
+    if: false && github.event_name == 'push'
     needs: build
     runs-on: ubuntu-24.04
     permissions:

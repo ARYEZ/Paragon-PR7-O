@@ -1,3 +1,6 @@
+> **THIS REPO IS PARAGON PR7-O (the orchestra instrument), seeded from PR7-D 0.70.0 (commit ed3eb4e, full history).**
+> Read `PR7-O PLAN.md` first: it's the plan agreed with the owner. Stage 1 (0.1.0) makes this its own plugin (name, `PLUGIN_CODE` Pr7o, presets folder, settings file, logo, version 0.1.0, the drums taken out) and switches the release job in `.github/workflows/build.yml` back on (the seed turned it off so CI can't publish PR7-D's 0.70.0 here). Everything below is PR7-D's notes, kept as the record of the code this inherits; rewrite them for PR7-O as it goes.
+
 # Paragon PR7-D: notes for Claude
 
 This repository starts as a copy of **Paragon PR7-K** (the synthesizer, repo `ARYEZ/Paragon-PR7-K`) at PR7-K **0.24.0** (branch `claude/stoic-knuth-wx6p7m`, commit `0974467`: no `v0.24.0` tag was ever pushed), full history included, to become **Paragon PR7-D**, the **drum instrument** of the PR7 family: a VST3 instrument that takes PR7-K's drum section (its stage 6) further, inspired by the groove and kit side of Toontrack's Superior Drummer 3 (SD3). PR7-K keeps its drum tab as it is (Avenger's drum tab). Siblings: **PR7-G** (guitar, `ARYEZ/Paragon-PR7-G`), **PR7-B** (bass), **PR7-V** (vocal), **PR7-C**, **PR7-E** (utility), **PR7-K** (synth). Everything below describes how the project is built, tested and released, and how the owner likes to work.
