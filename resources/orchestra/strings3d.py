@@ -258,7 +258,9 @@ def build(kind, origin, rotation, lit):
     # the neck and fingerboard, over the body from its end to the nut
     yEnd = L - p["over"]
     yNut = L + p["neck"]
-    zFbEnd, zFbNut = ribs + 0.060 * L, ribs + 0.040 * L
+    # (the fingerboard is a flat slab: its nut end as high as its body end, so the strings run above it all the way;
+    # 0.5.0 had the nut lower and the strings sank into the board near it, hidden: seen once the view was zoomed in)
+    zFbEnd, zFbNut = ribs + 0.060 * L, ribs + 0.060 * L
     hE, hN = p["fbE"] / 2, p["fbN"] / 2
     slab(kind + " neck", [(-hN * 0.9, L - 0.02 * L), (hN * 0.9, L - 0.02 * L), (hN * 0.85, yNut), (-hN * 0.85, yNut)], zTop * 0.3, zFbNut - 0.004 * L, LACQUER, root)
     fb = [(-hE, yEnd), (hE, yEnd), (hN, yNut), (-hN, yNut)]
@@ -317,6 +319,13 @@ if VIEW.startswith("single:"):
     PX_PER_M = (WIDTH / 2) * 0.93 / length
     # lying across: its strings along X, the scroll right, the low string on top (+Y)
     start = -length / 2 + p["pin"]
+    # ORCH_FRAME=strings (the owner, after 0.5.0: "much closer to the scale that we used for the guitar in the PR7-I"):
+    # the strings from the bridge to the nut fill the picture (ORCH_SPAN of them across it), as PR7-I's guitar's
+    # neck does; the body and the scroll run off the edges. The view's middle is the strings' middle.
+    if os.environ.get("ORCH_FRAME") == "strings":
+        bridge, nut = 0.455 * p["L"], p["L"] + p["neck"]
+        PX_PER_M = (WIDTH / 2) / ((nut - bridge) * float(os.environ.get("ORCH_SPAN", "1.22")))
+        start = -(bridge + nut) / 2
     root, strings, _ = build(kind, (start, 0, 0), -math.pi / 2, kind in LIT)
     pieces = [(kind, root, strings)]
 else:
