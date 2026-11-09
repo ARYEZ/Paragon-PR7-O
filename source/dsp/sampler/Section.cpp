@@ -139,9 +139,11 @@ namespace sampler::section
                 ranges.push_back ({ file.getFullPathName(), read->lowestKey(), read->highestKey() });
         }
         // 0.6.0: ordered by the middle of their ranges (a horn's recordings reach under a trombone's, but it plays
-        // above it), each starting at its own lowest key unless that's under where the part beneath starts: then the
-        // two share their overlap, split at its middle. The strings' splits are 0.4.0's; VSCO 2 CE's brass: tuba
-        // 29-33, trombone 34-52, horn 53-65, trumpet 66-84 (by lowest keys alone the horn had one key).
+        // above it), each starting at its own lowest key unless that would leave the part beneath fewer than
+        // `fewestKeys` (or start under it): then the two share their overlap, split at its middle. 7 is the violas'
+        // share in VSCO 2 CE's strings, so their splits stay 0.4.0's; its brass (sustains): tuba 29-47, trombone 48-56,
+        // horn 57-67, trumpet 68-84 (by lowest keys alone the tuba had 5 keys and the horn 1).
+        constexpr int fewestKeys = 7;
         std::stable_sort (ranges.begin(), ranges.end(), [] (const Range& a, const Range& b)
         {
             const auto middleA = a.lowest + a.highest, middleB = b.lowest + b.highest;   // (twice the middles)
@@ -151,9 +153,9 @@ namespace sampler::section
         for (size_t i = 0; i < ranges.size(); ++i)
         {
             auto start = ranges[i].lowest;
-            if (i > 0 && start <= starts.back())
+            if (i > 0 && start < starts.back() + fewestKeys)
             {
-                const auto from = starts.back() + 1, to = juce::jmax (from, juce::jmin (ranges[i - 1].highest, ranges[i].highest));
+                const auto from = juce::jmax (start, starts.back() + 1), to = juce::jmax (from, juce::jmin (ranges[i - 1].highest, ranges[i].highest));
                 start = (from + to + 1) / 2;
             }
             starts.push_back (juce::jlimit (0, 127, i > 0 ? juce::jmax (start, starts.back() + 1) : start));
