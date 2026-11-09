@@ -206,8 +206,10 @@ VPO, stage 4's CC / channel articulations, stage 5 legato, stage 6 the stage and
 
 ## Releases
 
-- Bump `project(ParagonX1 VERSION x.y.z)` in CMakeLists.txt and add a matching `## x.y.z` section at the top of
-  CHANGELOG.md, then push. CI builds Windows and Linux and publishes a GitHub Release with the two zips
+- Bump `project(ParagonX1 VERSION x.y.z)` in CMakeLists.txt, the version `ProcessorTests` checks ("PR7-O is an
+  instrument..."), and add a matching `## x.y.z` section at the top of CHANGELOG.md; **re-run `cmake -B build`** before
+  the release checks (the version is baked in at configure time: 0.3.0's first push failed CI because the local build
+  still said 0.2.0 and so passed), then push. CI builds Windows and Linux and publishes a GitHub Release with the two zips
   (`ParagonPR7-O-vX.Y.Z-<os>-VST3.zip`), the changelog section as its notes. It publishes from a push to **any** branch
   whose version isn't released yet.
 - After pushing, check the release published (both zips) about 15-20 minutes later, **and that its `target_commitish`
