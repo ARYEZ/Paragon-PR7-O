@@ -50,6 +50,16 @@ namespace orchestra
         return {};
     }
 
+    float alongString (int semitones, float nutX, float bridgeX, float edge)
+    {
+        // A stop's place, nut (0) to bridge (1): 1 - 2^(-semitones / 12). 0.5.1: at the common scale the cello's and
+        // bass's bridge end is off the left edge; a note stopped past `edge` lights at it, on its string.
+        auto along = 1.0f - std::pow (2.0f, -(float) semitones / 12.0f);
+        if (nutX > edge && bridgeX < edge && std::abs (bridgeX - nutX) > 1.0f)
+            along = juce::jmin (along, (nutX - edge) / (nutX - bridgeX));
+        return along;
+    }
+
     std::vector<Stop> stopsFor (Kind k, std::vector<int> notes)
     {
         std::vector<Stop> stops;
@@ -335,8 +345,7 @@ void OrchestraView::paintStops (juce::Graphics& g, const Strings& strings, const
             continue;
         const auto s = (size_t) stop.string;
         const auto nut = strings.nut[s].transformedBy (toView), bridge = strings.bridge[s].transformedBy (toView);
-        const auto along = 1.0f - std::pow (2.0f, -(float) stop.semitones / 12.0f);
-        const auto at = nut + (bridge - nut) * along;
+        const auto at = nut + (bridge - nut) * orchestra::alongString (stop.semitones, nut.x, bridge.x, 14.0f);
         const auto colour = stringColours[s];
         const auto scale = std::sqrt (std::abs (toView.getDeterminant()));
         const juce::Line<float> sounding (at, bridge);

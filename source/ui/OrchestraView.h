@@ -27,6 +27,9 @@ namespace orchestra
     // Each note's string and how many semitones over it (-1: no string), for these notes (any order).
     struct Stop { int note = 0, string = -1, semitones = 0; };
     std::vector<Stop> stopsFor (Kind, std::vector<int> notes);
+    // How far along its string (nut 0, bridge 1) a stop is drawn: where it's stopped, but never past `edge` (px) when
+    // the bridge end is off the picture's left edge (0.5.1).
+    float alongString (int semitones, float nutX, float bridgeX, float edge);
 }
 
 class OrchestraView final : public juce::Component, private juce::Timer

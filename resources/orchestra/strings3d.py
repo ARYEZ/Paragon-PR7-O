@@ -319,13 +319,28 @@ if VIEW.startswith("single:"):
     PX_PER_M = (WIDTH / 2) * 0.93 / length
     # lying across: its strings along X, the scroll right, the low string on top (+Y)
     start = -length / 2 + p["pin"]
-    # ORCH_FRAME=strings (the owner, after 0.5.0: "much closer to the scale that we used for the guitar in the PR7-I"):
-    # the strings from the bridge to the nut fill the picture (ORCH_SPAN of them across it), as PR7-I's guitar's
-    # neck does; the body and the scroll run off the edges. The view's middle is the strings' middle.
-    if os.environ.get("ORCH_FRAME") == "strings":
-        bridge, nut = 0.455 * p["L"], p["L"] + p["neck"]
-        PX_PER_M = (WIDTH / 2) / ((nut - bridge) * float(os.environ.get("ORCH_SPAN", "1.22")))
-        start = -(bridge + nut) / 2
+    # 0.5.1, ONE COMMON SCALE like PR7-I's guitar's (the owner: "much closer to the scale that we used for the guitar
+    # in the PR7-I ... We don't need to see the entire body", then "all four instruments to one common scale"): the
+    # largest scale at which every instrument's strings, bridge to nut, stay in the picture: the double bass's fill it
+    # (ORCH_SPAN, 1.05, of them across), and the others are drawn at that same scale, each centred on its strings
+    # (the cello's fill about three quarters, the violin's and viola's about a third). The body and scroll of the
+    # bigger ones run off the edges. ORCH_FRAME=strings: each fills the picture instead (the first mock-up);
+    # ORCH_FRAME=whole: 0.5.0's, each whole instrument fitted.
+    # The owner chose from three (0.5.1): the scale halfway (geometric middle) between the violin's strings filling the
+    # picture (x1.22) and the bass's (x1.05): 0.654 m across, the violin whole and about as big as 0.5.0's, the cello
+    # and bass big. A bigger instrument's strings run past the picture: it's framed on its nut end (the nut at 92%
+    # across, where low-position notes are played), the bridge off the left edge. ORCH_FIT / ORCH_SPAN: another scale
+    # (the instrument whose strings set it, and how many of them across).
+    frame = os.environ.get("ORCH_FRAME", "common")
+    if frame in ("common", "strings"):
+        def span(q): return q["L"] + q["neck"] - 0.455 * q["L"]   # bridge to nut
+        halfway = math.sqrt (span (FAMILY["violin"]) * 1.22 * span (FAMILY["bass"]) * 1.05)
+        fitted = FAMILY[os.environ.get("ORCH_FIT", "violin")] if frame == "common" else p
+        across = span (fitted) * float(os.environ.get("ORCH_SPAN", str (halfway / span (FAMILY["violin"])) if frame == "common" else "1.22"))   # metres
+        PX_PER_M = (WIDTH / 2) / across
+        start = -(0.455 * p["L"] + p["L"] + p["neck"]) / 2
+        if span (p) > across * 0.95:
+            start = 0.42 * across - (p["L"] + p["neck"])
     root, strings, _ = build(kind, (start, 0, 0), -math.pi / 2, kind in LIT)
     pieces = [(kind, root, strings)]
 else:

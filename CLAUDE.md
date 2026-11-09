@@ -193,6 +193,15 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   `oversamplingLatency()` measures each factor once (after `initProcessing`, which sets the whole-sample latency).
 - Blender 4.0 isn't on a fresh machine: `apt-get install -y blender`. Each picture ~2.5 min on 4 cores at 64 samples.
 
+## 0.5.1: the single instruments at one common scale (the owner: "much closer to the scale that we used for the guitar in the PR7-I ... We don't need to see the entire body or the entire headstock"; after a mock-up: "all four instruments to one common scale"; of three, "C: halfway")
+
+- `strings3d.py` single views: `ORCH_FRAME` common (default) / strings (each fills: the first mock-up) / whole
+  (0.5.0's). Common: 0.654 m across the picture, the geometric middle of the violin's strings x1.22 and the bass's
+  x1.05 (`ORCH_FIT`, `ORCH_SPAN` to choose another); an instrument whose strings are longer than 95% of it is framed
+  on its nut end (the nut at 92% across), others centred on their strings. The nut now as high as the fingerboard's
+  body end (`zFbNut = zFbEnd`: the strings had sunk into the board near the nut, hidden). All six pictures rendered again.
+- `OrchestraView::paintStops`: a stop past the picture's left edge (cello / bass upper notes) lights 14 px in from it.
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /

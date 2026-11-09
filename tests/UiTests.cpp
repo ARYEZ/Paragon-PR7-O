@@ -665,3 +665,15 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: every picture's colours sit inside 322-38 
         CHECK (outside == 0);
     }
 }
+
+TEST_CASE ("THE ORCHESTRA VIEW 0.5.1: a stop past the picture's left edge (a cello's or bass's high note) lights at the edge", "[ui][orchestra]")
+{
+    // An octave up is halfway along; the open string at the nut.
+    CHECK (orchestra::alongString (0, 1000.0f, 200.0f, 14.0f) == 0.0f);
+    CHECK (std::abs (orchestra::alongString (12, 1000.0f, 200.0f, 14.0f) - 0.5f) < 1.0e-5f);
+    // The bridge end off the left edge (the nut at 940, the bridge at -500): two octaves up would be at 940 - 0.75 x
+    // 1440 = -140, off the picture: it's drawn at 14 instead. An octave up (220) is where it's stopped.
+    const auto at = [] (int semitones) { return 940.0f + (-500.0f - 940.0f) * orchestra::alongString (semitones, 940.0f, -500.0f, 14.0f); };
+    CHECK (std::abs (at (24) - 14.0f) < 1.0e-3f);
+    CHECK (std::abs (at (12) - 220.0f) < 1.0e-3f);
+}

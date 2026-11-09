@@ -40,8 +40,8 @@ PR7-O is built in stages, each one released (the plan: `PR7-O PLAN.md`):
   POLYPHONY, DYNAMICS, AUTO SUSTAIN) and **ROUTING** (SEND DELAY, SEND REVERB, INSERT BUS). Or drop files on the page.
   The left panel: the articulations (click to switch), a section's **SPLITS** (- / + move a split), what the instrument
   holds (regions, keys, velocity layers, round robins, memory, anything PR7-O doesn't play yet, missing files). The big
-  panel: **the instrument itself** in the family's neon look (violin, viola, cello, double bass: each note lit where
-  it's played; a section's instruments glowing as they play), or its **region map** (keys across, velocity up: where
+  panel: **the instrument itself** in the family's neon look (violin, viola, cello, double bass, at one common scale
+  like PR7-I's guitar: each note lit where it's played; a section's instruments glowing as they play), or its **region map** (keys across, velocity up: where
   each recording plays): INSTRUMENT / REGIONS switch; instruments not modelled yet show the region map.
 - **The keyboard** under the pages: 88 keys, the instrument's tinted; click to play. **HIDE KEYBOARD** (at the foot of
   OUTPUT) makes the window shorter.

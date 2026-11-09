@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.1
+
+**The single instruments bigger, at one common scale** (you: "much closer to the scale that we used for the guitar in
+the PR7-I ... We don't need to see the entire body or the entire headstock", then "all four instruments to one common
+scale", and of three common scales you chose the halfway one). A violin, viola, cello or double bass now lies across
+the picture panel at the same scale as the others, so their sizes compare as in life:
+- the **violin and viola** whole, about as big as 0.5.0's violin (0.5.0 fitted each instrument to the panel, so a
+  violin looked as big as a double bass);
+- the **cello and double bass** much bigger, framed on their nut end where low-position notes are played: the scroll
+  at the right, the upper body showing, the bridge end running off the left edge. A note stopped beyond the edge (their
+  highest, above about 15-18 semitones up a string) lights at the edge, on its string, so whatever sounds shows.
+The scale sits halfway between the violin's strings filling the panel and the bass's (0.654 m across the panel).
+
+**The strings run above the fingerboard to the nut.** Zoomed in, a slip in our model showed: the strings sank into
+the fingerboard near the nut and were hidden there (in every picture, the section's too). Fixed and rendered again.
+(The lit notes are drawn by the plugin, so they were always right.)
+
+Not checked: how it looks on your screen at your window size, and listening.
+
 ## 0.5.0
 
 **THE INSTRUMENT page in the family's "Tron" look, with PR7-I's rack** (you chose both mock-ups, and the rack system
