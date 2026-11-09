@@ -40,6 +40,9 @@ public:
     void refresh();                                                    // from the processor's instrument now
     float getGlow (orchestra::Kind k) const noexcept;                  // a section's part: how lit (0 to 1)
     std::vector<orchestra::Stop> getStops (orchestra::Kind) const;     // the notes lit on its strings now (tests)
+    // The pictures as loaded (tests): one instrument's, or the section's (dim or lit).
+    static const juce::Image& getPicture (orchestra::Kind k) { return single (k).image; }
+    static const juce::Image& getSectionPicture (bool lit) { return section (lit).image; }
 
     void paint (juce::Graphics&) override;
 

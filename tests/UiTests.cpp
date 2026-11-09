@@ -633,3 +633,35 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: a section's parts glow while they play, th
     REQUIRE (moved.size() == 1);
     CHECK ((moved[0].note == 50 && moved[0].string == 2 && moved[0].semitones == 0));
 }
+
+TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: every picture's colours sit inside 322-38 degrees, so any renderer's scaling stays in the family", "[ui][orchestra][colours]")
+{
+    // Blending colours inside an arc this narrow (76 degrees) gives a colour inside it, however a renderer scales the
+    // picture (0.5.0's first Windows build blended a nearly grey lilac pixel into a pink one: 317 degrees).
+    std::vector<std::pair<juce::String, juce::Image>> pictures;
+    for (const auto k : { orchestra::Kind::violin, orchestra::Kind::viola, orchestra::Kind::cello, orchestra::Kind::bass })
+        pictures.push_back ({ orchestra::nameOf (k), OrchestraView::getPicture (k) });
+    pictures.push_back ({ "section", OrchestraView::getSectionPicture (false) });
+    pictures.push_back ({ "section lit", OrchestraView::getSectionPicture (true) });
+    for (const auto& [name, image] : pictures)
+    {
+        REQUIRE (image.isValid());
+        auto outside = 0;
+        juce::String example;
+        const juce::Image::BitmapData pixels (image, juce::Image::BitmapData::readOnly);
+        for (int y = 0; y < pixels.height; ++y)
+            for (int x = 0; x < pixels.width; ++x)
+            {
+                const auto c = pixels.getPixelColour (x, y);
+                const auto hue = c.getHue() * 360.0f;
+                // (8-bit rounding allowed: a hue can only be placed within about 60 / (255 x saturation x brightness)
+                // degrees, plus one; pixels darker than 12% can't tint a pixel they're blended with)
+                const auto slack = 1.0f + 60.0f / (255.0f * juce::jmax (1.0e-3f, c.getSaturation() * c.getBrightness()));
+                if (c.getBrightness() > 0.12f && c.getSaturation() > 0.0f && hue > 38.0f + slack && hue < 322.0f - slack)
+                    if (++outside == 1)
+                        example << " (" << x << "," << y << ") #" << c.toDisplayString (false) << " hue " << hue;
+            }
+        INFO (name << ": " << outside << " pixels outside 322-38 degrees" << example);
+        CHECK (outside == 0);
+    }
+}

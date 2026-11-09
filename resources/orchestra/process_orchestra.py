@@ -24,10 +24,11 @@ def family_hues(path):
     hue[bb] = (r - g)[bb] / delta[bb] + 4.0
     hue = hue * 60.0
     sat = np.where(mx > 0, delta / np.maximum(mx, 1e-6), 0.0)
-    # hues outside 318..42 (with some colour in them) moved to the nearer end, 2 degrees inside it (8-bit rounding and
-    # JPEG move a colour a degree or two)
-    outside = (hue > 40.0) & (hue < 320.0) & (sat > 0.10)
-    nearer = np.where(hue - 40.0 < 320.0 - hue, 40.0, 320.0)
+    # hues outside 318..42 moved to the nearer end, 4 degrees inside it (8-bit rounding and JPEG move a colour a degree
+    # or two); every pixel with any colour, the nearly grey too (scaled down, a lilac grey blended into a pink makes a
+    # pink past the range)
+    outside = (hue > 38.0) & (hue < 322.0) & (sat > 0.0)
+    nearer = np.where(hue - 38.0 < 322.0 - hue, 38.0, 322.0)
     hue = np.where(outside, nearer, hue)
     # back to RGB (value and saturation kept)
     h6 = (hue / 60.0) % 6.0

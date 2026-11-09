@@ -167,7 +167,7 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
 - **The look** (as PR7-D's kit view and PR7-I's GuitarView): our own violin, viola, cello and double bass modelled
   and rendered in Blender 4.0 (`resources/orchestra/strings3d.py`: PR7-I's `guitar3d.py` materials, neon gradient
   pink `ff2d6e` / red `ff2a2e` / orange `ff6a24` across each instrument (low string's side pink), `c0102c` grid floor,
-  lights, Filmic, fog glow), `process_orchestra.py` (hues into 320-40, JPEG, geometry merged), README there.
+  lights, Filmic, fog glow), `process_orchestra.py` (hues into 322-38, every pixel with any colour, JPEG, geometry merged), README there.
   `OrchestraImages` binary data: `violin/viola/cello/bass.jpg` (one lying across, 2200 x 900), `section.jpg` /
   `section-lit.jpg` (all four standing, real sizes), `orchestra.json` (strings' bridge / nut px, each area).
 - **`ui/OrchestraView.*`**: `orchestra::kindOf` (from names; bassoon, trombone, tuba, drums... excluded),
@@ -176,7 +176,7 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   strings: lit areas faded in by `glow`, 1/8 a tick at 30 Hz down) / none (region map). The picture fills the view,
   centred (cropped, never stretched; the geometry through the same transform). Notes: the sounding part of the string
   lit (three widths + a pearl core) and a dot (radius ≥ 6.5 px); keyswitch keys left out; + TRANSPOSE. Lit areas are
-  prepared once: widened and their edges feathered over 70 px (no seams). Pictures' hues pulled into 320-40 again on
+  prepared once: widened and their edges feathered over 70 px (no seams). Pictures' hues pulled into 322-38 again on
   load (JPEG; exactly 318 / 42 rounds past the range).
 - **`ui/InstrumentRack.*`** (PR7-I's `GuitarRack`, same parts): badge "ORCHESTRA INSTRUMENT", PAGE keys PLAYING /
   ROUTING, the screen (`Screen` caption / name / corner / line1 / line2), the INSTRUMENT keys `loadKey`, `sectionKey`,

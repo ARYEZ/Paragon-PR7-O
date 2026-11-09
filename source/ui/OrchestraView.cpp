@@ -95,7 +95,7 @@ namespace
     juce::Point<float> pointOf (const juce::var& v) { return { (float) v[0], (float) v[1] }; }
 
     // Every hue into the family's range once more as a picture loads (JPEG moves a few colours a few degrees past the
-    // processing's), as PR7-D's kit view does: a colour outside 318 through 0 to 42 degrees goes to the nearer end (2 degrees inside it).
+    // processing's), as PR7-D's kit view does: a colour outside 318 through 0 to 42 degrees goes to the nearer end (4 degrees inside it).
     juce::Image inFamily (juce::Image image)
     {
         if (image.isNull())
@@ -107,9 +107,11 @@ namespace
             {
                 const auto c = pixels.getPixelColour (x, y);
                 const auto hue = c.getHue() * 360.0f;
-                // (to 2 degrees inside the range: 8-bit rounding moves a colour set exactly to its end a little past it)
-                if (c.getSaturation() > 0.10f && hue > 40.0f && hue < 320.0f)
-                    pixels.setPixelColour (x, y, c.withHue ((hue - 40.0f < 320.0f - hue ? 40.0f : 320.0f) / 360.0f));
+                // (to 4 degrees inside the range: 8-bit rounding moves a colour set exactly to its end a little past
+                // it. Every pixel with any colour, the nearly grey too: drawn smaller, a nearly grey lilac pixel blended
+                // into a bright pink one made a 317-degree pink on Windows' renderer)
+                if (c.getSaturation() > 0.0f && hue > 38.0f && hue < 322.0f)
+                    pixels.setPixelColour (x, y, c.withHue ((hue - 38.0f < 322.0f - hue ? 38.0f : 322.0f) / 360.0f));
             }
         return image;
     }
