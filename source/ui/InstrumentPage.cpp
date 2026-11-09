@@ -2,6 +2,7 @@
 
 #include "NoteNames.h"
 #include "ui/DockPanels.h"
+#include "ui/Finish.h"
 #include "ui/ParagonLookAndFeel.h"
 
 //==============================================================================
@@ -229,21 +230,17 @@ juce::String articulationName (const sampler::Program::Articulation& a)
 }
 
 //==============================================================================
-InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map (p)
+InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map (p), picture (p)
 {
     auto& state = processor.getParameters();
-    loadButton.setTooltip ("Load an SFZ instrument (or one audio file, played across the keyboard from C3/C4). You can also drop one on this page.");
-    loadButton.onClick = [this] { chooseFile(); };
-    sectionButton.setTooltip ("Several SFZ instruments split over the keyboard as one (a string section: basses, cellos, violas, violins), "
-                              "with one set of keyswitches. Choose their files; PR7-O splits the keys where each next one's range begins "
-                              "(move the splits under SPLITS). You can also drop several .sfz files on this page.");
-    sectionButton.onClick = [this] { chooseSection(); };
-    clearButton.setTooltip ("Unload the instrument (one undo step)");
-    clearButton.onClick = [this] { processor.clearInstrument(); };
-    nameLabel.setFont (juce::FontOptions (24.0f, juce::Font::bold));
-    nameLabel.setColour (juce::Label::textColourId, ParagonColours::text);
-    fileLabel.setFont (juce::FontOptions (12.5f));
-    fileLabel.setColour (juce::Label::textColourId, ParagonColours::textDim);
+    rack.loadKey.setTooltip ("LOAD: an SFZ instrument (or one audio file, played across the keyboard from C3/C4). You can also drop one on this page.");
+    rack.loadKey.onClick = [this] { chooseFile(); };
+    rack.sectionKey.setTooltip ("SECTION: several SFZ instruments split over the keyboard as one (a string section: basses, cellos, violas, "
+                                "violins), with one set of keyswitches. Choose their files; PR7-O splits the keys where each next one's "
+                                "range begins (move the splits under SPLITS). You can also drop several .sfz files on this page.");
+    rack.sectionKey.onClick = [this] { chooseSection(); };
+    rack.clearKey.setTooltip ("CLEAR: unload the instrument (one undo step)");
+    rack.clearKey.onClick = [this] { processor.clearInstrument(); };
     info.setMultiLine (true);
     info.setReadOnly (true);
     info.setScrollbarsShown (true);
@@ -253,13 +250,30 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     info.setColour (juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
     info.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
     info.setColour (juce::TextEditor::textColourId, ParagonColours::text);
-    for (auto* c : std::initializer_list<juce::Component*> { &loadButton, &sectionButton, &clearButton, &nameLabel, &fileLabel, &info, &map })
+    for (auto* c : std::initializer_list<juce::Component*> { &rack, &info, &map, &picture })
         addAndMakeVisible (c);
 
+    // The INSTRUMENT / REGIONS switch over the picture panel.
+    for (auto* b : { &showPicture, &showRegions })
+    {
+        b->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff0d0a0e));
+        b->setColour (juce::TextButton::buttonOnColourId, ParagonColours::accentDim);
+        b->setColour (juce::TextButton::textColourOffId, ParagonColours::textDim);
+        b->setColour (juce::TextButton::textColourOnId, ParagonColours::accent);
+        addChildComponent (*b);
+    }
+    showPicture.setTooltip ("The instrument itself, its notes lit as they play");
+    showRegions.setTooltip ("Its regions: where each recording plays (keys across, velocity up)");
+    showPicture.onClick = [this] { chooseRegions (false); };
+    showRegions.onClick = [this] { chooseRegions (true); };
+
+    // The rack's knobs and menus, in its pearl black.
+    Finish::paintAs (Finish::Type::pearlBlack);
     const auto add = [this, &state] (std::vector<std::unique_ptr<ParamControl>>& list, const char* id, const char* label, const char* tip)
     {
         list.push_back (std::make_unique<ParamControl> (state, id, label, tip));
-        addAndMakeVisible (*list.back());
+        list.back()->setRack (true);
+        rack.addAndMakeVisible (*list.back());
     };
     add (playControls, ParamIDs::instLevel, "LEVEL", "The instrument's level, after its own (each region's volume and velocity)");
     add (playControls, ParamIDs::instPan, "PAN", "A balance, after each region's own pan");
@@ -268,20 +282,107 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     add (playControls, ParamIDs::instRelease, "RELEASE", "The instrument's release times (how long a note takes to fade once let go) times this");
     add (playControls, ParamIDs::instVoices, "POLYPHONY", "How many notes can sound at once; past it one fades out in 10 ms: the oldest let go, "
                                                           "else the oldest held that isn't the chord's lowest or highest");
-    add (playControls, ParamIDs::instDynamics, "DYNAMICS", "VELOCITY: how hard you play picks the recording (as the file says). MOD WHEEL: "
-                                                           "a held note (sustain, tremolo) starts every dynamic at once and the mod wheel "
-                                                           "crossfades between them, soft to loud, as you hold it; shorts still go by velocity");
-    add (playControls, ParamIDs::instAutoSustain, "AUTO SUSTAIN", "A held note longer than its recording keeps going: it crossfades back into the "
-                                                                  "steady part of the recording before the bow comes off (our own; for files "
-                                                                  "without loops, as VSCO 2's)");
     add (sendControls, ParamIDs::instSendDelay, "SEND DELAY", "How much of the instrument goes to the DELAY (FX page: switch it on there)");
     add (sendControls, ParamIDs::instSendReverb, "SEND REVERB", "How much of the instrument goes to the REVERB (FX page: switch it on there)");
-    add (sendControls, ParamIDs::instInsert, "INSERT BUS", "Play it through an insert bus's DRIVE, GLITCH, MOD and LO-FI (FX page, INSERTS). "
-                                                          "On a bus, the bus's own sends are used instead of these");
+    const auto menu = [this, &state] (const char* id, const char* label, const char* tip)
+    {
+        auto control = std::make_unique<ParamControl> (state, id, label, tip);
+        control->setCompact (true);
+        control->setRack (true);
+        rack.addAndMakeVisible (*control);
+        return control;
+    };
+    dynamicsMenu = menu (ParamIDs::instDynamics, "DYNAMICS", "VELOCITY: how hard you play picks the recording (as the file says). MOD WHEEL: "
+                                                             "a held note (sustain, tremolo) starts every dynamic at once and the mod wheel "
+                                                             "crossfades between them, soft to loud, as you hold it; shorts still go by velocity");
+    insertMenu = menu (ParamIDs::instInsert, "INSERT BUS", "Play it through an insert bus's DRIVE, GLITCH, MOD and LO-FI (FX page, INSERTS). "
+                                                           "On a bus, the bus's own sends are used instead of these");
+    Finish::paintAs (std::nullopt);
+
+    // AUTO SUSTAIN: a key on the rack, its stripe lit while it's on.
+    autoSustainKey.getProperties().set (ParagonLookAndFeel::pedalButtonProperty, true);
+    autoSustainKey.setTooltip ("AUTO SUSTAIN: a held note longer than its recording keeps going: it crossfades back into the steady part "
+                               "of the recording before the bow comes off (our own; for files without loops, as VSCO 2's)");
+    autoSustainAttachment = std::make_unique<juce::ParameterAttachment> (*state.getParameter (ParamIDs::instAutoSustain), [this] (float v)
+    {
+        autoSustainKey.setToggleState (v > 0.5f, juce::dontSendNotification);
+    });
+    autoSustainKey.onClick = [this] { autoSustainAttachment->setValueAsCompleteGesture (autoSustainKey.getToggleState() ? 0.0f : 1.0f); };
+    autoSustainAttachment->sendInitialUpdate();
+    rack.addAndMakeVisible (autoSustainKey);
+    rack.onPageChanged = [this] { showRackPage(); };
+    showRackPage();
 
     processor.instrumentBroadcaster.addChangeListener (this);
     refresh();
     startTimerHz (4);
+}
+
+void InstrumentPage::showRackPage()
+{
+    const auto playing = rack.getPage() == InstrumentRack::Page::playing;
+    for (auto& c : playControls)
+        c->setVisible (playing);
+    dynamicsMenu->setVisible (playing);
+    autoSustainKey.setVisible (playing);
+    for (auto& c : sendControls)
+        c->setVisible (! playing);
+    insertMenu->setVisible (! playing);
+}
+
+void InstrumentPage::chooseRegions (bool regions)
+{
+    regionsChosen = regions;
+    showView();
+}
+
+void InstrumentPage::showView()
+{
+    const auto hasPicture = picture.getMode() != OrchestraView::Mode::none;
+    const auto showing = hasPicture && ! regionsChosen;
+    picture.setVisible (showing);
+    map.setVisible (! showing);
+    showPicture.setVisible (hasPicture);
+    showRegions.setVisible (hasPicture);
+    showPicture.setToggleState (showing, juce::dontSendNotification);
+    showRegions.setToggleState (! showing, juce::dontSendNotification);
+    repaint (mapArea);
+}
+
+void InstrumentPage::updateScreen()
+{
+    InstrumentRack::Screen screen;
+    const auto section = sampler::section::fromText (shownFile);
+    if (shownLoading)
+        screen.caption = "LOADING  " + juce::String (juce::roundToInt (processor.getLoadProgress() * 100.0)) + "%";
+    else
+        screen.caption = section.has_value() ? "THE SECTION" : "THE INSTRUMENT";
+    screen.name = shown != nullptr ? shown->name.toUpperCase()
+                : shownFile.isNotEmpty() ? sampler::section::describe (shownFile).toUpperCase()
+                : juce::String ("NO INSTRUMENT");
+    if (shown != nullptr)
+    {
+        if (const auto a = shown->articulationOf (processor.getKeyswitch()); a >= 0)
+        {
+            const auto& articulation = shown->articulations[(size_t) a];
+            screen.corner = notenames::name (articulation.lo);
+            auto name = articulationName (articulation);
+            if (name.startsWith (screen.corner + " "))
+                name = name.substring (screen.corner.length() + 1);
+            screen.line1 = name.toUpperCase();
+        }
+        else if (shown->lowestKey() >= 0)
+            screen.line1 = "KEYS " + notenames::name (shown->lowestKey()) + " TO " + notenames::name (shown->highestKey());
+    }
+    else if (shownFile.isNotEmpty() && ! shownLoading)
+        screen.line1 = "COULDN'T LOAD IT";
+    else if (shownFile.isEmpty())
+        screen.line1 = "LOAD AN SFZ, OR DROP ONE ON THE PAGE";
+    screen.line2 = section.has_value() ? juce::String ((int) section->parts.size()) + " PARTS SPLIT OVER THE KEYS, FROM "
+                                             + sampler::section::folderOf (shownFile).getFullPathName()
+                 : shown == nullptr && shownFile.isNotEmpty() && ! shownLoading ? processor.getLoadProblem()
+                 : shownFile;
+    rack.setScreen (screen);
 }
 
 InstrumentPage::~InstrumentPage()
@@ -435,6 +536,7 @@ void InstrumentPage::timerCallback()
 {
     if (editedSection.has_value() && juce::Time::getMillisecondCounterHiRes() - editedAt > 300.0)
         applyPendingSplits();
+    updateScreen();
     if (processor.isLoadingInstrument() != shownLoading)
         refresh();
     if (notenames::middleCOctave.load() != shownOctave)
@@ -483,16 +585,10 @@ void InstrumentPage::refresh()
     shownLoading = processor.isLoadingInstrument();
     map.setProgram (shown);
     rebuildArticulations();
-    clearButton.setEnabled (shownFile.isNotEmpty() || shown != nullptr);
-
-    const auto section = sampler::section::fromText (shownFile);
-    nameLabel.setText (shown != nullptr ? shown->name.toUpperCase()
-                       : shownFile.isNotEmpty() ? sampler::section::describe (shownFile).toUpperCase()
-                       : juce::String ("NO INSTRUMENT"), juce::dontSendNotification);
-    fileLabel.setText (section.has_value() ? "A section of " + juce::String ((int) section->parts.size()) + " SFZ files split over the keys, from "
-                                                 + juce::File (section->parts.front().file).getParentDirectory().getFullPathName()
-                       : shownFile.isNotEmpty() ? shownFile : juce::String ("Load an SFZ file, or drop one here (several: a section)"),
-                       juce::dontSendNotification);
+    rack.clearKey.setEnabled (shownFile.isNotEmpty() || shown != nullptr);
+    picture.refresh();
+    showView();
+    updateScreen();
     rebuildSplits();
 
     updateInfo();
@@ -567,7 +663,7 @@ void InstrumentPage::updateInfo()
 
 void InstrumentPage::paint (juce::Graphics& g)
 {
-    for (const auto& area : { headArea, infoArea, mapArea, playArea, sendArea })
+    for (const auto& area : { infoArea, mapArea })
         DockStyle::drawPanel (g, area.toFloat());
     DockStyle::drawTitle (g, infoArea.reduced (16, 0).withHeight (32), "THE INSTRUMENT");
     if (! splitRows.empty())
@@ -576,16 +672,23 @@ void InstrumentPage::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
         g.drawText ("SPLITS (LOW TO HIGH)", splitArea.withHeight (22), juce::Justification::bottomLeft);
     }
-    DockStyle::drawTitle (g, mapArea.reduced (16, 0).withHeight (32), "ITS REGIONS: KEYS ACROSS, VELOCITY UP");
-    DockStyle::drawTitle (g, playArea.reduced (16, 0).withHeight (32), "HOW IT PLAYS");
-    DockStyle::drawTitle (g, sendArea.reduced (16, 0).withHeight (32), "WHERE IT GOES");
+}
+
+void InstrumentPage::paintOverChildren (juce::Graphics& g)
+{
+    // The picture panel's title, over the picture.
+    juce::String title = "ITS REGIONS: KEYS ACROSS, VELOCITY UP";
+    if (picture.isVisible())
+        title = picture.getMode() == OrchestraView::Mode::section ? "THE SECTION: EACH PART LIT AS IT PLAYS"
+              : "THE " + orchestra::nameOf (picture.getKind()).toUpperCase() + ": EACH NOTE LIT WHERE IT'S PLAYED";
+    DockStyle::drawTitle (g, mapArea.reduced (16, 0).withHeight (32), title);
 }
 
 void InstrumentPage::resized()
 {
     auto area = getLocalBounds();
-    headArea = area.removeFromTop (78);
-    area.removeFromTop (10);
+    rack.setBounds (area.removeFromTop (InstrumentRack::preferredHeight));
+    area.removeFromTop (4);
     infoArea = area.removeFromLeft (440);
     {
         auto inside = infoArea.reduced (14, 0).withTrimmedTop (36);
@@ -611,32 +714,22 @@ void InstrumentPage::resized()
         }
     }
     area.removeFromLeft (10);
-    auto bottom = area.removeFromBottom (150);
-    area.removeFromBottom (10);
     mapArea = area;
-    playArea = bottom.removeFromLeft (bottom.getWidth() * 72 / 100);
-    bottom.removeFromLeft (10);
-    sendArea = bottom;
-
-    auto head = headArea.reduced (18, 14);
-    loadButton.setBounds (head.removeFromLeft (130).withSizeKeepingCentre (130, 40));
-    head.removeFromLeft (10);
-    sectionButton.setBounds (head.removeFromLeft (150).withSizeKeepingCentre (150, 40));
-    head.removeFromLeft (10);
-    clearButton.setBounds (head.removeFromLeft (100).withSizeKeepingCentre (100, 40));
-    head.removeFromLeft (24);
-    nameLabel.setBounds (head.removeFromTop (30));
-    fileLabel.setBounds (head);
 
     info.setBounds (infoArea.reduced (14, 0).withTrimmedTop (36 + articulationArea.getHeight() + splitArea.getHeight()).withTrimmedBottom (12));
     map.setBounds (mapArea.withTrimmedTop (30).reduced (6, 4));
+    picture.setBounds (mapArea.reduced (2));
+    auto switches = mapArea.reduced (14, 0).withHeight (32).withSizeKeepingCentre (mapArea.getWidth() - 28, 22);
+    showRegions.setBounds (switches.removeFromRight (90));
+    switches.removeFromRight (4);
+    showPicture.setBounds (switches.removeFromRight (104));
 
-    const auto row = [] (juce::Rectangle<int> panel) { return panel.withTrimmedTop (36).withTrimmedBottom (14).reduced (10, 0); };
-    std::vector<juce::Component*> play, sends;
-    for (auto& c : playControls)
-        play.push_back (c.get());
-    for (auto& c : sendControls)
-        sends.push_back (c.get());
-    SynthPanel::layoutRow (row (playArea), play, 0, 6);
-    SynthPanel::layoutRow (row (sendArea), sends, 0, 6);
+    // The rack's controls in its cells.
+    for (int i = 0; i < (int) playControls.size(); ++i)
+        playControls[(size_t) i]->setBounds (rack.knobCell (i));
+    dynamicsMenu->setBounds (rack.menuCell (0).reduced (4, 2));
+    autoSustainKey.setBounds (rack.pageKeyCell (0));
+    for (int i = 0; i < (int) sendControls.size(); ++i)
+        sendControls[(size_t) i]->setBounds (rack.routingKnobCell (i));
+    insertMenu->setBounds (rack.menuCell (0).reduced (4, 2));
 }

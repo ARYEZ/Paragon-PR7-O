@@ -156,8 +156,11 @@ namespace effects
         void reset();
         void process (juce::dsp::AudioBlock<float>, const Settings&) noexcept;
 
-        // How late process() makes the sound with these settings (0 when off or for BRICK, SOFT, AUTO).
+        // How late process() makes the sound with these settings (0 when off or for BRICK, SOFT, AUTO). Safe to ask from
+        // any thread at any time (PR7-O 0.4.0: it no longer touches the oversamplers, which prepare() replaces).
         int getLatencySamples (const Settings&) const noexcept;
+        // The oversamplers' own delay at 2x, 4x and 8x (samples at the host's rate: the same at any rate or block size).
+        static const std::array<int, 3>& oversamplingLatency();
         double getSampleRate() const noexcept { return sampleRate; }
 
         // Meters (the last block; dB).

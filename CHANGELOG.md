@@ -1,6 +1,51 @@
 # Changelog
 
-## 0.4.0
+## 0.5.0
+
+**THE INSTRUMENT page in the family's "Tron" look, with PR7-I's rack** (you chose both mock-ups, and the rack system
+from PR7-I for the knobs and buttons). This release also brings 0.4.0's **sections** (below), which never reached a
+release: its build failed (a test that only failed on Windows, then the crash fixed here).
+
+**THE ORCHESTRA VIEW** (our own 3D string family, modelled and rendered in Blender as PR7-D's kit and PR7-I's guitar
+are: the same gloss black, neon running pink to orange, grid floor and glow):
+- **One instrument:** load a violin, viola, cello or double bass and it lies across the picture panel, scroll to the
+  right, its lowest string on top. Each note you play lights up on its string where a player would stop it (low on the
+  neck, one note a string, a chord's lower notes moving down a string), the string glowing from there to the bridge.
+  TRANSPOSE moves them.
+- **A section:** bass, cello, viola and violin standing side by side, low to high, at their real sizes; each one glows
+  while its part of the split plays (fading out over a quarter second), its notes on its strings.
+- Which instrument a file is comes from its name (VSCO 2 CE's ViolinEns, SViolin, ViolaEns, CelloEns, Contrabass; also
+  "violin", "viola", "cello", "double bass"...). Brass, woodwinds and percussion aren't modelled yet: they show the
+  region map, as before. **INSTRUMENT / REGIONS** over the panel switches between the picture and the region map.
+
+**THE RACK** across the top of the page, drawn with PR7-I's parts (the pearl black unit, the PARAGON PR7-O badge, the
+orange screen, the big knobs with their values on small screens, the small keys with lit stripes):
+- the **screen**: the instrument's name, the articulation chosen (and its key), where it's from; LOADING with the
+  percentage while it loads;
+- **LOAD, SECTION, CLEAR** under it (LOAD... / NEW SECTION... / CLEAR before);
+- two **PAGES**: **PLAYING** (LEVEL, PAN, TRANSPOSE, TUNE, RELEASE, POLYPHONY, the DYNAMICS menu, the AUTO SUSTAIN key)
+  and **ROUTING** (SEND DELAY, SEND REVERB, the INSERT BUS menu). The window's OUTPUT stays beside the pages.
+The articulations, SPLITS and the instrument's details stay in the left panel.
+
+**A crash fixed** (inherited from PR7-D's LIMITER): the plugin asks the LIMITER how much delay it adds (for the DAW)
+30 times a second, and that read the LIMITER's oversamplers, which the DAW replaces whenever it restarts the audio, and
+which don't exist before the audio has started. With the LIMITER on and OVERSAMPLING set, a DAW starting or restarting
+audio at the wrong moment could crash it. pluginval's parameter fuzzing caught it, here about one run in eight. The
+delays are now measured once, so asking never touches them; tested from two threads at once.
+
+**From 0.4.0: SECTIONS, several instruments split over one keyboard** (you asked for "the all strings section",
+split). **SECTION** on the rack (or several `.sfz` files dropped on the page): VSCO 2 CE's `Contrabass-KS`,
+`CelloEns-KS`, `ViolaEns-KS` and `ViolinEns-KS` play as one instrument, basses C0-B0, cellos C1-B1, violas C2-F#2,
+violins G2 up (each starting at the bottom of its own range); **SPLITS** in the left panel, **- / +** move a split. One
+set of keyswitches over the top note for all of them (C6 Sustain, C#6 Sustain Non-Vibrato, D6 Tremolo, D#6 Spiccato,
+E6 Pizzicato), matched by name across the files. Each part loads only the recordings its keys need (450 MB for the
+four instead of about 1 GB); moving a split reads only what's new. Kept in presets and projects, undoable. Details in
+0.4.0's notes below.
+
+Not checked: how it looks on your screen at your window size (the pictures fill their panel and are cropped at the
+edges, never stretched), and listening.
+
+## 0.4.0 (never released: its build failed; in 0.5.0)
 
 **SECTIONS: several instruments split over one keyboard** (our own design; you asked for "the all strings section",
 split). **NEW SECTION...** on the INSTRUMENT page (or drop several `.sfz` files on it at once): choose, say, VSCO 2 CE's

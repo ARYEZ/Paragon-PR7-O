@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures")
 
-project(ParagonX1 VERSION 0.4.0 LANGUAGES C CXX)
+project(ParagonX1 VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,6 +42,19 @@ juce_add_binary_data(ParagonX1Fonts
         resources/fonts/Inter-Regular.ttf
         resources/fonts/Inter-SemiBold.ttf
         resources/fonts/InterDisplay-BlackItalic.ttf)
+
+# 0.5.0: THE ORCHESTRA VIEW's pictures, our own 3D string family rendered in Blender (resources/orchestra/README.md).
+juce_add_binary_data(ParagonX1Orchestra
+    HEADER_NAME OrchestraImages.h
+    NAMESPACE   OrchestraImages
+    SOURCES
+        resources/orchestra/violin.jpg
+        resources/orchestra/viola.jpg
+        resources/orchestra/cello.jpg
+        resources/orchestra/bass.jpg
+        resources/orchestra/section.jpg
+        resources/orchestra/section-lit.jpg
+        resources/orchestra/orchestra.json)
 
 target_sources(ParagonX1
     PRIVATE
@@ -93,6 +106,9 @@ target_sources(ParagonX1
         source/ui/Icons.cpp
         source/ui/DockPanels.cpp
         source/ui/SynthControls.cpp
+        source/ui/PedalBody.cpp
+        source/ui/InstrumentRack.cpp
+        source/ui/OrchestraView.cpp
         source/ui/SynthDisplays.cpp
         source/ui/InstrumentPage.cpp
         source/ui/ProgressBox.cpp
@@ -127,6 +143,7 @@ target_compile_definitions(ParagonX1
 target_link_libraries(ParagonX1
     PRIVATE
         ParagonX1Fonts
+        ParagonX1Orchestra
         juce::juce_audio_utils
         juce::juce_dsp
         juce::juce_recommended_warning_flags   # strict warnings for our code only

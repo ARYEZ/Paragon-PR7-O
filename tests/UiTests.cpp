@@ -306,32 +306,67 @@ TEST_CASE ("COLOURS: the look-and-feel's, the keyboard's, the region map's and e
     for (int v = 1; v <= 127; ++v)   // the region map's boxes, by velocity
         CHECK (inFamily (ParagonColours::velocityColour ((float) v / 127.0f)));
 
-    // The page with an instrument and a chord sounding, drawn: no pixel outside the family.
+    // The page with an instrument and a chord sounding, drawn: no pixel outside the family. 0.5.0: also with each
+    // string instrument's picture (VSCO 2 CE's names) and a section's (its parts lit, notes on their strings).
     Window w;
     w.processor.setPlayConfigDetails (0, 2, 48000.0, 256);
     w.processor.prepareToPlay (48000.0, 256);
-    auto program = sampler::programFrom (testkit::sine (220.0), 60);
-    program->regions[0].loKey = 40;
-    program->regions[0].hiKey = 80;
-    program->index();
-    w.processor.setProgram (std::move (program), "/libraries/a.sfz");
-    w.view->getInstrumentPage().refresh();
-    for (const auto note : { 48, 55, 64 })
-        w.processor.getKeyboardState().noteOn (1, note, 0.8f);
-    juce::AudioBuffer<float> buffer (2, 256);
-    juce::MidiBuffer midi;
-    for (int block = 0; block < 10; ++block)
-        w.processor.processBlock (buffer, midi);
-    juce::Thread::sleep (300);
-    juce::Timer::callPendingTimersSynchronously();
-    const auto image = w.editor->createComponentSnapshot (w.editor->getLocalBounds());
-    auto outside = 0;
-    for (int y = 0; y < image.getHeight(); y += 2)
-        for (int x = 0; x < image.getWidth(); x += 2)
-            if (! inFamily (image.getPixelAt (x, y)))
-                ++outside;
-    INFO (outside << " pixels outside the family's colours");
-    CHECK (outside == 0);
+    const auto scan = [&w] (std::initializer_list<int> notes, const juce::String& what)
+    {
+        w.view->getInstrumentPage().refresh();
+        for (const auto note : notes)
+            w.processor.getKeyboardState().noteOn (1, note, 0.8f);
+        juce::AudioBuffer<float> buffer (2, 256);
+        juce::MidiBuffer midi;
+        for (int block = 0; block < 10; ++block)
+            w.processor.processBlock (buffer, midi);
+        juce::Thread::sleep (300);
+        juce::Timer::callPendingTimersSynchronously();
+        const auto image = w.editor->createComponentSnapshot (w.editor->getLocalBounds());
+        auto outside = 0;
+        juce::String examples;
+        for (int y = 0; y < image.getHeight(); y += 2)
+            for (int x = 0; x < image.getWidth(); x += 2)
+                if (const auto c = image.getPixelAt (x, y); ! inFamily (c))
+                {
+                    if (++outside <= 6)
+                        examples << " (" << x << "," << y << ") #" << c.toDisplayString (false) << " hue " << juce::roundToInt (c.getHue() * 360.0f)
+                                 << " sat " << juce::String (c.getSaturation(), 2) << " bri " << juce::String (c.getBrightness(), 2) << ";";
+                }
+        INFO (what << ": " << outside << " pixels outside the family's colours:" << examples);
+        CHECK (outside == 0);
+        w.processor.getKeyboardState().allNotesOff (1);
+        for (int block = 0; block < 4; ++block)
+            w.processor.processBlock (buffer, midi);
+    };
+    for (const auto* name : { "a", "ViolinEns-KS", "ViolaEns-KS", "CelloEns-KS", "Contrabass-KS" })
+    {
+        auto program = sampler::programFrom (testkit::sine (220.0), 60);
+        program->name = name;
+        program->regions[0].loKey = 28;
+        program->regions[0].hiKey = 96;
+        program->index();
+        w.processor.setProgram (std::move (program), juce::String ("/libraries/") + name + ".sfz");
+        scan ({ 48, 55, 64, 76 }, name);
+    }
+    CHECK (w.view->getInstrumentPage().isShowingPicture());   // (the last: a picture)
+
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("t.wav"), *testkit::sine (220.0, 1.0), 24);
+    juce::StringArray files;
+    for (const auto& [name, low, high] : { std::tuple { "Contrabass", 28, 60 }, std::tuple { "CelloEns", 36, 77 },
+                                           std::tuple { "ViolaEns", 48, 86 }, std::tuple { "ViolinEns", 55, 96 } })
+    {
+        dir.getChildFile (juce::String (name) + ".sfz").replaceWithText ("<region> sample=t.wav lokey=" + juce::String (low) + " hikey="
+                                                                         + juce::String (high) + " pitch_keycenter=60\n");
+        files.add (dir.getChildFile (juce::String (name) + ".sfz").getFullPathName());
+    }
+    w.processor.loadSection (sampler::section::fromFiles (files));
+    REQUIRE (w.processor.waitForInstrument());
+    scan ({ 30, 40, 50, 70 }, "the section");
+    CHECK (w.view->getInstrumentPage().getOrchestraView().getMode() == OrchestraView::Mode::section);
 }
 
 TEST_CASE ("THE INSTRUMENT page 0.2.0: an instrument's articulations, named as the keyboard names keys; clicking switches; the map shows the one chosen", "[ui][keyswitch]")
@@ -438,4 +473,163 @@ TEST_CASE ("THE INSTRUMENT page 0.4.0: a section's SPLITS, a row a part; - / + m
     page.refresh();
     CHECK (page.getInfoText().contains ("REGIONS"));
     CHECK (w.processor.getProgram()->name == "Basses + Cellos + Violins");
+}
+
+TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: which instrument a file is; each note's string, as a player in low position stops it", "[ui][orchestra]")
+{
+    using orchestra::Kind;
+    // VSCO 2 CE's names, and others.
+    CHECK (orchestra::kindOf ("ViolinEns-KS") == Kind::violin);
+    CHECK (orchestra::kindOf ("SViolinVib") == Kind::violin);
+    CHECK (orchestra::kindOf ("ViolaEnsSusVib") == Kind::viola);
+    CHECK (orchestra::kindOf ("CelloEns-KS") == Kind::cello);
+    CHECK (orchestra::kindOf ("Contrabass-KS") == Kind::bass);
+    CHECK (orchestra::kindOf ("Double Bass Pizz") == Kind::bass);
+    CHECK (orchestra::kindOf ("BassoonSus") == Kind::none);
+    CHECK (orchestra::kindOf ("TromboneSus") == Kind::none);
+    CHECK (orchestra::kindOf ("GM-StylePerc bassdrum") == Kind::none);
+    CHECK (orchestra::kindOf ("FluteSusVib") == Kind::none);
+
+    // A cello: C2 G2 D3 A3. The snapshot's chord C2 G2 E3 C4: two open strings, E3 two up the D, C4 three up the A.
+    auto stops = orchestra::stopsFor (Kind::cello, { 36, 43, 52, 60 });
+    std::sort (stops.begin(), stops.end(), [] (const auto& a, const auto& b) { return a.note < b.note; });
+    REQUIRE (stops.size() == 4);
+    CHECK ((stops[0].string == 0 && stops[0].semitones == 0));
+    CHECK ((stops[1].string == 1 && stops[1].semitones == 0));
+    CHECK ((stops[2].string == 2 && stops[2].semitones == 2));
+    CHECK ((stops[3].string == 3 && stops[3].semitones == 3));
+    // Two notes over one string: the lower moves down a string (A3 and B3 on a cello: B3 on the A string, A3 on the D).
+    stops = orchestra::stopsFor (Kind::cello, { 57, 59 });
+    CHECK ((stops[0].note == 59 && stops[0].string == 3 && stops[0].semitones == 2));
+    CHECK ((stops[1].note == 57 && stops[1].string == 2 && stops[1].semitones == 7));
+    // Under the lowest string (VSCO's basses reach C1, an extension): the lowest string, open. High up: to the
+    // fingerboard's end at most.
+    stops = orchestra::stopsFor (Kind::bass, { 24 });
+    CHECK ((stops[0].string == 0 && stops[0].semitones == 0));
+    stops = orchestra::stopsFor (Kind::violin, { 120 });
+    CHECK ((stops[0].string == 3 && stops[0].semitones == 28));
+    // Five notes on four strings: one has none.
+    stops = orchestra::stopsFor (Kind::violin, { 55, 62, 69, 76, 80 });
+    CHECK (std::count_if (stops.begin(), stops.end(), [] (const auto& s) { return s.string < 0; }) == 1);
+}
+
+TEST_CASE ("THE INSTRUMENT page 0.5.0: PR7-I's rack holds its knobs, menus and keys; the picture for strings, the region map otherwise", "[ui][orchestra]")
+{
+    Window w;
+    auto& page = w.view->getInstrumentPage();
+    auto& rack = page.getRack();
+    // The knobs, menus and keys are the rack's, in its cells; PLAYING shows the playing ones, ROUTING the rest.
+    CHECK (page.getLoadButton().getParentComponent() == &rack);
+    CHECK (page.getNewSectionButton().getParentComponent() == &rack);
+    CHECK (page.getClearButton().getParentComponent() == &rack);
+    const auto shownOnRack = [&rack]
+    {
+        juce::StringArray names;
+        for (auto* c : rack.getChildren())
+            if (auto* control = dynamic_cast<ParamControl*> (c); control != nullptr && control->isVisible())
+                names.add (control->getParameterId());
+        return names;
+    };
+    CHECK (rack.getPage() == InstrumentRack::Page::playing);
+    CHECK (shownOnRack() == juce::StringArray { ParamIDs::instLevel, ParamIDs::instPan, ParamIDs::instTranspose, ParamIDs::instTune,
+                                                ParamIDs::instRelease, ParamIDs::instVoices, ParamIDs::instDynamics });
+    rack.getPageKey (InstrumentRack::Page::routing).onClick();
+    CHECK (rack.getPage() == InstrumentRack::Page::routing);
+    CHECK (shownOnRack() == juce::StringArray { ParamIDs::instSendDelay, ParamIDs::instSendReverb, ParamIDs::instInsert });
+    for (auto* c : rack.getChildren())
+        if (c->isVisible())
+        {
+            INFO (c->getName() << " " << c->getBounds().toString());
+            CHECK (rack.getLocalBounds().contains (c->getBounds()));
+        }
+    rack.setPage (InstrumentRack::Page::playing);
+    CHECK (rack.getScreen().name == "NO INSTRUMENT");
+
+    // A cello: its picture, the screen naming it; REGIONS shows the map instead.
+    const auto make = [] (const juce::String& name, int low, int high)
+    {
+        auto program = std::make_shared<sampler::Program>();
+        program->name = name;
+        sampler::Region r;
+        r.sample = testkit::sine (220.0, 0.2);
+        r.loKey = low;
+        r.hiKey = high;
+        program->regions.push_back (r);
+        program->index();
+        return program;
+    };
+    w.processor.setProgram (make ("CelloEns", 36, 76), "/libraries/CelloEns.sfz");
+    page.refresh();
+    CHECK (page.getOrchestraView().getMode() == OrchestraView::Mode::single);
+    CHECK (page.getOrchestraView().getKind() == orchestra::Kind::cello);
+    CHECK (page.isShowingPicture());
+    CHECK (rack.getScreen().name == "CELLOENS");
+    CHECK (rack.getScreen().line2 == "/libraries/CelloEns.sfz");
+    page.chooseRegions (true);
+    CHECK_FALSE (page.isShowingPicture());
+    page.chooseRegions (false);
+    CHECK (page.isShowingPicture());
+
+    // A flute: no picture (not modelled yet): the region map.
+    w.processor.setProgram (make ("FluteSusVib", 60, 96), "/libraries/FluteSusVib.sfz");
+    page.refresh();
+    CHECK (page.getOrchestraView().getMode() == OrchestraView::Mode::none);
+    CHECK_FALSE (page.isShowingPicture());
+
+    // AUTO SUSTAIN's key follows the parameter and sets it.
+    auto* autoSustain = w.processor.getParameters().getParameter (ParamIDs::instAutoSustain);
+    const auto before = autoSustain->getValue() > 0.5f;
+    for (auto* c : rack.getChildren())
+        if (auto* key = dynamic_cast<juce::TextButton*> (c); key != nullptr && key->getTooltip().startsWith ("AUTO SUSTAIN"))
+        {
+            CHECK (key->getToggleState() == before);
+            key->onClick();
+        }
+    CHECK ((autoSustain->getValue() > 0.5f) != before);
+}
+
+TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: a section's parts glow while they play, their notes on their strings", "[ui][orchestra][section]")
+{
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("t.wav"), *testkit::sine (220.0, 2.0), 24);
+    dir.getChildFile ("Contrabass.sfz").replaceWithText ("<region> sample=t.wav lokey=24 hikey=60 pitch_keycenter=40\n");
+    dir.getChildFile ("CelloEns.sfz").replaceWithText ("<region> sample=t.wav lokey=36 hikey=77 pitch_keycenter=48\n");
+    dir.getChildFile ("Horns.sfz").replaceWithText ("<region> sample=t.wav lokey=55 hikey=80 pitch_keycenter=69\n");
+    Window w;
+    auto& page = w.view->getInstrumentPage();
+    w.processor.loadSection (sampler::section::fromFiles ({ dir.getChildFile ("Contrabass.sfz").getFullPathName(),
+                                                            dir.getChildFile ("CelloEns.sfz").getFullPathName(),
+                                                            dir.getChildFile ("Horns.sfz").getFullPathName() }));
+    REQUIRE (w.processor.waitForInstrument());
+    page.refresh();
+    auto& view = page.getOrchestraView();
+    CHECK (view.getMode() == OrchestraView::Mode::section);   // the horns aren't modelled: they play, unpictured
+    CHECK (page.isShowingPicture());
+    CHECK (w.processor.getInstrumentFile().contains ("Horns.sfz"));
+
+    // A cello note (in the cellos' split, 36-54), played into the processor: the cello glows, the bass doesn't.
+    w.processor.setPlayConfigDetails (0, 2, 48000.0, 256);
+    w.processor.prepareToPlay (48000.0, 256);
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 45, (juce::uint8) 100), 0);
+    w.processor.processBlock (buffer, midi);
+    juce::Timer::callPendingTimersSynchronously();
+    juce::Thread::sleep (60);
+    juce::Timer::callPendingTimersSynchronously();
+    CHECK (view.getGlow (orchestra::Kind::cello) > 0.9f);
+    CHECK (view.getGlow (orchestra::Kind::bass) == 0.0f);
+    const auto stops = view.getStops (orchestra::Kind::cello);
+    REQUIRE (stops.size() == 1);
+    CHECK ((stops[0].note == 45 && stops[0].string == 1 && stops[0].semitones == 2));   // A2: two up the G string
+    CHECK (view.getStops (orchestra::Kind::bass).empty());
+    // TRANSPOSE moves where it's stopped (+5: D3, the D string open).
+    testkit::set (w.processor, ParamIDs::instTranspose, 5.0f);
+    juce::Thread::sleep (60);
+    juce::Timer::callPendingTimersSynchronously();
+    const auto moved = view.getStops (orchestra::Kind::cello);
+    REQUIRE (moved.size() == 1);
+    CHECK ((moved[0].note == 50 && moved[0].string == 2 && moved[0].semitones == 0));
 }

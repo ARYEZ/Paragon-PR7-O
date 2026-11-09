@@ -161,6 +161,38 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
 - On VSCO's four string KS files: splits 24-35 / 36-47 / 48-54 / 55-86, switches 96-100 (C7-E7 SFZ), 450 MB, load
   2.3 s warm, a split moved 0.8 s with nothing read. A full chord peaks over 0 dBFS (+20 dB per file).
 
+## 0.5.0: the INSTRUMENT page's "Tron" look and PR7-I's rack (the owner: "continue the concept we have used in both the PR7-D and PR7-I with the TRON style instruments"; then, after two mock-ups: "Build both ...only change is for the knob and button menu let's use the rack system from PR7-I")
+
+0.4.0 was never released (CI failed: a Windows-only test path check, then the LIMITER crash below); 0.5.0 carries it.
+- **The look** (as PR7-D's kit view and PR7-I's GuitarView): our own violin, viola, cello and double bass modelled
+  and rendered in Blender 4.0 (`resources/orchestra/strings3d.py`: PR7-I's `guitar3d.py` materials, neon gradient
+  pink `ff2d6e` / red `ff2a2e` / orange `ff6a24` across each instrument (low string's side pink), `c0102c` grid floor,
+  lights, Filmic, fog glow), `process_orchestra.py` (hues into 320-40, JPEG, geometry merged), README there.
+  `OrchestraImages` binary data: `violin/viola/cello/bass.jpg` (one lying across, 2200 x 900), `section.jpg` /
+  `section-lit.jpg` (all four standing, real sizes), `orchestra.json` (strings' bridge / nut px, each area).
+- **`ui/OrchestraView.*`**: `orchestra::kindOf` (from names; bassoon, trombone, tuba, drums... excluded),
+  `openStrings`, `stopsFor` (our rule: highest free open string at or under the note, one note a string, under the
+  lowest string its lowest open, at most 28 semitones up); `Mode` single (the program's name) / section (parts named as
+  strings: lit areas faded in by `glow`, 1/8 a tick at 30 Hz down) / none (region map). The picture fills the view,
+  centred (cropped, never stretched; the geometry through the same transform). Notes: the sounding part of the string
+  lit (three widths + a pearl core) and a dot (radius ≥ 6.5 px); keyswitch keys left out; + TRANSPOSE. Lit areas are
+  prepared once: widened and their edges feathered over 70 px (no seams). Pictures' hues pulled into 320-40 again on
+  load (JPEG; exactly 318 / 42 rounds past the range).
+- **`ui/InstrumentRack.*`** (PR7-I's `GuitarRack`, same parts): badge "ORCHESTRA INSTRUMENT", PAGE keys PLAYING /
+  ROUTING, the screen (`Screen` caption / name / corner / line1 / line2), the INSTRUMENT keys `loadKey`, `sectionKey`,
+  `clearKey`, `knobCell` (6), `menuCell` (DYNAMICS / INSERT BUS on a painted screen), `pageKeyCell` (AUTO SUSTAIN),
+  `routingKnobCell`; no OUTPUT column (the window's stays). `preferredHeight` 236. Ported from PR7-I: `PedalBody.*`,
+  `SynthControls.*` (`setRack`, `setLabelBelow`, `knobForChoices`).
+- **`InstrumentPage`**: the rack across the top (no head panel, no HOW IT PLAYS / WHERE IT GOES panels); left panel as
+  before; the picture panel: `OrchestraView` or `RegionMap`, `chooseRegions`, INSTRUMENT / REGIONS buttons (shown only
+  when there's a picture), the title painted over it (`paintOverChildren`); `updateScreen` each tick. Snapshot:
+  `PARAGON_SNAPSHOT_ROUTING=1`, `PARAGON_SNAPSHOT_REGIONS=1`. The `[colours]` test scans each picture too.
+- **The LIMITER crash** (PR7-D's `MasterLimiter`, so PR7-D and PR7-E have it too: port back): `getLatencySamples`
+  read `oversamplers[...]`, replaced by `prepare()` on the host's thread and null before it; the processor's timer asks
+  on the message thread (`updateLatency`). pluginval's Fuzz parameters crashed ~1 run in 8 (caught under gdb). Now
+  `oversamplingLatency()` measures each factor once (after `initProcessing`, which sets the whole-sample latency).
+- Blender 4.0 isn't on a fresh machine: `apt-get install -y blender`. Each picture ~2.5 min on 4 cores at 64 samples.
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
@@ -183,6 +215,8 @@ VPO, stage 4's CC / channel articulations, stage 5 legato, stage 6 the stage and
   colours and every pixel of the INSTRUMENT page with an instrument.
 - Ask for source material (example SFZ files, libraries' layouts, riffs) rather than invent specifics; say when
   something is a guess or our own design; say what can't be checked here (listening).
+- **UI changes: a mock-up first**, approved by the owner, as PR7-D's kit and PR7-I's guitar were (0.5.0: two
+  mock-ups, "build both").
 
 ## The project
 

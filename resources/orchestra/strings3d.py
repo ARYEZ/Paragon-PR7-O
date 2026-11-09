@@ -409,7 +409,16 @@ if GEOMETRY:
         return [round(v.x * WIDTH, 2), round((1 - v.y) * HEIGHT, 2)]
     geo = {"width": WIDTH, "height": HEIGHT, "instruments": {}}
     for k, root, strings in pieces:
-        geo["instruments"][k] = [{"bridge": px(root.matrix_world @ Vector(b)), "nut": px(root.matrix_world @ Vector(n))} for b, n in strings]
+        # its strings (bridge and nut ends) and the area it covers (its parts' corners, with room for the glow)
+        xs, ys = [], []
+        for o in bpy.data.objects:
+            if o.parent == root:
+                for corner in o.bound_box:
+                    x, y = px(o.matrix_world @ Vector(corner))
+                    xs.append(x); ys.append(y)
+        margin = 0.05 * FAMILY[k]["L"] * PX_PER_M * 2
+        geo["instruments"][k] = {"strings": [{"bridge": px(root.matrix_world @ Vector(b)), "nut": px(root.matrix_world @ Vector(n))} for b, n in strings],
+                                 "area": [round(min(xs) - margin), round(min(ys) - margin), round(max(xs) + margin), round(max(ys) + margin)]}
     with open(GEOMETRY, "w") as f:
         json.dump(geo, f)
 

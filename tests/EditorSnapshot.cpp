@@ -21,6 +21,8 @@
 //   PARAGON_SNAPSHOT_SFZ=<file>      instead, an SFZ from your computer (none ship with the tests), loaded
 //   PARAGON_SNAPSHOT_SECTION=<file>,<file>...   instead, a section of these SFZ files, split over the keys
 //   PARAGON_SNAPSHOT_SWITCH=<key>    with its keyswitch `key` (a MIDI note number) chosen
+//   PARAGON_SNAPSHOT_ROUTING=1       the INSTRUMENT page's rack on its ROUTING page (0.5.0)
+//   PARAGON_SNAPSHOT_REGIONS=1       the region map instead of the instrument's picture (0.5.0)
 //   PARAGON_SNAPSHOT_NOTES=1         and a C major chord (C2 G2 E3 C4) held on the keyboard, sounding
 //   PARAGON_SNAPSHOT_LOADING=1       the instrument page while an instrument loads, its progress box 62% done
 //   PARAGON_SNAPSHOT_KEYBOARD=0      the keyboard hidden (the shorter window)
@@ -298,6 +300,11 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
     if (page == "settings")
         view->showPage (MainView::Page::settings);
     view->getInstrumentPage().refresh();
+    // 0.5.0: the rack's ROUTING page; the region map instead of the picture.
+    if (env ("PARAGON_SNAPSHOT_ROUTING") == "1")
+        view->getInstrumentPage().getRack().setPage (InstrumentRack::Page::routing);
+    if (env ("PARAGON_SNAPSHOT_REGIONS") == "1")
+        view->getInstrumentPage().chooseRegions (true);
 
     // PARAGON_SNAPSHOT_LOADING=1: an instrument loading, the progress box over the page.
     if (env ("PARAGON_SNAPSHOT_LOADING") == "1")

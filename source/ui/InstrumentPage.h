@@ -3,6 +3,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "PluginProcessor.h"
+#include "ui/InstrumentRack.h"
+#include "ui/OrchestraView.h"
 #include "ui/SynthControls.h"
 
 // THE KEYBOARD (PR7-O 0.1.0): 88 keys under the pages, in the plugin's colours; the keys the instrument plays tinted,
@@ -73,6 +75,10 @@ juce::String articulationName (const sampler::Program::Articulation&);
 // plays (LEVEL, PAN, TRANSPOSE, TUNE, RELEASE, POLYPHONY) and where it goes (SEND DELAY, SEND REVERB, INSERT BUS).
 // 0.4.0: NEW SECTION... (several SFZ files, or drop several): a section split over the keys, its SPLITS listed, each
 // split point moved a semitone with - / + (applied 0.3 s after the last click: one reload, one undo step).
+// 0.5.0 (the owner: "build both ... for the knob and button menu let's use the rack system from PR7-I"): the knobs,
+// menus and keys on a rack unit across the top (InstrumentRack: LOAD, SECTION, CLEAR under its screen; PLAYING and
+// ROUTING pages); the picture panel shows THE ORCHESTRA VIEW (OrchestraView) for a string instrument or section, its
+// region map one click away (INSTRUMENT / REGIONS); anything else shows the region map.
 class InstrumentPage final : public juce::Component,
                              public juce::FileDragAndDropTarget,
                              private juce::ChangeListener,
@@ -90,12 +96,17 @@ public:
     static bool isInstrumentFile (const juce::File&);
 
     void refresh();   // from the processor's instrument now
-    juce::TextButton& getLoadButton() noexcept { return loadButton; }
+    juce::TextButton& getLoadButton() noexcept { return rack.loadKey; }
     // 0.2.0: the instrument's ARTICULATIONS (its keyswitches): a button each, the chosen one lit; click to switch.
     int getNumArticulations() const noexcept { return (int) articulationButtons.size(); }
     juce::TextButton& getArticulationButton (int i) noexcept { return *articulationButtons[(size_t) i]; }
-    juce::TextButton& getClearButton() noexcept { return clearButton; }
-    juce::TextButton& getNewSectionButton() noexcept { return sectionButton; }
+    juce::TextButton& getClearButton() noexcept { return rack.clearKey; }
+    juce::TextButton& getNewSectionButton() noexcept { return rack.sectionKey; }
+    // 0.5.0: the rack, the picture, and which the panel shows (the picture when there's one, unless REGIONS is chosen).
+    InstrumentRack& getRack() noexcept { return rack; }
+    OrchestraView& getOrchestraView() noexcept { return picture; }
+    bool isShowingPicture() const noexcept { return picture.isVisible(); }
+    void chooseRegions (bool regions);
     // 0.4.0: a section's SPLITS: a row a part (its name and keys); moving the split under part `part` (1 on) by
     // `semitones` (each part keeps a key at least), applied after a moment (applyPendingSplits: now).
     int getNumSplitRows() const noexcept { return (int) splitRows.size(); }
@@ -111,11 +122,20 @@ private:
     void chooseSection();
 
     ParagonX1AudioProcessor& processor;
-    juce::TextButton loadButton { "LOAD..." }, clearButton { "CLEAR" }, sectionButton { "NEW SECTION..." };
-    juce::Label nameLabel, fileLabel;
+    InstrumentRack rack;
     juce::TextEditor info;
     RegionMap map;
-    std::vector<std::unique_ptr<ParamControl>> playControls, sendControls;
+    OrchestraView picture;
+    juce::TextButton showPicture { "INSTRUMENT" }, showRegions { "REGIONS" };
+    bool regionsChosen = false;
+    std::vector<std::unique_ptr<ParamControl>> playControls, sendControls;   // the rack's knobs
+    std::unique_ptr<ParamControl> dynamicsMenu, insertMenu;                  // the rack's menus
+    juce::TextButton autoSustainKey;
+    std::unique_ptr<juce::ParameterAttachment> autoSustainAttachment;
+    void showRackPage();
+    void showView();       // the picture or the region map
+    void updateScreen();   // the rack's screen, from the instrument now
+    void paintOverChildren (juce::Graphics&) override;
     std::vector<std::unique_ptr<juce::TextButton>> articulationButtons;
     int shownSwitch = -1, shownOctave = -1;
     juce::Rectangle<int> articulationArea;
@@ -132,5 +152,5 @@ private:
     std::shared_ptr<const sampler::Program> shown;
     juce::String shownFile;
     bool shownLoading = false;
-    juce::Rectangle<int> headArea, infoArea, mapArea, playArea, sendArea;
+    juce::Rectangle<int> infoArea, mapArea;
 };

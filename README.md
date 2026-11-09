@@ -23,7 +23,7 @@ PR7-O is built in stages, each one released (the plan: `PR7-O PLAN.md`):
 |---|---|---|
 | **1** | Its own plugin: an instrument that loads an SFZ and plays it | **Works (0.1.0)** |
 | **2** | Held notes, VSCO 2 CE first (strings in 0.2.0, the rest in 0.3.0): keyswitches, AUTO SUSTAIN, SFZ loops, dynamics on the mod wheel, expression, polyphony that keeps a chord's edges | **Works (0.3.0)**; release samples and the files' own crossfades still to come |
-| 3 | The libraries: VSCO 2 CE, Sonatina Symphonic Orchestra, Virtual Playing Orchestra; a browser by section; streaming | **Sections split over the keys (0.4.0)** |
+| 3 | The libraries: VSCO 2 CE, Sonatina Symphonic Orchestra, Virtual Playing Orchestra; a browser by section; streaming | **Sections split over the keys; the instrument page's neon string family and rack (0.5.0)** |
 | 4 | Articulations: keyswitches (done in 0.2.0), CC or channel | |
 | 5 | Legato (our own) and portamento | |
 | 6 | The stage: sections seated on a drawn stage, simulated mics and room | |
@@ -33,12 +33,16 @@ PR7-O is built in stages, each one released (the plan: `PR7-O PLAN.md`):
 
 ## Using it
 
-- **INSTRUMENT** (the page it opens on): **LOAD...** an `.sfz` file (or one audio file, played across the keyboard
-  from middle C), or drop one on the page. It shows what the instrument holds: its regions, keys, velocity layers and
-  round robins, the memory it takes, anything in the file PR7-O doesn't play yet, and any files it couldn't find; and a
-  **region map** (keys across, velocity up: where each recording plays, lit as notes sound). **HOW IT PLAYS**: LEVEL,
-  PAN, TRANSPOSE, TUNE, RELEASE (times the instrument's own release), POLYPHONY. **WHERE IT GOES**: SEND DELAY, SEND
-  REVERB, INSERT BUS. **CLEAR** unloads it.
+- **INSTRUMENT** (the page it opens on): **the rack** across the top (PR7-I's): its screen shows the instrument, the
+  articulation and where it's from; **LOAD** an `.sfz` (or one audio file, played across the keyboard from middle C),
+  **SECTION** (several `.sfz` split over the keyboard as one: a string section, basses up to violins, with one set of
+  keyswitches over the top note), **CLEAR**; the PAGE keys: **PLAYING** (LEVEL, PAN, TRANSPOSE, TUNE, RELEASE,
+  POLYPHONY, DYNAMICS, AUTO SUSTAIN) and **ROUTING** (SEND DELAY, SEND REVERB, INSERT BUS). Or drop files on the page.
+  The left panel: the articulations (click to switch), a section's **SPLITS** (- / + move a split), what the instrument
+  holds (regions, keys, velocity layers, round robins, memory, anything PR7-O doesn't play yet, missing files). The big
+  panel: **the instrument itself** in the family's neon look (violin, viola, cello, double bass: each note lit where
+  it's played; a section's instruments glowing as they play), or its **region map** (keys across, velocity up: where
+  each recording plays): INSTRUMENT / REGIONS switch; instruments not modelled yet show the region map.
 - **The keyboard** under the pages: 88 keys, the instrument's tinted; click to play. **HIDE KEYBOARD** (at the foot of
   OUTPUT) makes the window shorter.
 - **FX**: an insert bus's DRIVE, GLITCH, MOD and LO-FI (INSERTS); DELAY and REVERB on sends (SENDS); MOD, MOD 2 and

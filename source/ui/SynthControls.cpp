@@ -1,10 +1,14 @@
 #include "SynthControls.h"
 
 #include "ui/DockPanels.h"
+#include "ui/Finish.h"
+#include "ui/LedDisplay.h"
 #include "ui/ParagonLookAndFeel.h"
 
+namespace { constexpr int rackValueHeight = 18; }   // a rack knob's value screen
+
 ParamControl::ParamControl (juce::AudioProcessorValueTreeState& stateToUse, const juce::String& id, const juce::String& labelText,
-                            const juce::String& tooltip)
+                            const juce::String& tooltip, bool knobForChoices)
     : state (stateToUse)
 {
     label.setText (labelText, juce::dontSendNotification);
@@ -18,7 +22,7 @@ ParamControl::ParamControl (juce::AudioProcessorValueTreeState& stateToUse, cons
 
     auto* parameter = state.getParameter (id);
     jassert (parameter != nullptr);   // a typo in a panel's parameter list
-    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (parameter))
+    if (auto* choice = knobForChoices ? nullptr : dynamic_cast<juce::AudioParameterChoice*> (parameter))
     {
         box = std::make_unique<juce::ComboBox>();
         box->addItemList (choice->choices, 1);
@@ -50,8 +54,23 @@ ParamControl::ParamControl (juce::AudioProcessorValueTreeState& stateToUse, cons
 
 ParamControl::~ParamControl() = default;
 
+juce::Rectangle<float> ParamControl::valueScreen() const
+{
+    if (! rack || slider == nullptr)
+        return {};
+    return slider->getBounds().toFloat().removeFromBottom ((float) rackValueHeight).withSizeKeepingCentre (juce::jmin (82.0f, (float) getWidth() - 8.0f), (float) rackValueHeight + 4.0f);
+}
+
+void ParamControl::paint (juce::Graphics& g)
+{
+    if (const auto screen = valueScreen(); ! screen.isEmpty())
+        LedDisplay::paintScreen (g, screen, 0.45f);
+}
+
 void ParamControl::paintOverChildren (juce::Graphics& g)
 {
+    if (const auto screen = valueScreen(); ! screen.isEmpty())
+        LedDisplay::paintGlassOverlay (g, screen.reduced (3.0f), 0.45f);
     const auto* h = host();
     if (h == nullptr)
         return;
@@ -151,6 +170,39 @@ void ParamControl::setCompact (bool shouldBeCompact)
     resized();
 }
 
+void ParamControl::setLabelBelow (bool below)
+{
+    labelBelow = below;
+    label.setColour (juce::Label::textColourId, below ? ParagonColours::text.withAlpha (0.85f) : ParagonColours::textDim);
+    label.setFont (juce::FontOptions (below ? 11.5f : 10.5f, juce::Font::bold));
+    resized();
+}
+
+void ParamControl::setRack (bool inRack)
+{
+    rack = inRack;
+    labelBelow = false;
+    label.setFont (juce::FontOptions (rack ? 9.5f : 10.5f, juce::Font::bold));
+    label.setColour (juce::Label::textColourId, rack ? Finish::ink() : ParagonColours::textDim);
+    if (slider != nullptr)
+    {
+        slider->getProperties().set (ParagonLookAndFeel::pedalKnobProperty, rack);
+        slider->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 78, rack ? rackValueHeight : 18);
+        slider->setColour (juce::Slider::textBoxTextColourId, rack ? LedDisplay::ledOrange : ParagonColours::accent);
+        slider->setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+    }
+    if (box != nullptr)
+    {
+        // On a screen the rack draws: the choice in orange, no box of its own.
+        box->setColour (juce::ComboBox::backgroundColourId, rack ? juce::Colours::transparentBlack : juce::Colour (0xff151217));
+        box->setColour (juce::ComboBox::outlineColourId, rack ? juce::Colours::transparentBlack : ParagonColours::panelEdge);
+        box->setColour (juce::ComboBox::textColourId, rack ? LedDisplay::ledOrange : ParagonColours::accent);
+        box->setColour (juce::ComboBox::arrowColourId, rack ? LedDisplay::ledOrange.withAlpha (0.6f) : ParagonColours::textDim);
+    }
+    resized();
+    repaint();
+}
+
 void ParamControl::resized()
 {
     auto area = getLocalBounds();
@@ -162,6 +214,13 @@ void ParamControl::resized()
             box->setBounds (area.withSizeKeepingCentre (area.getWidth(), juce::jmin (24, area.getHeight())));
         else if (toggle != nullptr)
             toggle->setBounds (area);
+        return;
+    }
+    if (labelBelow)
+    {
+        label.setBounds (area.removeFromBottom (14));
+        if (slider != nullptr)
+            slider->setBounds (area);
         return;
     }
     label.setBounds (area.removeFromTop (14));

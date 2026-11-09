@@ -4,6 +4,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <atomic>
+#include <thread>
+
 #include "Parameters.h"
 #include "PluginProcessor.h"
 #include "dsp/effects/Loudness.h"
@@ -658,4 +661,37 @@ TEST_CASE ("Limiter: after a kick, a dense mix comes straight back up (it doesn'
         CHECK (bedDb (out, 80, 120) - usual > -1.2);
         CHECK (bedDb (out, 120, 240) - usual > -0.7);
     }
+}
+
+TEST_CASE ("Limiter: its delay can be asked from another thread before it's prepared and while it's prepared again", "[limit]")
+{
+    // PR7-O 0.4.0: the processor's timer asks for the LIMITER's delay on the message thread while the host prepares the
+    // audio on its own; getLatencySamples read the oversamplers prepare() replaces (and that didn't exist before the
+    // first prepare): pluginval's parameter fuzzing crashed about one run in eight.
+    effects::MasterLimiter limiter;
+    auto s = settings (Style::modern, 6.0f, -1.0f);
+    s.oversampling = 3;
+    const auto before = limiter.getLatencySamples (s);   // never prepared: no oversamplers yet
+    limiter.prepare (48000.0, 512);
+    CHECK (limiter.getLatencySamples (s) == before);
+    CHECK (before > effects::MasterLimiter::oversamplingLatency()[2]);
+    std::atomic<bool> done { false };
+    std::thread host ([&]
+    {
+        for (int i = 0; i < 200; ++i)
+            limiter.prepare (i % 2 == 0 ? 44100.0 : 48000.0, 64 + 64 * (i % 8));
+        done = true;
+    });
+    auto asked = 0;
+    while (! done.load())
+    {
+        for (const auto oversampling : { 1, 2, 3 })
+        {
+            s.oversampling = oversampling;
+            CHECK (limiter.getLatencySamples (s) > 0);
+        }
+        ++asked;
+    }
+    host.join();
+    CHECK (asked > 0);
 }
