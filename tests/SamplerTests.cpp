@@ -1011,7 +1011,7 @@ TEST_CASE ("SECTION 0.4.0: kept as text; split where each next part's range begi
     CHECK (program->highestKey() == 86);
     for (const auto& r : program->regions)
     {
-        const auto fromLow = r.sample->path.contains ("/low/");
+        const auto fromLow = (juce::File (r.sample->path).getParentDirectory().getFileName() == "low");
         CHECK ((fromLow ? r.hiKey <= 47 : r.loKey >= 48));
     }
 }
@@ -1084,7 +1084,7 @@ TEST_CASE ("SECTION 0.4.0: a split moved reads only what's new; the rest is the 
         juce::StringArray parts;
         for (const auto i : after->byKey[(size_t) key])
             if (after->regions[(size_t) i].playsUnder (after->swDefault))
-                parts.addIfNotAlreadyThere (after->regions[(size_t) i].sample->path.contains ("/low/") ? "low" : "high");
+                parts.addIfNotAlreadyThere (juce::File (after->regions[(size_t) i].sample->path).getParentDirectory().getFileName() == "low" ? "low" : "high");
         return parts.joinIntoString (",");
     };
     CHECK (partAt (49) == "low");
