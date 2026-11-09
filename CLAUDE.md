@@ -247,7 +247,12 @@ VPO, stage 4's CC / channel articulations, stage 5 legato, stage 6 the stage and
     DiskStreamer.
 - **pluginval:** `xvfb-run -a <pluginval> --strictness-level 10 --validate-in-process --validate
   "build/ParagonX1_artefacts/Release/VST3/Paragon PR7-O.vst3"`. Check its exit code. Linux pluginval sometimes crashes
-  in its own host at shutdown after SUCCESS; CI retries that case only (see the workflow).
+  in its own host (its event loop's handler map, `registerEventHandler`, no plugin code on any thread): after SUCCESS,
+  or while it deletes the plugin after its last test, before SUCCESS (about 1 run in 16-20 here). 0.5.0: CI makes a
+  core dump and gdb reads it; only that crash gets another try (see the workflow). To hunt a crash locally: run
+  pluginval in a loop with `ulimit -c unlimited` (a core in the folder it ran from; gdb's own slowness hides races:
+  24 runs under gdb never crashed) and `gdb -batch -ex "thread apply all bt 40" pluginval core`: frames in
+  "Paragon PR7-O.so" mean it's ours.
 - **Screenshots** via `xvfb-run -a build/tests/ParagonX1Tests "[snapshot]"` with `PARAGON_SNAPSHOT=<png>`:
   `PARAGON_SNAPSHOT_WIDTH` (1600; 3200 for 2x), `PARAGON_SNAPSHOT_PAGE=instrument|fx|presets|settings`,
   `PARAGON_SNAPSHOT_INSTRUMENT=1` (a generated demo instrument: 16 zones x 3 layers x 2 round robins),
