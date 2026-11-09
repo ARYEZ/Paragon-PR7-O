@@ -138,19 +138,33 @@ namespace sampler::section
             if (read->lowestKey() >= 0)
                 ranges.push_back ({ file.getFullPathName(), read->lowestKey(), read->highestKey() });
         }
+        // 0.6.0: ordered by the middle of their ranges (a horn's recordings reach under a trombone's, but it plays
+        // above it), each starting at its own lowest key unless that's under where the part beneath starts: then the
+        // two share their overlap, split at its middle. The strings' splits are 0.4.0's; VSCO 2 CE's brass: tuba
+        // 29-33, trombone 34-52, horn 53-65, trumpet 66-84 (by lowest keys alone the horn had one key).
         std::stable_sort (ranges.begin(), ranges.end(), [] (const Range& a, const Range& b)
         {
-            return a.lowest != b.lowest ? a.lowest < b.lowest : a.highest < b.highest;
+            const auto middleA = a.lowest + a.highest, middleB = b.lowest + b.highest;   // (twice the middles)
+            return middleA != middleB ? middleA < middleB : a.lowest < b.lowest;
         });
+        std::vector<int> starts;
+        for (size_t i = 0; i < ranges.size(); ++i)
+        {
+            auto start = ranges[i].lowest;
+            if (i > 0 && start <= starts.back())
+            {
+                const auto from = starts.back() + 1, to = juce::jmax (from, juce::jmin (ranges[i - 1].highest, ranges[i].highest));
+                start = (from + to + 1) / 2;
+            }
+            starts.push_back (juce::jlimit (0, 127, i > 0 ? juce::jmax (start, starts.back() + 1) : start));
+        }
         Section section;
         for (size_t i = 0; i < ranges.size(); ++i)
         {
             Part p;
             p.file = ranges[i].file;
-            p.low = i == 0 ? ranges[i].lowest : juce::jmax (ranges[i].lowest, section.parts.back().high + 1);
-            p.high = i + 1 < ranges.size() ? juce::jmax (p.low, ranges[i + 1].lowest - 1) : juce::jmax (p.low, ranges[i].highest);
-            p.low = juce::jmin (p.low, 127);
-            p.high = juce::jlimit (p.low, 127, p.high);
+            p.low = juce::jmin (starts[i], 127);
+            p.high = juce::jlimit (p.low, 127, i + 1 < ranges.size() ? starts[i + 1] - 1 : ranges[i].highest);
             section.parts.push_back (p);
         }
         return section;

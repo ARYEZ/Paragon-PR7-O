@@ -10,8 +10,9 @@
 //
 //   - Kept as text where an instrument's file name would go (presets, projects, undo all keep it as they keep a
 //     path): <Section><Part file="..." low="24" high="35"/>...</Section>.
-//   - Its default split points: the parts ordered by their lowest key, each playing from its own lowest key to the key
-//     under the next part's lowest; the top one to its highest.
+//   - Its default split points: the parts ordered by the middle of their ranges, each playing from its own lowest key
+//     to the key under the next part's start; the top one to its highest. 0.6.0: a part whose lowest key is under the
+//     start of the part beneath (a horn's under a trombone's) starts at the middle of their shared range instead.
 //   - Each part loads only the regions on its keys (cut to them), so the samples elsewhere aren't read. `reuse` gives
 //     samples already in memory (a split moved: only what's newly needed is read).
 //   - ARTICULATIONS matched by name across the parts (our own rule, from their labels: sustain, sustain non-vibrato,

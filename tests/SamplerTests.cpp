@@ -1090,3 +1090,35 @@ TEST_CASE ("SECTION 0.4.0: a split moved reads only what's new; the rest is the 
     CHECK (partAt (49) == "low");
     CHECK (partAt (50) == "high");
 }
+
+TEST_CASE ("SECTION 0.6.0: default splits by the middle of each range; an overlapping part shares the middle of the overlap (brass)", "[sfz][section]")
+{
+    // Invented files with VSCO 2 CE's brass ranges: tuba 29-62, tenor trombone 34-70, horn 33-77, trumpet 52-84.
+    Folder folder;
+    folder.wav ("t.wav", 220.0, 0.2);
+    const auto file = [&folder] (const char* name, int low, int high)
+    {
+        return folder.sfz (name, "<region> sample=t.wav lokey=" + juce::String (low) + " hikey=" + juce::String (high) + " pitch_keycenter=60\n")
+            .getFullPathName();
+    };
+    const auto tuba = file ("TubaSus.sfz", 29, 62), trombone = file ("TromboneSus.sfz", 34, 70);
+    const auto horn = file ("FHornSus.sfz", 33, 77), trumpet = file ("TrumpetSus.sfz", 52, 84);
+    const auto section = sampler::section::fromFiles ({ trumpet, horn, tuba, trombone });
+    REQUIRE (section.parts.size() == 4);
+    CHECK (section.parts[0].file == tuba);
+    CHECK (section.parts[1].file == trombone);
+    CHECK (section.parts[2].file == horn);   // above the trombone, though its lowest note is under the trombone's
+    CHECK (section.parts[3].file == trumpet);
+    CHECK ((section.parts[0].low == 29 && section.parts[0].high == 33));
+    CHECK ((section.parts[1].low == 34 && section.parts[1].high == 52));
+    CHECK ((section.parts[2].low == 53 && section.parts[2].high == 65));   // the middle of 35-70
+    CHECK ((section.parts[3].low == 66 && section.parts[3].high == 84));   // the middle of 54-77
+    // The strings' splits are as they were (each from its own lowest): basses 24-60, cellos 36-77, violas 48-86,
+    // violins 55-86.
+    const auto strings = sampler::section::fromFiles ({ file ("V.sfz", 55, 86), file ("C.sfz", 36, 77), file ("B.sfz", 24, 60), file ("A.sfz", 48, 86) });
+    REQUIRE (strings.parts.size() == 4);
+    CHECK ((strings.parts[0].low == 24 && strings.parts[0].high == 35));
+    CHECK ((strings.parts[1].low == 36 && strings.parts[1].high == 47));
+    CHECK ((strings.parts[2].low == 48 && strings.parts[2].high == 54));
+    CHECK ((strings.parts[3].low == 55 && strings.parts[3].high == 86));
+}
