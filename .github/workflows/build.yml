@@ -44,7 +44,7 @@ jobs:
             libfreetype-dev libfontconfig1-dev \
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev \
             libxrandr-dev libxrender-dev libxi-dev \
-            libegl-dev libglu1-mesa-dev mesa-common-dev
+            libegl-dev libglu1-mesa-dev mesa-common-dev gdb
 
       - name: Configure
         shell: bash
@@ -91,7 +91,20 @@ jobs:
             # after SUCCESS. So: that crash (exit 139 / 134) after pluginval has
             # printed SUCCESS gets up to 3 more tries; any other failure, a
             # crash before SUCCESS, or 4 crashes in a row fail the build.
+            # PR7-O 0.5.0: it also strikes while pluginval deletes the plugin
+            # after its last test (Fuzz parameters), before SUCCESS is printed
+            # (and that test's "Completed" line can be lost in the buffer): a
+            # core dump here showed no plugin code on any thread, the main
+            # thread in registerEventHandler's map. Telling that from a real
+            # crash by the log alone can't be done, so a crash now leaves a
+            # core dump and gdb reads it: no thread in the plugin (Paragon
+            # PR7-O.so) and the crash in registerEventHandler: the known one,
+            # another try; anything else fails the build, its backtrace printed
+            # (0.5.0's real crash, in the LIMITER, was found that way, by hand).
+            sudo sysctl -w kernel.core_pattern=core.%p > /dev/null || true
+            ulimit -c unlimited
             for attempt in 1 2 3 4; do
+              rm -f core.*
               set +e
               xvfb-run -a $RUN "$PLUGIN" 2>&1 | tee pluginval.log
               status=${PIPESTATUS[0]}
@@ -99,8 +112,27 @@ jobs:
               if [ $status -eq 0 ]; then
                 break
               fi
-              if { [ $status -eq 139 ] || [ $status -eq 134 ]; } && grep -q "^SUCCESS" pluginval.log && [ $attempt -lt 4 ]; then
-                echo "pluginval crashed after SUCCESS (exit $status, its known Linux shutdown crash): try $((attempt + 1)) of 4"
+              known=0
+              if [ $status -eq 139 ] || [ $status -eq 134 ]; then
+                if grep -q "^SUCCESS" pluginval.log; then
+                  known=1
+                else
+                  core=$(ls core.* 2>/dev/null | head -1)
+                  if [ -n "$core" ] && command -v gdb > /dev/null; then
+                    gdb -batch -ex "thread apply all bt 40" ./pluginval "$core" > crash.txt 2>&1 || true
+                    if ! grep -q "Paragon PR7-O.so" crash.txt && grep -q "registerEventHandler" crash.txt; then
+                      known=1
+                    else
+                      echo "pluginval crashed in a way that isn't its known one; the backtrace:"
+                      grep -E "^Thread|^#" crash.txt | head -150
+                    fi
+                  else
+                    echo "pluginval crashed before SUCCESS and left no core dump to read"
+                  fi
+                fi
+              fi
+              if [ $known -eq 1 ] && [ $attempt -lt 4 ]; then
+                echo "pluginval's known Linux host crash (exit $status, no plugin code on any thread): try $((attempt + 1)) of 4"
                 continue
               fi
               exit $status
