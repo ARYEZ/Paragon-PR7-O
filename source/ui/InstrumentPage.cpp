@@ -680,6 +680,8 @@ void InstrumentPage::paintOverChildren (juce::Graphics& g)
     juce::String title = "ITS REGIONS: KEYS ACROSS, VELOCITY UP";
     if (picture.isVisible())
         title = picture.getMode() == OrchestraView::Mode::section ? "THE SECTION: EACH PART LIT AS IT PLAYS"
+              : picture.getKind() == orchestra::Kind::trombone ? juce::String ("THE TROMBONE: EACH NOTE'S SLIDE POSITION LIT")
+              : orchestra::isBrass (picture.getKind()) ? "THE " + orchestra::nameOf (picture.getKind()).toUpperCase() + ": EACH NOTE'S VALVES LIT"
               : "THE " + orchestra::nameOf (picture.getKind()).toUpperCase() + ": EACH NOTE LIT WHERE IT'S PLAYED";
     DockStyle::drawTitle (g, mapArea.reduced (16, 0).withHeight (32), title);
 }

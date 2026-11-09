@@ -202,13 +202,40 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   body end (`zFbNut = zFbEnd`: the strings had sunk into the board near the nut, hidden). All six pictures rendered again.
 - `OrchestraView::paintStops`: a stop past the picture's left edge (cello / bass upper notes) lights 14 px in from it.
 
+## 0.6.0: the brass (the owner: "Do we have brass section in our library?", "Let's do it"; after a mock-up: "Build it but make the metal a bit more visible")
+
+- **Split points** (`section::fromFiles`): parts ordered by the middle of their ranges; each starts at its own lowest
+  key unless that leaves the part beneath fewer than `fewestKeys` (7: the violas' share in VSCO's strings section),
+  or is under its start: then the two split their shared range at its middle. VSCO brass sustains (tuba 29-62,
+  trombone 34-65, horn 33-77, trumpet 52-84): 29-47 / 48-56 / 57-67 / 68-84; strings unchanged. (A first try
+  without the 7-key minimum passed the test with the trombone *staccato*'s range and failed on the real sustain file.)
+- **Pictures** (`resources/orchestra/brass3d.py`: strings3d's helpers copied in; side views of our own design at real
+  sizes; satin gunmetal `6a5e65` metallic rough 0.3, lit by two extra lights linked to the instruments only (Cycles'
+  light linking) so the gloss floor stays black; a neon spine along each tube, bell edges and rims, valve rings).
+  `trumpet/horn/trombone/tuba.jpg`, `brass-section(-lit).jpg` (tuba standing left, trombone across the top right,
+  horn and trumpet under it: four bells-up on stands made horn and trumpet tiny). Trumpet, horn, trombone at 0.745 m
+  across (the trombone framed on its bell end so its crook shows), the tuba whole (the owner chose this). JSON:
+  `valves` (button tops / rotary faces, valve 1 first, horn's thumb last), `slide` (the hand at 1st and 7th: 0.60 m
+  behind the crook at 1st, +0.55 m), `brassSection.<kind>`. `process_orchestra.py <strings> <out> [<brass>]`.
+- **`OrchestraView`**: `Kind` trumpet / horn / trombone / tuba (`kindOf`: trombone, tuba, trumpet / tpt, horn except
+  english / basset / flugel); `isBrass`; `fingeringFor (kind, note)` (our rule from the usual charts, sounding pitch:
+  the lowest harmonic at or over the note (7th, 11th, 13th, 14th left out), lowered by the valves 2 / 1 / 1+2 / 2+3 /
+  1+3 / 1+2+3, or the slide 1st-7th; B-flat trumpet harmonics 2-12, F horn 2-16 (F side, thumb never), B-flat tenor
+  trombone 1-10 (no trigger: 35-39 unplayable), 4-valve B-flat tuba 1-10 (4 = five, 2+4 six... 1+2+3+4 eleven, only
+  under its 2nd harmonic)); the highest held note shows (`getBrassNote`); `paintFingering` (valve dots as the strings'
+  stop dots; slide: 7 marks with numbers, the run to the note's lit). A section shows the family with more pictured
+  parts (`brassSection`, `showsBrass`); `section (lit, brass)`, `getValves`, `hasSlide` (tests). Titles: "THE TRUMPET:
+  EACH NOTE'S VALVES LIT", "THE TROMBONE: EACH NOTE'S SLIDE POSITION LIT". `pictureArea`: one trombone's picture moves
+  sideways to keep its slide's run (1st-7th + 90 px) in view, a little smaller where even that won't fit (the panel
+  crops the picture's sides at usual window shapes: positions 1-2 were off the left edge).
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
 `xfout_*`, `amp_velcurve`), for libraries that use them (VSCO uses neither). Sections are split only (0.4.0; layered
 was offered too: not asked for). Then (ask the owner): stage 3's library browser by
 section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
-VPO, stage 4's CC / channel articulations, stage 5 legato, stage 6 the stage and mixer strips (dsp/mixer).
+VPO, the woodwinds' pictures, stage 4's CC / channel articulations, stage 5 legato, stage 6 the stage and mixer strips (dsp/mixer).
 
 ## Rules (from the owner and the family's CLAUDE.md files)
 

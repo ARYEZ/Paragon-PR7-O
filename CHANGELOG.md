@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.6.0
+
+**The brass in the neon look** (you: "Build it but make the metal a bit more visible", after the mock-up). Load a
+trumpet, horn, trombone or tuba (by its file's name: VSCO 2 CE's TrumpetSus, FHornSus, TromboneSus, Tuba-KS...) and the
+INSTRUMENT page shows our own model of it, lying across with its bell to the right:
+- **trumpet, horn, tuba:** the valves a player presses for the note you play light up (the usual charts: B-flat
+  trumpet, F horn on its F side, 4-valve B-flat tuba; sounding pitch, TRANSPOSE included). A brass instrument plays one
+  note at a time, so with a chord held it shows the highest;
+- **trombone:** the slide's positions 1-7 are marked where the player's hand goes, the note's position lit with the
+  slide's run to it (B-flat tenor without the F trigger: the notes it can't reach light nothing).
+Trumpet, horn and trombone share one scale (the trombone framed on its bell and slide end); the tuba, 92 cm tall, is
+shown whole. **The metal is more visible than in the mock-up:** satin gunmetal with two lights that shine on the
+instruments only, so the floor stays black.
+
+**A brass section** (NEW SECTION... with the brass files) shows the four together: the tuba standing at the left, the
+trombone across the top, the horn and trumpet under it, each lit while its part plays, with its valves or slide
+position. A section mixing strings and brass shows the family with more parts.
+
+**Smarter split points for a section.** 0.4.0 started each part at its own lowest note, which works for the strings
+but not the brass (VSCO's horn recordings start under the trombone's: the horn got a key or two). Now the parts are
+ordered by the middle of their ranges, and a part starts at its own lowest note only if the part below keeps at least
+7 keys; otherwise the two split the notes they share down the middle. VSCO's brass: tuba F0-B1, trombone C2-G#2, horn
+A2-G3, trumpet G#3-C5 (MIDI 29-47, 48-56, 57-67, 68-84; middle C = C3, as the page names them). The strings' splits
+are as before. You can still move any split with - / +.
+
+Not checked: listening (how the brass section sounds with these splits), and how the pictures look on your screen.
+
 ## 0.5.1
 
 **The single instruments bigger, at one common scale** (you: "much closer to the scale that we used for the guitar in
