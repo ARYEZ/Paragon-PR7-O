@@ -132,6 +132,8 @@ private:
     std::unique_ptr<ParamControl> dynamicsMenu, insertMenu;                  // the rack's menus
     juce::TextButton autoSustainKey;
     std::unique_ptr<juce::ParameterAttachment> autoSustainAttachment;
+    juce::TextButton legatoKey;   // 0.7.0
+    std::unique_ptr<juce::ParameterAttachment> legatoAttachment;
     void showRackPage();
     void showView();       // the picture or the region map
     void updateScreen();   // the rack's screen, from the instrument now

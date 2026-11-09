@@ -115,6 +115,18 @@ namespace sampler
         }
     }
 
+    juce::int64 settledFrame (const Sample& sample)
+    {
+        // The first window of its core within 3 dB of its body (an attack's swell, a bow's bite are before it).
+        const auto levels = levelsOf (sample);
+        if (levels.coreLast < levels.coreFirst || levels.body <= 0.0f)
+            return 0;
+        for (int i = levels.coreFirst; i <= levels.coreLast; ++i)
+            if (levels.windows[(size_t) i] >= levels.body * 0.7079f)
+                return (juce::int64) i * levels.window;
+        return 0;
+    }
+
     bool isSustained (const Sample& sample)
     {
         const auto levels = levelsOf (sample);
@@ -312,7 +324,7 @@ namespace sampler
         // 0.4.0: each recording's shape and AUTO SUSTAIN points, kept while the recording is in memory, so a program
         // made again from the same samples (a section's split moved) doesn't work them out again. Keyed by the sample
         // (its weak pointer tells a live one from a new one at the same address).
-        struct Analysis { bool sustained = false; bool pointsKnown = false; SustainPoints points; };
+        struct Analysis { bool sustained = false; bool pointsKnown = false; SustainPoints points; juce::int64 settled = 0; };
         std::mutex analysesLock;
         std::map<const Sample*, std::pair<std::weak_ptr<const Sample>, Analysis>> analyses;
 
@@ -326,6 +338,7 @@ namespace sampler
                     old = old->second.first.expired() ? analyses.erase (old) : std::next (old);
                 Analysis a;
                 a.sustained = isSustained (*sample);
+                a.settled = a.sustained ? settledFrame (*sample) : 0;
                 it = analyses.insert_or_assign (sample.get(), std::make_pair (std::weak_ptr<const Sample> (sample), a)).first;
             }
             return it->second.second;
@@ -342,10 +355,14 @@ namespace sampler
             auto& analysis = analysisOf (r.sample);
             r.held = ! r.oneShot && (double) r.sample->length() / r.sample->sampleRate > 2.5 && analysis.sustained;
             r.autoLoop = false;
+            // 0.7.0: where a joined (legato) note starts: past the attack, never past the recording's first half.
+            r.legatoStart = r.held ? juce::jlimit (r.offset, juce::jmax (r.offset, r.lastFrame() / 2), analysis.settled) : -1;
             if (r.loop != Region::Loop::none)
             {
                 // The file's own loop: its crossfade's curve from how alike its two sides are.
                 r.loopLikeness = loopLikeness (*r.sample, r.loopStart, r.loopEnd, r.loopCrossfade);
+                if (r.legatoStart >= 0)
+                    r.legatoStart = juce::jmin (r.legatoStart, juce::jmax (r.offset, r.loopStart));   // (before its loop)
                 continue;
             }
             if (! r.held)
@@ -365,6 +382,8 @@ namespace sampler
                 r.loopLikeness = points.likeness;
                 r.loopTilt = points.tilt;
             }
+            if (r.legatoStart >= 0 && (r.loop != Region::Loop::none || r.autoLoop))
+                r.legatoStart = juce::jmin (r.legatoStart, juce::jmax (r.offset, r.loopStart));   // (before its loop)
         }
     }
 

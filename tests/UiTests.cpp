@@ -532,7 +532,7 @@ TEST_CASE ("THE INSTRUMENT page 0.5.0: PR7-I's rack holds its knobs, menus and k
     };
     CHECK (rack.getPage() == InstrumentRack::Page::playing);
     CHECK (shownOnRack() == juce::StringArray { ParamIDs::instLevel, ParamIDs::instPan, ParamIDs::instTranspose, ParamIDs::instTune,
-                                                ParamIDs::instRelease, ParamIDs::instVoices, ParamIDs::instDynamics });
+                                                ParamIDs::instRelease, ParamIDs::instVoices, ParamIDs::instGlide, ParamIDs::instDynamics });
     rack.getPageKey (InstrumentRack::Page::routing).onClick();
     CHECK (rack.getPage() == InstrumentRack::Page::routing);
     CHECK (shownOnRack() == juce::StringArray { ParamIDs::instSendDelay, ParamIDs::instSendReverb, ParamIDs::instInsert });
@@ -586,6 +586,25 @@ TEST_CASE ("THE INSTRUMENT page 0.5.0: PR7-I's rack holds its knobs, menus and k
             key->onClick();
         }
     CHECK ((autoSustain->getValue() > 0.5f) != before);
+
+    // 0.7.0: LEGATO's key beside it, off by default, sets its parameter; GLIDE a seventh knob, inside the rack.
+    auto* legato = w.processor.getParameters().getParameter (ParamIDs::instLegato);
+    CHECK (legato->getValue() < 0.5f);
+    auto legatoKeys = 0;
+    for (auto* c : rack.getChildren())
+        if (auto* key = dynamic_cast<juce::TextButton*> (c); key != nullptr && key->getTooltip().startsWith ("LEGATO"))
+        {
+            ++legatoKeys;
+            CHECK (key->isVisible());
+            CHECK_FALSE (key->getToggleState());
+            CHECK_FALSE (key->getBounds().intersects (rack.pageKeyCell (0)));
+            key->onClick();
+            CHECK (key->getToggleState());
+        }
+    CHECK (legatoKeys == 1);
+    CHECK (legato->getValue() > 0.5f);
+    CHECK (rack.getLocalBounds().contains (rack.knobCell (InstrumentRack::numKnobs - 1)));
+    CHECK (w.processor.getParameters().getParameter (ParamIDs::instGlide)->getCurrentValueAsText() == "Off");
 }
 
 TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: a section's parts glow while they play, their notes on their strings", "[ui][orchestra][section]")

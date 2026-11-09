@@ -52,7 +52,7 @@ InstrumentRack::InstrumentRack()
     }
     playingKey.setComponentID ("rackPlaying");
     routingKey.setComponentID ("rackRouting");
-    playingKey.setTooltip ("PLAYING: how the instrument plays (LEVEL ... POLYPHONY, DYNAMICS, AUTO SUSTAIN)");
+    playingKey.setTooltip ("PLAYING: how the instrument plays (LEVEL ... POLYPHONY, GLIDE, DYNAMICS, AUTO SUSTAIN, LEGATO)");
     routingKey.setTooltip ("ROUTING: where it goes (SEND DELAY, SEND REVERB, INSERT BUS)");
     playingKey.onClick = [this] { setPage (Page::playing); };
     routingKey.onClick = [this] { setPage (Page::routing); };
@@ -153,10 +153,13 @@ juce::Rectangle<int> InstrumentRack::menuCell (int) const
     return juce::Rectangle<float> (area.getX(), area.getY() + 18.0f, area.getWidth(), 30.0f).toNearestInt();
 }
 
-juce::Rectangle<int> InstrumentRack::pageKeyCell (int) const
+juce::Rectangle<int> InstrumentRack::pageKeyCell (int index) const
 {
+    // Two keys side by side under the menu (0.7.0: AUTO SUSTAIN, LEGATO).
     const auto area = sideOfPage();
-    return juce::Rectangle<float> (area.getX(), area.getY() + 74.0f, area.getWidth(), 28.0f).withSizeKeepingCentre (54.0f, 26.0f).toNearestInt();
+    const auto half = area.getWidth() * 0.5f;
+    return juce::Rectangle<float> (area.getX() + half * (float) juce::jlimit (0, 1, index), area.getY() + 74.0f, half, 28.0f)
+        .withSizeKeepingCentre (54.0f, 26.0f).toNearestInt();
 }
 
 //==============================================================================
@@ -215,8 +218,11 @@ void InstrumentRack::paint (juce::Graphics& g)
     LedDisplay::paintScreen (g, menu, screenSize);
     if (page == Page::playing)
     {
-        const auto key = pageKeyCell (0).toFloat();
-        stamped (g, "AUTO SUSTAIN", key.translated (0.0f, key.getHeight() + 2.0f).withHeight (12.0f).expanded (40.0f, 0.0f), 8.0f);
+        for (int i = 0; i < 2; ++i)
+        {
+            const auto key = pageKeyCell (i).toFloat();
+            stamped (g, i == 0 ? "AUTO SUSTAIN" : "LEGATO", key.translated (0.0f, key.getHeight() + 2.0f).withHeight (12.0f).expanded (22.0f, 0.0f), 8.0f);
+        }
     }
 }
 

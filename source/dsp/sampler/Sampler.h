@@ -41,6 +41,13 @@
 //     the oldest let go, else the oldest held that isn't the chord's lowest or highest (a big chord keeps its bass and
 //     its top line).
 //   - A new Program fades every voice of the old one over 20 ms (the processor keeps the old one 2 s).
+//   - 0.7.0, LEGATO (our own design: the open libraries have no recorded transitions): while it's on, a note pressed
+//     while a held recording (Region::held) still sounds from a key pressed at least `chordWindow` before it (so a
+//     chord isn't joined), the nearest within an octave, JOINS it: the old note fades out as the new one fades in (equal
+//     power), the new one started past its attack (Region::legatoStart). The crossfade follows how fast you play: a
+//     quarter of the time since the old note began, 30 to 150 ms. GLIDE slides both notes' pitch from the old note's to
+//     the new one's. Let go of the joined note while the key it came from is still down and it joins back (a trill).
+//     Shorts (not held) are never joined.
 // On the audio thread nothing is allocated.
 namespace sampler
 {
@@ -62,7 +69,13 @@ namespace sampler
             int channel = 0;            // MIDI channel listened to (0: any)
             Dynamics dynamics = Dynamics::velocity;
             bool autoSustain = true;
+            bool legato = false;        // 0.7.0
+            float glideSeconds = 0.0f;  // 0.7.0: a joined note's slide in pitch
         };
+        static constexpr double chordWindow = 0.04;                                  // seconds (0.7.0)
+        static constexpr double shortestJoin = 0.03, longestJoin = 0.15;             // the legato crossfade's range
+        // The legato crossfade for a note joined `since` seconds after the one it joins began.
+        static double joinSeconds (double since) noexcept { return juce::jlimit (shortestJoin, longestJoin, 0.25 * since); }
 
         Sampler();
         void prepare (double sampleRate);
@@ -118,12 +131,20 @@ namespace sampler
             bool onWheel = false;
             float layerMiddle = 64.0f, lowerMiddle = -1.0f, upperMiddle = -1.0f, velTrack = 1.0f;
             float wheelGain = 1.0f, wheelTarget = 1.0f;
+            // 0.7.0, LEGATO: fading in (its attack an equal-power rise) or out (its fade an equal-power fall) as a join,
+            // and GLIDE: its pitch times glideRatio, moving by glideStep each sample for glideCount samples to glideTarget.
+            bool legatoIn = false, legatoOut = false;
+            double glideRatio = 1.0, glideStep = 1.0, glideTarget = 1.0;
+            int glideCount = 0;
         };
+        struct Join { int from = -1; double seconds = 0.0, glide = 0.0; };   // a legato join (from: the note joined)
 
         void noteOn (const Program&, int note, int velocity, int channel, const Settings&) noexcept;
-        void noteOff (int note, int channel) noexcept;
+        bool playNote (const Program&, int note, int velocity, int channel, const Settings&, int joinFrom) noexcept;
+        void noteOff (const Program*, int note, int channel, const Settings&) noexcept;
+        int joinableFrom (int note) const noexcept;   // LEGATO: the sounding note a new one would join (-1: none)
         void startVoice (const Region&, int note, int velocity, int channel, const Settings&, std::uint64_t noteId,
-                         float lowerMiddle, float upperMiddle) noexcept;
+                         float lowerMiddle, float upperMiddle, const Join*) noexcept;
         void makeRoom (const Settings&) noexcept;   // POLYPHONY: a note faded if one more would pass it
         void release (Voice&) noexcept;
         void fadeOut (Voice&, double seconds) noexcept;
@@ -146,6 +167,12 @@ namespace sampler
         float expression = 1.0f;        // CC 11, 0 to 1
         bool pedal = false;
         int keyswitch = -1;
+        // 0.7.0: the keys as they're down (velocity, channel, when: the sample clock), and which key each was joined
+        // from (-1: none).
+        juce::int64 clock = 0, now = 0;
+        std::array<bool, 128> keyDown {};
+        std::array<int, 128> keyVelocity {}, keyChannel {}, cameFrom {};
+        std::array<juce::int64, 128> keyStart {};
         std::uint64_t counter = 0, notes = 0;
         std::uint32_t random = 0x9e3779b9u;
         float shownGain = -1.0f, shownLeft = 1.0f, shownRight = 1.0f;   // LEVEL / PAN / EXPRESSION the last piece ended on
