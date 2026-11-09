@@ -116,13 +116,37 @@ no release samples, no xfin / xfout.** Sustains are 7-17 s, steady, ending in a 
   level over 12-24 s of looping vs the recording's own steady part on 64 notes of 5 instruments: the same spread
   (median 4-6 dB, the bowing's swell). Demo WAVs rendered for the owner. Not checked: listening.
 
+## Stage 2 continued in 0.3.0: the rest of VSCO 2 CE (the owner: "Let's do the rest of VSCO")
+
+The other 44 files (woodwinds, brass, organ, timpani + rolls, harp, pianos, mallets, bells, GM-StylePerc) use no opcode
+the strings didn't (counted): all 75 load, 0 problems, 0 unread (paths with spaces fine). The work was the held rule
+and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM-StylePerc) against their file names:
+- `levelsOf`: the **core** (first to last 50 ms window within 6 dB of the median of the middle 3/5) and `body` = the
+  core's median (used by `findSustain` too). `isSustained`: on the core, peak ≤ 18 dB over body, first quarter ≤ 9 dB
+  over last, core ≥ 0.8 s (plus > 2.5 s, not one_shot). 7 misjudged (0.2.0's rule: 41; 4 are TrumpetSusVib notes that
+  really die away). Bass drum "rub", bowed cymbal, rolls, ratchets count as held; 6 kit sounds held but unlooped (swells).
+- `findSustain`: the steady stretch is the longest without a **burst** (0.2 s level > body + 6 dB: VSCO's quiet organ);
+  `minimumSteady` 1 s (was 1.5); the start searched ±0.1 s (was 25 ms): every peak of the 40 ms snippet match (> 0.5,
+  coarse steps of 8, refined) judged by the whole crossfade (every 4th frame), the snippet's best if none; the
+  crossfade the longest of 1, 1/2, 1/4, 1/8 s with likeness ≥ 0.7, else the longest (pure tones drift out of phase
+  over 1 s: VSCO's piccolo); `tilt` (dB, ±`maximumTilt` 6) = level over the crossfade's length before the start less
+  before the end. Load time: Flute-KS ~1 s (was 0.4).
+- `Region::loopTilt` (AUTO SUSTAIN loops only); `Sampler`: the main read times `tiltGain` (exp (tiltK x frames past the
+  loop start), 1 before it, `tiltEnd` past its end: no step at note-off), incremental (`tiltStep` per sample, `exp` per
+  block and per wrap); the crossfade's back read untilted.
+- Checked on the real files (probes in the scratchpad, not committed): 19 sustain instruments, 9-21 notes each held 25
+  s: looping level spread ≤ the recording's own (strings 4-6 dB, brass 1.5-2.2, woodwinds 0.6-2.9, organ 1-3, rolls
+  3.3, piccolo 2.9). Demo WAVs rendered for the owner. Not checked: listening.
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
-`xfout_*`, `amp_velcurve`), for libraries that use them (VSCO's strings don't). Then (ask the owner): the rest of VSCO
-(brass, woodwinds, percussion, choir has none in VSCO), stage 3's library browser by section and disk streaming
-(DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), stage 4's CC / channel articulations,
-stage 5 legato, stage 6 the stage and mixer strips (dsp/mixer).
+`xfout_*`, `amp_velcurve`), for libraries that use them (VSCO uses neither). The owner asked (0.3.0) whether all the
+strings can be one instrument: today one SFZ per PR7-O (VSCO's keyswitch ranges differ: violins C1-D#1, cellos and
+basses C5-E5). Offered as our own "section" feature with stage 3, split by register or layered (or both), one
+keyswitch switching every section: waiting for the owner's choice. Then (ask the owner): stage 3's library browser by
+section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
+VPO, stage 4's CC / channel articulations, stage 5 legato, stage 6 the stage and mixer strips (dsp/mixer).
 
 ## Rules (from the owner and the family's CLAUDE.md files)
 

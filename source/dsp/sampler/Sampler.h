@@ -32,7 +32,9 @@
 //     two sides are (r = their correlation: weights (1 - t) and t, divided by sqrt (w1² + w2² + 2 r w1 w2): linear
 //     when they match, equal power when they're unrelated). AUTO SUSTAIN (our own design) gives a
 //     held recording without loop points one, found where the recording is steady (findSustain), so a note held past
-//     the recording's end keeps sounding.
+//     the recording's end keeps sounding. 0.3.0: its loop TILTED (Region::loopTilt: the gain rising across the loop,
+//     in dB, to make up how much quieter its end is than the sound it goes back to; held at its end value past the
+//     loop, so letting go doesn't step), for notes still settling as they're held (a timpani roll).
 //   - Note off releases it (one_shot regions play on to their end); the sustain pedal (CC 64) holds note-offs until
 //     it's lifted; CC 120 / 123 stop everything.
 //   - POLYPHONY counts NOTES (0.2.0; all the voices one note started are one). Past it, a note fades out over 10 ms:
@@ -106,6 +108,11 @@ namespace sampler
             juce::int64 loopStart = 0, loopEnd = 0;
             int crossfade = 0;
             float likeness = 0.0f;   // the loop's two sides' correlation (the crossfade keeps the level for it)
+            // 0.3.0, AUTO SUSTAIN's tilt: the gain rises across the loop (exp (tiltK x frames past its start), to
+            // tiltEnd at its end, held there past it), so each time round it ends at the level it goes back to.
+            bool tilted = false;
+            double tiltK = 0.0;
+            float tiltGain = 1.0f, tiltStep = 1.0f, tiltEnd = 1.0f;
             // DYNAMICS ON THE MOD WHEEL: this layer's middle and its neighbours' (in velocity, 1-127; -1: none), and the
             // gain the wheel gives it now (ramped across each piece).
             bool onWheel = false;

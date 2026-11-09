@@ -22,7 +22,7 @@ PR7-O is built in stages, each one released (the plan: `PR7-O PLAN.md`):
 | Stage | What | Now |
 |---|---|---|
 | **1** | Its own plugin: an instrument that loads an SFZ and plays it | **Works (0.1.0)** |
-| **2** | Held notes, starting with VSCO 2 CE's strings: keyswitches, AUTO SUSTAIN, SFZ loops, dynamics on the mod wheel, expression, polyphony that keeps a chord's edges | **Works (0.2.0)**; release samples and the files' own crossfades still to come |
+| **2** | Held notes, VSCO 2 CE first (strings in 0.2.0, the rest in 0.3.0): keyswitches, AUTO SUSTAIN, SFZ loops, dynamics on the mod wheel, expression, polyphony that keeps a chord's edges | **Works (0.3.0)**; release samples and the files' own crossfades still to come |
 | 3 | The libraries: VSCO 2 CE, Sonatina Symphonic Orchestra, Virtual Playing Orchestra; a browser by section; streaming | |
 | 4 | Articulations: keyswitches (done in 0.2.0), CC or channel | |
 | 5 | Legato (our own) and portamento | |
@@ -58,8 +58,10 @@ crossfades (`xfin` / `xfout`), filters and other modulation.
 
 **VSCO 2 Community Edition** (Versilian Studios, CC0: credit them, and don't sell the samples on their own): get it from
 its GitHub page (github.com/sgossner/VSCO-2-CE, the SFZ branch) and load its `.sfz` files from the folder's top level.
-Its 31 string instruments load completely in 0.2.0; the `-KS` files hold every articulation, switched from C1-D#1 (the
-violins, violas, solo violin) or C5-E5 (cellos, basses), as PR7-O names notes by default.
+All 75 of its instruments load completely (0.3.0): strings, woodwinds, brass, organ, timpani, harp, pianos, mallets
+and the percussion kit. The `-KS` files hold several articulations, switched from C1-D#1 (violins, violas, solo violin,
+flute; clarinet C1-C#1) or C5-E5 (cellos, basses; tuba C5-C#5), as PR7-O names notes by default. Their sustains are
+recorded a few seconds long with no loops: AUTO SUSTAIN keeps them going for as long as you hold them.
 
 PR7-O ships no samples, and never reads locked formats (Kontakt, Opus, Spitfire's player...). Check each library's
 licence before releasing music made with it.

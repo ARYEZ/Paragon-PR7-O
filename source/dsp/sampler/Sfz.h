@@ -55,6 +55,10 @@ namespace sampler
         int loopCrossfade = 0;
         float loopLikeness = 0.0f;    // how alike the two sides of the crossfade are (-1 to 1): sets its curve
         bool autoLoop = false;
+        // 0.3.0, AUTO SUSTAIN's TILT (dB): how much quieter the loop's end is than the sound before its start (a roll or
+        // a note still settling); the sampler turns the loop up across its length by this, so each time round it
+        // arrives at the level it goes back to. 0 for the file's own loops.
+        float loopTilt = 0.0f;
         // A HELD recording: one that sustains (no one_shot, longer than 2.5 s, and shaped like a bowed or blown note:
         // isSustained), as against a short (spiccato, pizzicato). MOD WHEEL dynamics and AUTO SUSTAIN work on these only.
         bool held = false;
@@ -112,17 +116,24 @@ namespace sampler
     std::shared_ptr<Program> programFrom (std::shared_ptr<const Sample> sample, int keyCenter = 60);
 
     // AUTO SUSTAIN (0.2.0, our own design): where a held recording's steady part lies, to loop it with a long crossfade.
-    // Its level in 50 ms windows; the "body" the median of its middle; steady from the first window within 3 dB of the
-    // body (plus 0.3 s) to the last (less 0.1 s): the bow-off after it is left out. The loop: the last stretch of that,
-    // up to 4 s (80% of it), crossfaded over up to 1 s (40% of the stretch). Its start then moved (by up to 25 ms, a
-    // cycle of the lowest string) to where the sound around the crossfade's middle best matches the sound a loop's
+    // Its level in 50 ms windows; its core (0.3.0: from the first window to the last within 6 dB of the median of its
+    // middle three fifths) and the "body", the core's median; steady from the first window within 3 dB of the body (plus
+    // 0.3 s) to the last (less 0.1 s): the bow-off or breath-off after it is left out. The loop: the last stretch of
+    // that, up to 4 s (80% of it), crossfaded over up to 1 s (40% of the stretch). Its start then moved (by up to 25 ms,
+    // a cycle of the lowest string) to where the sound around the crossfade's middle best matches the sound a loop's
     // length later, so the two sides don't cancel; `likeness` how well (their correlation there). None (found false)
-    // when the steady part is under 1.5 s or the file is silent.
-    struct SustainPoints { bool found = false; juce::int64 start = 0, end = 0; int crossfade = 0; float likeness = 0.0f; };
-    // Whether a recording is shaped like a held note (our own rule, measured on VSCO 2 CE's strings: of 431 regions,
-    // sustains, tremolos, spiccatos and pizzicatos, it misjudged 3, all contrabass): its loudest moment no more than
-    // 13 dB over the median of its middle three fifths, and that middle's first quarter no more than 9 dB louder than
-    // its last (a plucked or bounced note peaks at its start and keeps falling).
+    // when the steady part is under `minimumSteady` (0.3.0: 1 s, for the 3-5 s brass notes; 0.2.0's 1.5 s) or the file
+    // is silent.
+    inline constexpr double minimumSteady = 1.0;
+    // 0.3.0: its tilt (dB, within 6): the level over the crossfade's length before the start less that before the end.
+    inline constexpr float maximumTilt = 6.0f;
+    struct SustainPoints { bool found = false; juce::int64 start = 0, end = 0; int crossfade = 0; float likeness = 0.0f, tilt = 0.0f; };
+    // Whether a recording is shaped like a held note (our own rule; 0.3.0 measured on all of VSCO 2 CE: of its 1914
+    // distinct recordings outside the percussion kit, judged by their file's name (sustain, vibrato, tremolo, roll,
+    // organ: held; staccato, spiccato, pizzicato, harp, mallets, piano: not), it misjudges 7 (0.2.0's rule: 41)): on its
+    // core, the loudest moment no more than 18 dB over the median (an organ pipe's chiff, a brass accent), and the
+    // core's first quarter no more than 9 dB louder than its last (a plucked or struck note peaks at its start and keeps
+    // falling); the core at least 0.8 s.
     bool isSustained (const Sample&);
     SustainPoints findSustain (const Sample&);
     // Sets each region's `held` and AUTO SUSTAIN points (regions without loops of their own). Called by sfz::load and

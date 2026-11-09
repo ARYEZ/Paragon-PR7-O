@@ -400,6 +400,14 @@ namespace sampler
             v.crossfade = (int) juce::jlimit<juce::int64> (0, juce::jmin (r.loopStart, (r.loopEnd - r.loopStart) / 2), (juce::int64) r.loopCrossfade);
             v.likeness = juce::jlimit (-0.9f, 1.0f, r.loopLikeness);
         }
+        v.tilted = v.looping && r.autoLoop && std::abs (r.loopTilt) > 0.01f && v.loopEnd > v.loopStart;
+        v.tiltK = 0.0;
+        v.tiltGain = v.tiltStep = v.tiltEnd = 1.0f;
+        if (v.tilted)
+        {
+            v.tiltEnd = juce::Decibels::decibelsToGain (r.loopTilt);
+            v.tiltK = std::log ((double) v.tiltEnd) / (double) (v.loopEnd - v.loopStart);
+        }
         // The envelope.
         v.countdown = (int) std::lround (r.delay * rate);
         v.stage = v.countdown > 0 ? Voice::Stage::delay : Voice::Stage::attack;
@@ -501,6 +509,20 @@ namespace sampler
                 return hermite (at (c, index - 1), at (c, index), at (c, index + 1), at (c, index + 2), t);
             };
             const auto wheelStep = (v.wheelTarget - v.wheelGain) / (float) numSamples;
+            const auto tilted = v.tilted;
+            const auto tiltAt = [&v] (double position) noexcept
+            {
+                if (position <= (double) v.loopStart)
+                    return 1.0f;
+                if (position >= (double) v.loopEnd)
+                    return v.tiltEnd;
+                return (float) std::exp (v.tiltK * (position - (double) v.loopStart));
+            };
+            if (tilted)
+            {
+                v.tiltGain = tiltAt (v.position);
+                v.tiltStep = (float) std::exp (v.tiltK * v.increment);
+            }
             for (int i = 0; i < numSamples; ++i)
             {
                 // The envelope.
@@ -548,8 +570,8 @@ namespace sampler
                     v.active = false;
                     break;
                 }
-                auto x = read (l, v.position);
-                auto y = stereo ? read (r, v.position) : x;
+                auto x = read (l, v.position) * v.tiltGain;
+                auto y = stereo ? read (r, v.position) * v.tiltGain : x;
                 // Going round a loop: its last `crossfade` frames fade into the frames before its start.
                 if (v.looping && v.crossfade > 0 && v.position >= (double) (v.loopEnd - v.crossfade))
                 {
@@ -570,6 +592,17 @@ namespace sampler
                     v.position -= (double) (v.loopEnd - v.loopStart);
                     if (v.stopAtWrap)
                         v.looping = v.stopAtWrap = false;
+                    if (tilted)
+                        v.tiltGain = tiltAt (v.position);
+                }
+                else if (tilted)
+                {
+                    if (v.position <= (double) v.loopStart)
+                        v.tiltGain = 1.0f;
+                    else if (v.position >= (double) v.loopEnd)
+                        v.tiltGain = v.tiltEnd;
+                    else
+                        v.tiltGain *= v.tiltStep;
                 }
             }
             if (v.active)

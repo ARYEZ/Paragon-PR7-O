@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.3.0
+
+**The rest of VSCO 2 Community Edition plays properly**: woodwinds (flute, piccolo, oboe, clarinet, bassoon), brass
+(trumpet, horn, trombone, tuba, the mutes), the organ, timpani and rolls, harp, upright pianos, mallets, bells and the
+percussion kit. Built against the real files (Versilian Studios, CC0; read in the build machine's scratch space, never
+shipped): all 75 of VSCO's instruments load with no problems and nothing left unread. They needed nothing new from the
+SFZ reader; what changed is how PR7-O tells a held note from a short one, and how AUTO SUSTAIN loops it.
+
+**Held or short, judged on the note itself** (our own rule, refitted): 0.2.0's rule was fitted on the strings' long
+bowed notes, and called these short: brass and wind notes recorded 3-5 s long (the player's breath runs out after 1-2 s
+of steady tone), organ pipes (a "chiff" 16 dB over the note as the pipe speaks, then perfectly steady), accented
+sustains and timpani rolls. So they faded out when held past their recording. Now the rule looks at the note's core
+(from where it reaches its typical level to where it drops away) instead of a fixed middle part of the file, and
+allows an onset up to 18 dB over the note. Checked on all 1914 of VSCO's recordings outside the percussion kit, against
+what their file names say (sustain, vibrato, tremolo, roll, organ: held; staccato, spiccato, pizzicato, harp, mallets,
+piano: not): it misjudges 7 (0.2.0's: 41). Four of those 7 are trumpet sus-vib notes that really do die away in the
+recording; they play to their end. In the kit, the sounds that keep going (snare and tambourine rolls, ratchets, bowed
+cymbal, bass drum rubs) count as held; hits don't.
+
+**AUTO SUSTAIN, better loops** (our own design):
+- **A burst stays out of the loop.** Some of VSCO's quiet organ notes have a burst of wind or key noise 6-11 dB over the
+  note near their end; 0.2.0's loop took it in, so it came round every 4 s. Now the loop is the longest stretch without
+  one.
+- **The crossfade fits the sound.** A near-pure tone (piccolo, flute) whose pitch moves a few cents over the note
+  drifts out of phase across a 1 s crossfade and dips partway through (VSCO's piccolo G5: 5 dB every time round). Now
+  PR7-O tries 1, 1/2, 1/4 and 1/8 s and takes the longest whose two sides still match; the loop's start is searched over
+  0.1 s (was 25 ms), judged by the whole crossfade rather than a 40 ms snippet.
+- **A note still settling is tilted.** A timpani roll gets quieter as it's held (6-12 dB over 16 s); looped, it jumped
+  back up each time round. Now the loop is turned up across its length by the difference (up to 6 dB), so it arrives at
+  the level it goes back to; past the loop (when you let go) it stays at that, so nothing steps.
+- A short note needs 1 s of steady tone to loop (was 1.5 s): VSCO's tuba notes have about that much.
+
+Measured, holding 9-21 notes of each of 19 sustain instruments for 25 s: the level while looping (12-24 s) moves no more
+than over the recording's own steady part. Strings 4-6 dB (the bowing, as in 0.2.0); brass 1.5-2.2 dB (trombone vibrato
+3 dB, against 7 in its recordings); woodwinds 0.6-2.9 dB; organ 1-3 dB; timpani rolls 3.3 dB (its recording: 4.2);
+piccolo 2.9 dB (worst note 4.6; 0.2.0: 7.8). Not checked: whether the joins can be heard (your ears). A roll's texture
+repeats every few seconds once looping, which a trained ear may pick out.
+
+Loading takes longer: the wider search for each loop's start makes a big keyswitch file (Flute-KS, 150 MB) take about
+1 s instead of 0.4 s, in the background as before.
+
+VSCO's keyswitches as their files set them: clarinet C1-C#1, flute C1-D#1, tuba C5-C#5 (PR7-O's names, middle C = C3).
+Percussion, piano, harp and mallets ring on for their release when let go, as their files say.
+
 ## 0.2.0
 
 **VSCO 2 Community Edition's strings play properly.** Built against the real files (Versilian Studios' open library,

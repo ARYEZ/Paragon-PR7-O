@@ -10,6 +10,7 @@
 #include "dsp/sampler/Sampler.h"
 #include "dsp/sampler/Sfz.h"
 
+#include <functional>
 #include <map>
 
 namespace
@@ -759,4 +760,166 @@ TEST_CASE ("SAMPLER 0.2.0: POLYPHONY counts notes; past it a big chord keeps its
     CHECK_FALSE (s.isKeyHeld (55));
     CHECK (s.isKeyHeld (60));
     CHECK (s.isKeyHeld (64));
+}
+
+//==============================================================================
+// 0.3.0: the rest of VSCO 2 CE (wind, brass, organ, percussion, keys). Shapes measured on the real files (in the
+// scratchpad, never committed), made here from generated tones.
+namespace
+{
+    // A tone at `hz` whose level follows `dbAt (seconds)` (0 dB: peak 0.4), its pitch rising `centsPerSecond`.
+    std::shared_ptr<sampler::Sample> shaped (double hz, double seconds, const std::function<double (double)>& dbAt, double centsPerSecond = 0.0)
+    {
+        auto s = std::make_shared<sampler::Sample>();
+        s->name = "shaped";
+        s->sampleRate = sampleRate;
+        const auto n = (size_t) (seconds * sampleRate);
+        s->channels.assign (1, std::vector<float> (n));
+        double phase = 0.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto t = (double) i / sampleRate;
+            phase += hz * std::pow (2.0, centsPerSecond * t / 1200.0) / sampleRate;
+            const auto fade = std::min ({ 1.0, t / 0.01, (seconds - t) / 0.01 });   // no click at either end
+            s->channels[0][i] = (float) (0.4 * fade * juce::Decibels::decibelsToGain (dbAt (t), -200.0)
+                                         * std::sin (juce::MathConstants<double>::twoPi * phase));
+        }
+        return s;
+    }
+
+    // Straight lines between (seconds, dB) points.
+    std::function<double (double)> curve (std::vector<std::pair<double, double>> points)
+    {
+        return [points] (double t)
+        {
+            if (t <= points.front().first)
+                return points.front().second;
+            for (size_t i = 1; i < points.size(); ++i)
+                if (t <= points[i].first)
+                {
+                    const auto& [t0, d0] = points[i - 1];
+                    const auto& [t1, d1] = points[i];
+                    return d0 + (d1 - d0) * (t - t0) / (t1 - t0);
+                }
+            return points.back().second;
+        };
+    }
+
+    // The level (RMS, dB) of 0.1 s windows of `x` from `from` to `to` seconds: the widest swing.
+    double swingOver (const std::vector<float>& x, double from, double to)
+    {
+        double lo = 1.0e9, hi = -1.0e9;
+        for (auto t = from; t + 0.1 <= to; t += 0.1)
+        {
+            const auto level = db (rms (x, (size_t) (t * sampleRate), (size_t) ((t + 0.1) * sampleRate)));
+            lo = std::min (lo, level);
+            hi = std::max (hi, level);
+        }
+        return hi - lo;
+    }
+}
+
+TEST_CASE ("SFZ 0.3.0: held or not, judged on the note itself: short brass, an organ's chiff, an accent, a roll are held; struck and plucked aren't", "[sfz][autosustain]")
+{
+    // A tuba's 3.5 s note: up in 0.3 s, steady to 2 s, then the breath runs out (VSCO's are 3-5 s). 0.2.0 measured the
+    // middle of the file, which reaches into the breath-off, and called it short.
+    const auto tuba = shaped (55.0, 3.5, curve ({ { 0.0, -20.0 }, { 0.3, 0.0 }, { 2.0, -1.0 }, { 3.5, -50.0 } }));
+    CHECK (sampler::isSustained (*tuba));
+    // An organ pipe: a chiff 16 dB over the note at its start, then perfectly steady for 10 s.
+    const auto organ = shaped (262.0, 10.5, curve ({ { 0.0, 0.0 }, { 0.3, 0.0 }, { 0.5, -16.0 }, { 10.3, -16.0 }, { 10.5, -60.0 } }));
+    CHECK (sampler::isSustained (*organ));
+    // A brass sforzando into a held note: 15 dB over it for 0.2 s.
+    const auto accent = shaped (233.0, 6.0, curve ({ { 0.0, 0.0 }, { 0.2, 0.0 }, { 0.4, -15.0 }, { 5.5, -15.0 }, { 6.0, -60.0 } }));
+    CHECK (sampler::isSustained (*accent));
+    // A timpani roll: settling 8 dB over 16 s, then the roll stops and the drum rings away over 4 s.
+    const auto roll = shaped (98.0, 20.0, curve ({ { 0.0, 0.0 }, { 16.0, -8.0 }, { 20.0, -70.0 } }));
+    CHECK (sampler::isSustained (*roll));
+    // Struck and plucked: a piano note falling 6 dB a second, a mallet's 3 s ring, the 0.2.0 pluck.
+    CHECK_FALSE (sampler::isSustained (*shaped (262.0, 8.0, curve ({ { 0.0, 0.0 }, { 8.0, -48.0 } }))));
+    CHECK_FALSE (sampler::isSustained (*shaped (880.0, 3.0, curve ({ { 0.0, 0.0 }, { 0.05, -6.0 }, { 3.0, -60.0 } }))));
+    CHECK_FALSE (sampler::isSustained (*plucked (220.0, 4.0)));
+
+    // The short brass note loops in its steady part (0.3.0: a steady second is enough; 0.2.0 asked for 1.5 s).
+    auto program = sampler::programFrom (tuba, 45);
+    const auto& r = program->regions[0];
+    REQUIRE (r.held);
+    REQUIRE (r.autoLoop);
+    CHECK ((double) (r.loopStart - r.loopCrossfade) / sampleRate >= 0.3);
+    CHECK ((double) r.loopEnd / sampleRate <= 2.3);
+    program->regions[0].velTrack = 0.0f;
+    const auto on = render (*program, noteOn (45), 10.0)[0];
+    const auto steady = db (rms (on, (size_t) (1.0 * sampleRate), (size_t) (1.5 * sampleRate)));
+    for (double t = 2.0; t < 9.5; t += 0.5)
+    {
+        INFO (t);
+        CHECK_THAT (db (rms (on, (size_t) (t * sampleRate), (size_t) ((t + 0.5) * sampleRate))) - steady, WithinAbs (0.0, 1.5));
+    }
+}
+
+TEST_CASE ("SAMPLER 0.3.0: AUTO SUSTAIN keeps a burst in the recording out of the loop", "[sampler][autosustain]")
+{
+    // An organ note, steady for 11 s, with a burst of wind noise 10 dB over it at 9 s (as on VSCO's quiet organ). In
+    // 0.2.0 the loop took the last 4 s of the steady part, so the burst came round every 4 s.
+    const auto note = shaped (262.0, 12.0, curve ({ { 0.0, -40.0 }, { 0.1, 0.0 }, { 9.0, 0.0 }, { 9.05, 10.0 }, { 9.25, 10.0 },
+                                                     { 9.3, 0.0 }, { 11.5, 0.0 }, { 12.0, -60.0 } }));
+    auto program = sampler::programFrom (note, 60);
+    program->regions[0].velTrack = 0.0f;
+    const auto& r = program->regions[0];
+    REQUIRE (r.autoLoop);
+    const auto loopFrom = (double) (r.loopStart - r.loopCrossfade) / sampleRate, loopTo = (double) r.loopEnd / sampleRate;
+    INFO (loopFrom << " to " << loopTo);
+    CHECK ((loopTo <= 9.0 || loopFrom >= 9.3));
+    CHECK (loopTo - loopFrom > 2.0);
+    // Held for 30 s: after the recording's own pass (to 9.4 s), no burst: the level stays within 1 dB.
+    const auto on = render (*program, noteOn (60), 30.0)[0];
+    CHECK (swingOver (on, 9.5, 29.5) < 1.0);
+}
+
+TEST_CASE ("SAMPLER 0.3.0: AUTO SUSTAIN on a near-pure tone drifting in pitch: a shorter crossfade, so no dip", "[sampler][autosustain]")
+{
+    // A piccolo-like tone (784 Hz, no vibrato) whose pitch creeps up 1 cent a second, steady in level for 8 s. Two
+    // places 4 s apart are 4 cents apart: over a 1 s crossfade they drift more than a cycle apart and cancel partway
+    // (VSCO's piccolo G5 dipped 5 dB in 0.2.0); a crossfade of a quarter second or less stays in step.
+    const auto note = shaped (784.0, 8.5, curve ({ { 0.0, -40.0 }, { 0.2, 0.0 }, { 8.2, 0.0 }, { 8.5, -60.0 } }), 1.0);
+    auto program = sampler::programFrom (note, 79);
+    program->regions[0].velTrack = 0.0f;
+    const auto& r = program->regions[0];
+    REQUIRE (r.autoLoop);
+    CHECK (r.loopCrossfade <= (int) (0.25 * sampleRate));
+    CHECK (r.loopCrossfade >= (int) (0.1 * sampleRate));
+    CHECK (r.loopLikeness >= 0.7f);
+    // The 1 s crossfade at the same loop would have matched badly: what this choice avoids.
+    CHECK (sampler::loopLikeness (*note, r.loopStart, r.loopEnd, (int) sampleRate) < 0.5f);
+    const auto on = render (*program, noteOn (79), 25.0)[0];
+    CHECK (swingOver (on, 1.0, 24.5) < 1.5);
+}
+
+TEST_CASE ("SAMPLER 0.3.0: AUTO SUSTAIN tilts a loop on a note still settling, so each time round doesn't jump back up", "[sampler][autosustain]")
+{
+    // A roll settling evenly, 0.75 dB a second over 12 s (VSCO's timpani rolls settle 6-12 dB over 16 s): a 4 s loop's
+    // end is 3 dB under the sound it goes back to.
+    const auto note = shaped (98.0, 13.0, curve ({ { 0.0, -40.0 }, { 0.1, 0.0 }, { 12.0, -9.0 }, { 13.0, -60.0 } }));
+    auto program = sampler::programFrom (note, 43);
+    program->regions[0].velTrack = 0.0f;
+    program->regions[0].release = 10.0f;   // slow, so a step at note-off would show
+    const auto& r = program->regions[0];
+    REQUIRE (r.held);
+    REQUIRE (r.autoLoop);
+    const auto loopSeconds = (double) (r.loopEnd - r.loopStart) / sampleRate;
+    CHECK_THAT (r.loopTilt, WithinAbs (0.75 * loopSeconds, 0.3));
+    // Going round: within 1 dB (0.2.0: a 3 dB step every time round).
+    const auto on = render (*program, noteOn (43), 25.0)[0];
+    const auto loopFrom = (double) r.loopEnd / sampleRate;   // the first wrap
+    CHECK (swingOver (on, loopFrom, 24.5) < 1.0);
+    // Let go halfway through a pass: no step in the level (the tilt holds past the loop, into the ending).
+    const auto offAt = loopFrom + 2.0 * loopSeconds - 0.5 * loopSeconds;
+    auto midi = noteOn (43);
+    midi.addEvent (juce::MidiMessage::noteOff (1, 43), (int) (offAt * sampleRate));
+    const auto released = render (*program, midi, offAt + 1.0)[0];
+    const auto before = db (rms (released, (size_t) ((offAt - 0.05) * sampleRate), (size_t) (offAt * sampleRate)));
+    const auto after = db (rms (released, (size_t) (offAt * sampleRate), (size_t) ((offAt + 0.05) * sampleRate)));
+    CHECK (std::abs (after - before) < 1.0);
+    // A steady note isn't tilted.
+    CHECK (std::abs (sampler::findSustain (*shaped (98.0, 8.0, curve ({ { 0.0, 0.0 }, { 7.5, 0.0 }, { 8.0, -60.0 } })))
+                         .tilt) < 0.3f);
 }

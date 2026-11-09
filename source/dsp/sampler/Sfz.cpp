@@ -1,5 +1,6 @@
 #include "dsp/sampler/Sfz.h"
 
+#include <array>
 #include <set>
 
 namespace sampler
@@ -72,8 +73,16 @@ namespace sampler
 
     namespace
     {
-        // A recording's level in 50 ms windows (both sides), and the median of its middle three fifths.
-        struct Levels { std::vector<float> windows; int window = 1; float body = 0.0f; };
+        // A recording's level in 50 ms windows (both sides); its CORE (0.3.0): from the first window to the last within
+        // 6 dB of the median of its middle three fifths (the attack's start and the release's tail left out), and the
+        // "body", the median of the core. 0.2.0 measured over the middle three fifths of the file, fitted on the strings'
+        // long notes: in a 3-5 s brass or wind note that reaches into the player's breath-off.
+        struct Levels { std::vector<float> windows; int window = 1; float body = 0.0f; int coreFirst = 0, coreLast = -1; };
+        float medianOf (std::vector<float> values)
+        {
+            std::nth_element (values.begin(), values.begin() + (long) values.size() / 2, values.end());
+            return values[values.size() / 2];
+        }
         Levels levelsOf (const Sample& sample)
         {
             Levels result;
@@ -90,9 +99,17 @@ namespace sampler
                         sum += (double) c[(size_t) i] * c[(size_t) i];
                 result.windows[(size_t) w] = (float) std::sqrt (sum / (double) (result.window * (int) sample.channels.size()));
             }
-            std::vector<float> middle (result.windows.begin() + count / 5, result.windows.begin() + count * 4 / 5);
-            std::nth_element (middle.begin(), middle.begin() + (long) middle.size() / 2, middle.end());
-            result.body = middle[middle.size() / 2];
+            const auto& w = result.windows;
+            const auto middle = medianOf ({ w.begin() + count / 5, w.begin() + count * 4 / 5 });
+            for (int i = 0; i < count; ++i)
+                if (w[(size_t) i] >= middle * 0.5f)
+                {
+                    if (result.coreLast < 0)
+                        result.coreFirst = i;
+                    result.coreLast = i;
+                }
+            if (result.coreLast >= result.coreFirst)
+                result.body = medianOf ({ w.begin() + result.coreFirst, w.begin() + result.coreLast + 1 });
             return result;
         }
     }
@@ -102,18 +119,21 @@ namespace sampler
         const auto levels = levelsOf (sample);
         if (levels.windows.empty() || levels.body < 1.0e-6f)
             return false;
-        const auto& w = levels.windows;
-        const auto count = (int) w.size();
-        const auto peak = *std::max_element (w.begin(), w.end());
-        const auto from = count / 5, to = count * 4 / 5, quarter = juce::jmax (1, (to - from) / 4);
+        const auto first = levels.coreFirst, count = levels.coreLast - levels.coreFirst + 1;
+        if ((double) count * levels.window < 0.8 * sample.sampleRate)
+            return false;
+        const auto core = levels.windows.begin() + first;
+        const auto peak = *std::max_element (core, core + count);
+        const auto quarter = juce::jmax (1, count / 4);
         double early = 0.0, late = 0.0;
-        for (int i = from; i < from + quarter; ++i)
-            early += w[(size_t) i];
-        for (int i = to - quarter; i < to; ++i)
-            late += w[(size_t) i];
+        for (int i = 0; i < quarter; ++i)
+        {
+            early += core[i];
+            late += core[count - 1 - i];
+        }
         const auto peakDb = juce::Decibels::gainToDecibels (peak / levels.body);
         const auto fallDb = juce::Decibels::gainToDecibels ((float) ((early + 1.0e-12) / (late + 1.0e-12)));
-        return peakDb <= 13.0f && fallDb <= 9.0f;
+        return peakDb <= 18.0f && fallDb <= 9.0f;
     }
 
     SustainPoints findSustain (const Sample& sample)
@@ -123,65 +143,149 @@ namespace sampler
         if (levels.windows.empty() || levels.body < 1.0e-6f)
             return points;
         const auto rate = sample.sampleRate;
+        const auto& w = levels.windows;
+        const auto count = (int) w.size();
         const auto near = levels.body * 0.7f;   // within 3 dB
         int first = -1, last = -1;
-        for (int w = 0; w < (int) levels.windows.size(); ++w)
-            if (levels.windows[(size_t) w] >= near)
+        for (int i = 0; i < count; ++i)
+            if (w[(size_t) i] >= near)
             {
                 if (first < 0)
-                    first = w;
-                last = w;
+                    first = i;
+                last = i;
             }
-        const auto steadyStart = (juce::int64) first * levels.window + (juce::int64) (0.3 * rate);
-        const auto steadyEnd = (juce::int64) (last + 1) * levels.window - (juce::int64) (0.1 * rate);
+        // 0.3.0: a burst (the level over 0.2 s more than 6 dB above the body: an organ's wind or key noise, a bump in the
+        // playing) can't be in the loop, or it would come round again every few seconds. The longest stretch between
+        // bursts is used.
+        const auto burst = [&] (int i)
+        {
+            float sum = 0.0f;
+            int n = 0;
+            for (int j = juce::jmax (0, i - 1); j <= juce::jmin (count - 1, i + 2); ++j, ++n)
+                sum += w[(size_t) j] * w[(size_t) j];
+            return std::sqrt (sum / (float) n) > levels.body * 2.0f;
+        };
+        int runFirst = first, runLast = first - 1, bestFirst = first, bestLast = first - 1;
+        for (int i = first; i <= last; ++i)
+        {
+            if (burst (i))
+            {
+                runFirst = i + 1;
+                continue;
+            }
+            runLast = i;
+            if (runLast - runFirst > bestLast - bestFirst)
+                bestFirst = runFirst, bestLast = runLast;
+        }
+        const auto steadyStart = (juce::int64) bestFirst * levels.window + (juce::int64) (0.3 * rate);
+        const auto steadyEnd = (juce::int64) (bestLast + 1) * levels.window - (juce::int64) (0.1 * rate);
         const auto steady = steadyEnd - steadyStart;
-        if (steady < (juce::int64) (1.5 * rate))
+        if (steady < (juce::int64) (minimumSteady * rate))
             return points;
         const auto span = juce::jmin ((juce::int64) (4.0 * rate), steady * 4 / 5);
         points.found = true;
         points.end = steadyEnd;
-        points.start = steadyEnd - span;
-        points.crossfade = (int) juce::jmin ((juce::int64) (1.0 * rate), span * 2 / 5);
-        // The start moved to where the sound a loop's length before the crossfade's middle best matches it (mono, a
-        // 40 ms window): coarse steps of 4 frames, then each frame around the best.
-        const auto window = juce::jmax (16, (int) (0.04 * rate)), reach = (int) (0.025 * rate);
-        const auto middle = points.end - points.crossfade / 2 - window / 2;
-        const auto mono = [&sample] (juce::int64 i)
+        // Both sides mixed once (the searches below read each frame many times).
+        std::vector<float> mixed ((size_t) sample.length(), 0.0f);
+        for (const auto& c : sample.channels)
+            for (size_t i = 0; i < mixed.size(); ++i)
+                mixed[i] += c[i];
+        const auto mono = [&mixed] (juce::int64 i) { return mixed[(size_t) i]; };
+        // The start moved (by up to 0.1 s; 0.2.0: 25 ms) to where the sound a loop's length before the crossfade's middle
+        // matches it (mono, a 40 ms window).
+        const auto window = juce::jmax (16, (int) (0.04 * rate)), reach = (int) (0.1 * rate);
+        std::vector<float> here ((size_t) window);
+        const auto aligned = [&] (int crossfade)
         {
-            float sum = 0.0f;
-            for (const auto& c : sample.channels)
-                sum += c[(size_t) i];
+            SustainPoints p = points;
+            p.crossfade = crossfade;
+            p.start = points.end - span;
+            const auto middle = p.end - crossfade / 2 - window / 2;
+            for (int i = 0; i < window; ++i)
+                here[(size_t) i] = mono (middle + i);
+            const auto likenessAt = [&] (int shift)
+            {
+                // The frames a loop's length earlier, the loop's start moved by `shift`.
+                const auto back = middle - (p.end - (p.start + shift));
+                if (back < 0 || back + window > sample.length())
+                    return -2.0;
+                double xy = 0.0, xx = 0.0, yy = 0.0;
+                for (int i = 0; i < window; ++i)
+                {
+                    const auto x = (double) here[(size_t) i], y = (double) mono (back + i);
+                    xy += x * y;
+                    xx += x * x;
+                    yy += y * y;
+                }
+                return xx > 0.0 && yy > 0.0 ? xy / std::sqrt (xx * yy) : 0.0;
+            };
+            // Every place the snippet matches well (a peak in coarse steps; a near-pure tone matches at every cycle, so
+            // the snippet alone can't tell which is best), each refined frame by frame, then judged by the whole
+            // crossfade (0.3.0), on every 4th frame to keep it quick.
+            const auto acrossCrossfade = [&] (juce::int64 start)
+            {
+                double xy = 0.0, xx = 0.0, yy = 0.0;
+                for (juce::int64 i = 0; i < crossfade; i += 4)
+                {
+                    const auto x = (double) mono (p.end - crossfade + i), y = (double) mono (start - crossfade + i);
+                    xy += x * y;
+                    xx += x * x;
+                    yy += y * y;
+                }
+                return xx > 0.0 && yy > 0.0 ? xy / std::sqrt (xx * yy) : 0.0;
+            };
+            auto bestStart = p.start;
+            auto bestScore = -3.0;
+            auto previous = -3.0, beforePrevious = -3.0, bestSnippet = -3.0;
+            auto bestSnippetShift = 0;
+            constexpr int step = 8;   // under half a cycle up to 2.7 kHz at 44.1 kHz
+            for (int shift = -reach; shift <= reach + step; shift += step)
+            {
+                const auto l = shift <= reach ? likenessAt (shift) : -3.0;
+                if (l > bestSnippet)
+                    bestSnippet = l, bestSnippetShift = shift;
+                if (previous > beforePrevious && previous >= l && previous > 0.5)   // a good match at the previous step
+                {
+                    auto best = shift - step;
+                    auto bestHere = previous;
+                    for (int fine = shift - 2 * step + 1; fine < shift; ++fine)
+                        if (const auto f = likenessAt (fine); f > bestHere)
+                            bestHere = f, best = fine;
+                    const auto start = juce::jlimit<juce::int64> ((juce::int64) crossfade, p.end - 2, p.start + best);
+                    if (const auto score = acrossCrossfade (start); score > bestScore)
+                        bestScore = score, bestStart = start;
+                }
+                beforePrevious = previous;
+                previous = l;
+            }
+            if (bestScore < -2.0)   // nowhere matches well (an ensemble): the best match of the snippet, as 0.2.0
+                bestStart = juce::jlimit<juce::int64> ((juce::int64) crossfade, p.end - 2, p.start + bestSnippetShift);
+            p.start = bestStart;
+            p.likeness = loopLikeness (sample, bestStart, p.end, crossfade);
+            return p;
+        };
+        // 0.3.0: the crossfade's length. Long (up to 1 s, 40% of the loop) hides a change of tone best; but two sides a
+        // hair apart in pitch drift out of phase over it, and a nearly pure tone (a flute, a piccolo) then cancels
+        // partway through. So the longest of 1, 1/2, 1/4, 1/8 s whose two sides stay alike (correlation 0.7 or more) is
+        // used; none (an ensemble's sides are never alike): the longest.
+        const auto longest = (int) juce::jmin ((juce::int64) (1.0 * rate), span * 2 / 5);
+        points = aligned (longest);
+        for (auto crossfade = longest; points.likeness < 0.7f && crossfade / 2 >= (int) (0.1 * rate);)
+        {
+            crossfade /= 2;
+            if (const auto shorter = aligned (crossfade); shorter.likeness >= 0.7f)
+                points = shorter;
+        }
+        const auto levelBefore = [&] (juce::int64 end)
+        {
+            double sum = 0.0;
+            for (auto i = end - points.crossfade; i < end; ++i)
+                sum += (double) mixed[(size_t) i] * mixed[(size_t) i];
             return sum;
         };
-        std::vector<float> here ((size_t) window);
-        for (int i = 0; i < window; ++i)
-            here[(size_t) i] = mono (middle + i);
-        const auto likenessAt = [&] (int shift)
-        {
-            // The frames a loop's length earlier, the loop's start moved by `shift`.
-            const auto back = middle - (points.end - (points.start + shift));
-            if (back < 0 || back + window > sample.length())
-                return -2.0;
-            double xy = 0.0, xx = 0.0, yy = 0.0;
-            for (int i = 0; i < window; ++i)
-            {
-                const auto x = (double) here[(size_t) i], y = (double) mono (back + i);
-                xy += x * y;
-                xx += x * x;
-                yy += y * y;
-            }
-            return xx > 0.0 && yy > 0.0 ? xy / std::sqrt (xx * yy) : 0.0;
-        };
-        auto best = 0;
-        auto bestLikeness = -3.0;
-        for (int shift = -reach; shift <= reach; shift += 4)
-            if (const auto l = likenessAt (shift); l > bestLikeness)
-                bestLikeness = l, best = shift;
-        for (int shift = best - 4; shift <= best + 4; ++shift)
-            if (const auto l = likenessAt (shift); l > bestLikeness)
-                bestLikeness = l, best = shift;
-        points.start = juce::jlimit<juce::int64> ((juce::int64) points.crossfade, points.end - 2, points.start + best);
-        points.likeness = (float) loopLikeness (sample, points.start, points.end, points.crossfade);
+        const auto before = levelBefore (points.start), atEnd = levelBefore (points.end);
+        if (before > 0.0 && atEnd > 0.0)
+            points.tilt = juce::jlimit (-maximumTilt, maximumTilt, (float) (10.0 * std::log10 (before / atEnd)));
         return points;
     }
 
@@ -239,6 +343,7 @@ namespace sampler
                 r.loopEnd = points.end;
                 r.loopCrossfade = points.crossfade;
                 r.loopLikeness = points.likeness;
+                r.loopTilt = points.tilt;
             }
         }
     }
