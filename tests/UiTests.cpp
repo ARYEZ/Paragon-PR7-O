@@ -388,3 +388,54 @@ TEST_CASE ("THE INSTRUMENT page 0.2.0: an instrument's articulations, named as t
     REQUIRE (instrument != nullptr);
     CHECK (instrument->getIntAttribute ("keyswitch") == 37);
 }
+
+TEST_CASE ("THE INSTRUMENT page 0.4.0: a section's SPLITS, a row a part; - / + move a split a semitone, each part keeping a key", "[ui][section]")
+{
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("t.wav"), *testkit::sine (220.0, 0.3), 24);
+    dir.getChildFile ("Basses.sfz").replaceWithText ("<region> sample=t.wav lokey=28 hikey=55 pitch_keycenter=40\n");
+    dir.getChildFile ("Cellos.sfz").replaceWithText ("<region> sample=t.wav lokey=36 hikey=70 pitch_keycenter=48\n");
+    dir.getChildFile ("Violins.sfz").replaceWithText ("<region> sample=t.wav lokey=55 hikey=96 pitch_keycenter=69\n");
+    Window w;
+    auto& page = w.view->getInstrumentPage();
+    CHECK (page.getNumSplitRows() == 0);
+    CHECK (page.getNewSectionButton().isVisible());
+    CHECK (page.isInterestedInFileDrag ({ dir.getChildFile ("Basses.sfz").getFullPathName(), dir.getChildFile ("Cellos.sfz").getFullPathName() }));
+    CHECK_FALSE (page.isInterestedInFileDrag ({ dir.getChildFile ("Basses.sfz").getFullPathName(), dir.getChildFile ("t.wav").getFullPathName() }));
+
+    // Dropped together: a section, its parts low to high.
+    page.filesDropped ({ dir.getChildFile ("Violins.sfz").getFullPathName(), dir.getChildFile ("Basses.sfz").getFullPathName(),
+                         dir.getChildFile ("Cellos.sfz").getFullPathName() }, 0, 0);
+    REQUIRE (w.processor.waitForInstrument());
+    page.refresh();
+    REQUIRE (page.getNumSplitRows() == 3);
+    CHECK (page.getSplitRowText (0) == "BASSES " + notenames::name (28) + " to " + notenames::name (35));
+    CHECK (page.getSplitRowText (1) == "CELLOS " + notenames::name (36) + " to " + notenames::name (54));
+    CHECK (page.getSplitRowText (2) == "VIOLINS " + notenames::name (55) + " to " + notenames::name (96));
+
+    // The split under the violins up 2 (the cellos play 2 keys more), shown at once, loaded after a moment.
+    CHECK (page.moveSplit (2, 1));
+    CHECK (page.moveSplit (2, 1));
+    CHECK (page.getSplitRowText (1).endsWith (notenames::name (56)));
+    CHECK (w.processor.getSection()->parts[1].high == 54);   // not yet
+    page.applyPendingSplits();
+    REQUIRE (w.processor.waitForInstrument());
+    CHECK (w.processor.getSection()->parts[1].high == 56);
+    CHECK (w.processor.getSection()->parts[2].low == 57);
+    // Each part keeps a key: the basses' split can't go under their lowest, nor the first row move at all.
+    CHECK_FALSE (page.moveSplit (0, 1));
+    for (int i = 0; i < 7; ++i)
+        page.moveSplit (1, -1);
+    CHECK_FALSE (page.moveSplit (1, -1));
+    CHECK (page.getSplitRowText (0).endsWith (notenames::name (28)));   // the basses down to one key
+    page.applyPendingSplits();
+    REQUIRE (w.processor.waitForInstrument());
+    CHECK (w.processor.getSection()->parts[0].high == 28);
+
+    // The page's name for it: its parts'.
+    page.refresh();
+    CHECK (page.getInfoText().contains ("REGIONS"));
+    CHECK (w.processor.getProgram()->name == "Basses + Cellos + Violins");
+}

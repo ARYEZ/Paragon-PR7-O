@@ -105,9 +105,19 @@ namespace sampler
 
     namespace sfz
     {
+        // 0.4.0: what to load. Only the regions playing keys loKey to hiKey, cut to them (a section's part: the rest's
+        // samples aren't read); `audio` false: no samples at all (the regions' keys and keyswitches, to plan a
+        // section); `reuse`: a sample already in memory for a file's full path (null: read it).
+        struct LoadOptions
+        {
+            int loKey = 0, hiKey = 127;
+            bool audio = true;
+            std::function<std::shared_ptr<const Sample> (const juce::String&)> reuse;
+        };
         // The whole file: its regions with their samples loaded (each file once). `progress` (0 to 1, by files) may
         // return false to stop (the program then has what was loaded). Never null; check `regions`.
-        std::shared_ptr<Program> load (const juce::File& file, const std::function<bool (double)>& progress = {});
+        std::shared_ptr<Program> load (const juce::File& file, const std::function<bool (double)>& progress = {},
+                                       const LoadOptions& options = {});
         // A note's number from SFZ's text: a number or a name (c4 = 60, c#4, db4).
         int noteNumber (const juce::String& text);
     }

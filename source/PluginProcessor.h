@@ -12,6 +12,7 @@
 #include "Parameters.h"
 #include "Rack.h"
 #include "dsp/sampler/Sampler.h"
+#include "dsp/sampler/Section.h"
 #include "rigs/RigLibrary.h"
 #include "rigs/UndoHistory.h"
 #include "rigs/MidiLinks.h"
@@ -108,6 +109,10 @@ public:
     // THE INSTRUMENT (0.1.0): an SFZ file (or a single audio file, over the whole keyboard), loaded on a background
     // thread and swapped in on the message thread (one undo step). Presets and projects keep its file and load it again.
     void loadInstrument (const juce::File& file);
+    // 0.4.0: a SECTION (several SFZ split over the keys) as the instrument; the one loaded or loading, if it is one.
+    // Its text stands where a file's path would (getInstrumentFile, presets, projects, undo).
+    void loadSection (const sampler::section::Section&);
+    std::optional<sampler::section::Section> getSection() const;
     void clearInstrument();
     // Tests (and anything that made one in memory): this program now, under `file`'s name (not loaded again from it).
     void setProgram (std::shared_ptr<const sampler::Program>, const juce::String& file = {});

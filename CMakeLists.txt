@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures")
 
-project(ParagonX1 VERSION 0.3.0 LANGUAGES C CXX)
+project(ParagonX1 VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,6 +52,7 @@ target_sources(ParagonX1
         # THE INSTRUMENT (PR7-O 0.1.0): SFZ instruments played by our sampler.
         source/dsp/sampler/Sample.cpp
         source/dsp/sampler/Sfz.cpp
+        source/dsp/sampler/Section.cpp
         source/dsp/sampler/Sampler.cpp
         source/dsp/sampler/DiskStreamer.cpp    # PR7-D's disk streaming, kept for the libraries (plan stage 3)
         source/dsp/mixer/MixerEffects.cpp      # PR7-D's mixer effects, kept for the stage (plan stage 6)

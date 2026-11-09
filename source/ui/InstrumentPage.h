@@ -22,6 +22,7 @@ private:
     void drawBlackNote (int note, juce::Graphics&, juce::Rectangle<float> area, bool isDown, bool isOver,
                         juce::Colour noteFillColour) override;
     bool plays (int note) const noexcept { return shown != nullptr && shown->plays (note); }
+    float tintOf (int note) const noexcept;   // 0.4.0: a section's parts shaded in turn
     bool switches (int note) const noexcept { return shown != nullptr && shown->isKeyswitch (note); }
     void markSwitch (juce::Graphics&, int note, juce::Rectangle<float> band);
 
@@ -33,6 +34,8 @@ private:
     ParagonX1AudioProcessor& processor;
     std::shared_ptr<const sampler::Program> shown;
     int shownOctave = 3, shownSwitch = -1;
+    juce::String shownSource;
+    std::array<int, 128> partOfKey {};   // a section's part playing each key (-1: none, or not a section)
     Poll poll;
 };
 
@@ -68,6 +71,8 @@ juce::String articulationName (const sampler::Program::Articulation&);
 // THE INSTRUMENT page: LOAD... (an SFZ file, or a single sample over the keyboard; or drop one on the page), what it
 // holds (its regions, keys, velocity layers, round robins, memory, anything not read yet), the region map, and how it
 // plays (LEVEL, PAN, TRANSPOSE, TUNE, RELEASE, POLYPHONY) and where it goes (SEND DELAY, SEND REVERB, INSERT BUS).
+// 0.4.0: NEW SECTION... (several SFZ files, or drop several): a section split over the keys, its SPLITS listed, each
+// split point moved a semitone with - / + (applied 0.3 s after the last click: one reload, one undo step).
 class InstrumentPage final : public juce::Component,
                              public juce::FileDragAndDropTarget,
                              private juce::ChangeListener,
@@ -90,15 +95,23 @@ public:
     int getNumArticulations() const noexcept { return (int) articulationButtons.size(); }
     juce::TextButton& getArticulationButton (int i) noexcept { return *articulationButtons[(size_t) i]; }
     juce::TextButton& getClearButton() noexcept { return clearButton; }
+    juce::TextButton& getNewSectionButton() noexcept { return sectionButton; }
+    // 0.4.0: a section's SPLITS: a row a part (its name and keys); moving the split under part `part` (1 on) by
+    // `semitones` (each part keeps a key at least), applied after a moment (applyPendingSplits: now).
+    int getNumSplitRows() const noexcept { return (int) splitRows.size(); }
+    juce::String getSplitRowText (int part) const;
+    bool moveSplit (int part, int semitones);
+    void applyPendingSplits();
     juce::String getInfoText() const { return info.getText(); }   // tests
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
     void timerCallback() override;
     void chooseFile();
+    void chooseSection();
 
     ParagonX1AudioProcessor& processor;
-    juce::TextButton loadButton { "LOAD..." }, clearButton { "CLEAR" };
+    juce::TextButton loadButton { "LOAD..." }, clearButton { "CLEAR" }, sectionButton { "NEW SECTION..." };
     juce::Label nameLabel, fileLabel;
     juce::TextEditor info;
     RegionMap map;
@@ -107,6 +120,13 @@ private:
     int shownSwitch = -1, shownOctave = -1;
     juce::Rectangle<int> articulationArea;
     void rebuildArticulations();
+    struct SplitRow { juce::Label name, keys; juce::TextButton down { "-" }, up { "+" }; };
+    std::vector<std::unique_ptr<SplitRow>> splitRows;
+    std::optional<sampler::section::Section> editedSection;   // splits moved, not yet applied
+    double editedAt = 0.0;
+    juce::Rectangle<int> splitArea;
+    void rebuildSplits();
+    void showSplits();   // the rows' text, from the section shown (or the one being edited)
     void updateInfo();   // the text, for the articulation chosen
     std::unique_ptr<juce::FileChooser> chooser;
     std::shared_ptr<const sampler::Program> shown;

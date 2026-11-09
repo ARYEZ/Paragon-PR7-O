@@ -783,6 +783,17 @@ void ParagonX1AudioProcessor::loadInstrument (const juce::File& file)
     startLoading (file.getFullPathName(), true);
 }
 
+void ParagonX1AudioProcessor::loadSection (const sampler::section::Section& section)
+{
+    if (! section.parts.empty())
+        startLoading (section.toText(), true);
+}
+
+std::optional<sampler::section::Section> ParagonX1AudioProcessor::getSection() const
+{
+    return sampler::section::fromText (instrumentFile);
+}
+
 void ParagonX1AudioProcessor::clearInstrument()
 {
     ++loadGeneration;   // a load still running puts nothing in
@@ -823,29 +834,52 @@ void ParagonX1AudioProcessor::startLoading (const juce::String& file, bool undoS
     std::weak_ptr<int> alive = lifeToken;
     if (loaderPool == nullptr)
         loaderPool = std::make_unique<juce::ThreadPool> (1);
-    loaderPool->addJob ([this, file, generation, undoStep, alive]
+    // 0.4.0: the samples in memory now, by file, for the loader to use again (a section's split moved, the same
+    // instrument loaded again): only what's new is read from disk.
+    auto inMemory = std::make_shared<std::map<juce::String, std::shared_ptr<const sampler::Sample>>>();
+    if (program != nullptr)
+        for (const auto& r : program->regions)
+            if (r.sample != nullptr)
+                (*inMemory)[r.sample->path] = r.sample;
+    loaderPool->addJob ([this, file, generation, undoStep, alive, inMemory]
     {
         Loaded result { nullptr, file, generation, undoStep };
         juce::String problem;
         if (! alive.expired() && loadGeneration.load() == generation)
         {
-            const juce::File source (file);
+            const auto reuse = [inMemory] (const juce::String& path) -> std::shared_ptr<const sampler::Sample>
+            {
+                const auto it = inMemory->find (path);
+                return it != inMemory->end() ? it->second : nullptr;
+            };
+            const auto keepGoing = [this, generation, alive] (double done)
+            {
+                loadProgress = done;
+                return ! alive.expired() && loadGeneration.load() == generation;
+            };
+            const auto section = sampler::section::fromText (file);
+            const juce::File source (section.has_value() ? juce::String() : file);
             std::shared_ptr<sampler::Program> made;
-            if (! source.existsAsFile())
+            if (section.has_value())
+                made = sampler::section::load (*section, keepGoing, reuse);   // 0.4.0: several SFZ split over the keys
+            else if (sampler::section::isSection (file))
+                problem = "couldn't read the section";
+            else if (! source.existsAsFile())
                 problem = "not found: " + file;
             else if (source.hasFileExtension ("sfz"))
-                made = sampler::sfz::load (source, [this, generation, alive] (double done)
-                {
-                    loadProgress = done;
-                    return ! alive.expired() && loadGeneration.load() == generation;
-                });
+            {
+                sampler::sfz::LoadOptions options;
+                options.reuse = reuse;
+                made = sampler::sfz::load (source, keepGoing, options);
+            }
             else
                 made = sampler::programFrom (sampler::sampleFiles::load (source), 60);   // a single sample, its root C3 / C4
+            const auto what = section.has_value() ? juce::String ("the section") : source.getFileName();
             if (made != nullptr && made->regions.empty())
-                problem = "nothing playable in " + source.getFileName()
+                problem = "nothing playable in " + what
                         + (made->problems.isEmpty() ? juce::String() : " (" + made->problems[0] + ")");
             else if (made == nullptr && problem.isEmpty())
-                problem = "couldn't read " + source.getFileName();
+                problem = "couldn't read " + what;
             if (made != nullptr && ! made->regions.empty())
                 result.program = std::move (made);
         }

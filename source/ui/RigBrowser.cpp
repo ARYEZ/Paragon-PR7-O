@@ -1,5 +1,7 @@
 #include "RigBrowser.h"
 
+#include "dsp/sampler/Section.h"
+
 #include "Parameters.h"
 #include "ParagonLookAndFeel.h"
 
@@ -33,7 +35,7 @@ namespace
         };
         juce::StringArray parts;
         parts.add (rig.instrument.isEmpty() ? juce::String ("no instrument")
-                                            : juce::File (rig.instrument).getFileNameWithoutExtension());
+                                            : sampler::section::describe (rig.instrument));
         if (isOn (ParamIDs::delayOn))
             parts.add ("delay");
         if (isOn (ParamIDs::reverbOn))

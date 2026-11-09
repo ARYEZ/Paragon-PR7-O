@@ -1,6 +1,7 @@
 #include "dsp/sampler/Sfz.h"
 
 #include <array>
+#include <mutex>
 #include <set>
 
 namespace sampler
@@ -306,23 +307,40 @@ namespace sampler
         return xx > 0.0 && yy > 0.0 ? (float) juce::jlimit (-1.0, 1.0, xy / std::sqrt (xx * yy)) : 0.0f;
     }
 
+    namespace
+    {
+        // 0.4.0: each recording's shape and AUTO SUSTAIN points, kept while the recording is in memory, so a program
+        // made again from the same samples (a section's split moved) doesn't work them out again. Keyed by the sample
+        // (its weak pointer tells a live one from a new one at the same address).
+        struct Analysis { bool sustained = false; bool pointsKnown = false; SustainPoints points; };
+        std::mutex analysesLock;
+        std::map<const Sample*, std::pair<std::weak_ptr<const Sample>, Analysis>> analyses;
+
+        Analysis& analysisOf (const std::shared_ptr<const Sample>& sample)
+        {
+            // (called with analysesLock held)
+            auto it = analyses.find (sample.get());
+            if (it == analyses.end() || it->second.first.lock() != sample)
+            {
+                for (auto old = analyses.begin(); old != analyses.end();)   // forget samples gone from memory
+                    old = old->second.first.expired() ? analyses.erase (old) : std::next (old);
+                Analysis a;
+                a.sustained = isSustained (*sample);
+                it = analyses.insert_or_assign (sample.get(), std::make_pair (std::weak_ptr<const Sample> (sample), a)).first;
+            }
+            return it->second.second;
+        }
+    }
+
     void prepareRegions (Program& program)
     {
-        // Each sample's shape and points worked out once, however many regions play it.
-        std::map<const Sample*, SustainPoints> found;
-        std::map<const Sample*, bool> shapes;
-        const auto sustained = [&shapes] (const Sample& s)
-        {
-            auto it = shapes.find (&s);
-            if (it == shapes.end())
-                it = shapes.emplace (&s, isSustained (s)).first;
-            return it->second;
-        };
+        const std::scoped_lock lock (analysesLock);
         for (auto& r : program.regions)
         {
             if (r.sample == nullptr)
                 continue;
-            r.held = ! r.oneShot && (double) r.sample->length() / r.sample->sampleRate > 2.5 && sustained (*r.sample);
+            auto& analysis = analysisOf (r.sample);
+            r.held = ! r.oneShot && (double) r.sample->length() / r.sample->sampleRate > 2.5 && analysis.sustained;
             r.autoLoop = false;
             if (r.loop != Region::Loop::none)
             {
@@ -332,10 +350,12 @@ namespace sampler
             }
             if (! r.held)
                 continue;
-            auto it = found.find (r.sample.get());
-            if (it == found.end())
-                it = found.emplace (r.sample.get(), findSustain (*r.sample)).first;
-            const auto& points = it->second;
+            if (! analysis.pointsKnown)
+            {
+                analysis.points = findSustain (*r.sample);
+                analysis.pointsKnown = true;
+            }
+            const auto& points = analysis.points;
             if (points.found && points.start > r.offset && points.end <= r.lastFrame())
             {
                 r.autoLoop = true;
@@ -557,7 +577,7 @@ namespace sampler
             return juce::jlimit (0, 127, (octave + 1) * 12 + semis);
         }
 
-        std::shared_ptr<Program> load (const juce::File& file, const std::function<bool (double)>& progress)
+        std::shared_ptr<Program> load (const juce::File& file, const std::function<bool (double)>& progress, const LoadOptions& options)
         {
             auto program = std::make_shared<Program>();
             program->name = file.getFileNameWithoutExtension();
@@ -572,6 +592,7 @@ namespace sampler
             struct Pending { Region region; juce::String path; float crossfadeSeconds = 0.0f; };
             std::vector<Pending> pending;                                  // regions, their files' paths, loop crossfades
             auto skippedRelease = 0, skippedGenerators = 0;
+            const auto loKeyWanted = juce::jlimit (0, 127, options.loKey), hiKeyWanted = juce::jlimit (0, 127, options.hiKey);
 
             for (const auto& op : parsed)
             {
@@ -692,9 +713,23 @@ namespace sampler
                 r.bendDown = number (op, "bend_down", -200.0f);
                 if (r.loKey > r.hiKey || r.loVel > r.hiVel)
                     continue;
+                // 0.4.0: only the keys asked for (a section's part): the rest isn't loaded at all.
+                if (r.hiKey < loKeyWanted || r.loKey > hiKeyWanted)
+                    continue;
+                r.loKey = juce::jmax (r.loKey, loKeyWanted);
+                r.hiKey = juce::jmin (r.hiKey, hiKeyWanted);
 
                 const auto path = (defaultPath + *sampleName).replaceCharacter ('\\', '/');
                 pending.push_back ({ std::move (r), path, crossfadeSeconds });
+            }
+
+            if (! options.audio)
+            {
+                // Read only: its regions with no samples (their keys and keyswitches), nothing loaded.
+                for (auto& p : pending)
+                    program->regions.push_back (std::move (p.region));
+                program->index();
+                return program;
             }
 
             // The audio: each file once, in the order the regions name them.
@@ -710,7 +745,9 @@ namespace sampler
                     break;
                 }
                 const auto audio = file.getParentDirectory().getChildFile (files[f]);
-                auto sample = sampleFiles::load (audio);
+                auto sample = options.reuse ? options.reuse (audio.getFullPathName()) : nullptr;   // 0.4.0: already in memory
+                if (sample == nullptr)
+                    sample = sampleFiles::load (audio);
                 if (sample == nullptr)
                     program->problems.add ((audio.existsAsFile() ? "can't read: " : "missing: ") + files[f]);
                 else

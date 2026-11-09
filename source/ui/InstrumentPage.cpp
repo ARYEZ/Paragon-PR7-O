@@ -23,16 +23,24 @@ InstrumentKeyboard::InstrumentKeyboard (ParagonX1AudioProcessor& p)
     setWantsKeyboardFocus (false);   // computer-key playing would fight the DAW's own shortcuts
     setScrollButtonsVisible (false); // all 88 keys fit
     setVelocity (0.8f, true);        // higher on the key plays softer
+    partOfKey.fill (-1);
     poll.callback = [this]
     {
         const auto now = processor.getProgram();
         const auto octave = notenames::middleCOctave.load();
         const auto chosen = processor.getKeyswitch();
-        if (now != shown || octave != shownOctave || chosen != shownSwitch)
+        const auto source = processor.getInstrumentFile();
+        if (now != shown || octave != shownOctave || chosen != shownSwitch || source != shownSource)
         {
             shown = now;
             shownOctave = octave;
             shownSwitch = chosen;
+            shownSource = source;
+            partOfKey.fill (-1);
+            if (const auto section = sampler::section::fromText (source))
+                for (int i = 0; i < (int) section->parts.size(); ++i)
+                    for (int k = section->parts[(size_t) i].low; k <= section->parts[(size_t) i].high; ++k)
+                        partOfKey[(size_t) k] = i;
             setOctaveForMiddleC (octave);
             repaint();
         }
@@ -52,6 +60,13 @@ void InstrumentKeyboard::paint (juce::Graphics& g)
     juce::MidiKeyboardComponent::paint (g);
 }
 
+float InstrumentKeyboard::tintOf (int note) const noexcept
+{
+    // A section's parts in turn full and faint, so its splits show.
+    const auto part = note >= 0 && note < 128 ? partOfKey[(size_t) note] : -1;
+    return part >= 0 && part % 2 == 1 ? 0.4f : 1.0f;
+}
+
 void InstrumentKeyboard::drawWhiteNote (int note, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver,
                                         juce::Colour lineColour, juce::Colour textColour)
 {
@@ -61,7 +76,7 @@ void InstrumentKeyboard::drawWhiteNote (int note, juce::Graphics& g, juce::Recta
     else if (plays (note) && ! isDown)
     {
         const auto band = area.withTrimmedTop (area.getHeight() * 0.62f).reduced (1.0f, 0.0f);
-        ParagonColours::setFill (g, ParagonColours::accent.withAlpha (0.32f), band);
+        ParagonColours::setFill (g, ParagonColours::accent.withAlpha (0.32f * tintOf (note)), band);
         g.fillRect (band);
     }
 }
@@ -75,7 +90,7 @@ void InstrumentKeyboard::drawBlackNote (int note, juce::Graphics& g, juce::Recta
     else if (plays (note) && ! isDown)
     {
         const auto band = area.withTrimmedTop (area.getHeight() * 0.7f).reduced (area.getWidth() * 0.2f, 2.0f);
-        ParagonColours::setFill (g, ParagonColours::accent.withAlpha (0.6f), band);
+        ParagonColours::setFill (g, ParagonColours::accent.withAlpha (0.6f * tintOf (note)), band);
         g.fillRect (band);
     }
 }
@@ -219,6 +234,10 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     auto& state = processor.getParameters();
     loadButton.setTooltip ("Load an SFZ instrument (or one audio file, played across the keyboard from C3/C4). You can also drop one on this page.");
     loadButton.onClick = [this] { chooseFile(); };
+    sectionButton.setTooltip ("Several SFZ instruments split over the keyboard as one (a string section: basses, cellos, violas, violins), "
+                              "with one set of keyswitches. Choose their files; PR7-O splits the keys where each next one's range begins "
+                              "(move the splits under SPLITS). You can also drop several .sfz files on this page.");
+    sectionButton.onClick = [this] { chooseSection(); };
     clearButton.setTooltip ("Unload the instrument (one undo step)");
     clearButton.onClick = [this] { processor.clearInstrument(); };
     nameLabel.setFont (juce::FontOptions (24.0f, juce::Font::bold));
@@ -234,7 +253,7 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     info.setColour (juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
     info.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
     info.setColour (juce::TextEditor::textColourId, ParagonColours::text);
-    for (auto* c : std::initializer_list<juce::Component*> { &loadButton, &clearButton, &nameLabel, &fileLabel, &info, &map })
+    for (auto* c : std::initializer_list<juce::Component*> { &loadButton, &sectionButton, &clearButton, &nameLabel, &fileLabel, &info, &map })
         addAndMakeVisible (c);
 
     const auto add = [this, &state] (std::vector<std::unique_ptr<ParamControl>>& list, const char* id, const char* label, const char* tip)
@@ -277,20 +296,132 @@ bool InstrumentPage::isInstrumentFile (const juce::File& f)
 
 bool InstrumentPage::isInterestedInFileDrag (const juce::StringArray& files)
 {
-    return files.size() == 1 && isInstrumentFile (juce::File (files[0]));
+    if (files.size() == 1)
+        return isInstrumentFile (juce::File (files[0]));
+    for (const auto& f : files)   // 0.4.0: several SFZ: a section
+        if (! juce::File (f).hasFileExtension ("sfz"))
+            return false;
+    return files.size() > 1;
 }
 
 void InstrumentPage::filesDropped (const juce::StringArray& files, int, int)
 {
     if (files.size() == 1 && isInstrumentFile (juce::File (files[0])))
         processor.loadInstrument (juce::File (files[0]));
+    else if (files.size() > 1 && isInterestedInFileDrag (files))
+        processor.loadSection (sampler::section::fromFiles (files));
+}
+
+void InstrumentPage::chooseSection()
+{
+    const auto start = sampler::section::folderOf (processor.getInstrumentFile());
+    chooser = std::make_unique<juce::FileChooser> ("A section: choose its SFZ files (basses, cellos, violas, violins...)",
+                                                   start.isDirectory() ? start : juce::File(), "*.sfz");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::canSelectMultipleItems,
+                          [this] (const juce::FileChooser& c)
+                          {
+                              juce::StringArray files;
+                              for (const auto& f : c.getResults())
+                                  if (f.existsAsFile())
+                                      files.add (f.getFullPathName());
+                              if (files.size() == 1)
+                                  processor.loadInstrument (juce::File (files[0]));   // one: just that instrument
+                              else if (files.size() > 1)
+                                  processor.loadSection (sampler::section::fromFiles (files));
+                          });
+}
+
+void InstrumentPage::rebuildSplits()
+{
+    splitRows.clear();
+    const auto section = editedSection.has_value() ? editedSection : processor.getSection();
+    if (section.has_value())
+        for (int i = 0; i < (int) section->parts.size(); ++i)
+        {
+            auto row = std::make_unique<SplitRow>();
+            row->name.setFont (juce::FontOptions (13.0f));
+            row->name.setColour (juce::Label::textColourId, ParagonColours::text);
+            row->keys.setFont (juce::FontOptions (13.0f));
+            row->keys.setColour (juce::Label::textColourId, ParagonColours::textDim);
+            row->keys.setJustificationType (juce::Justification::centredRight);
+            addAndMakeVisible (row->name);
+            addAndMakeVisible (row->keys);
+            if (i > 0)
+            {
+                for (auto* b : { &row->down, &row->up })
+                {
+                    b->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff0d0a0e));
+                    b->setColour (juce::TextButton::textColourOffId, ParagonColours::text);
+                    addAndMakeVisible (*b);
+                }
+                const auto below = sampler::section::nameOf (section->parts[(size_t) i - 1]);
+                const auto above = sampler::section::nameOf (section->parts[(size_t) i]);
+                row->down.setTooltip ("Move the split between " + below + " and " + above + " down a semitone (" + above + " plays one key more)");
+                row->up.setTooltip ("Move the split between " + below + " and " + above + " up a semitone (" + below + " plays one key more)");
+                row->down.onClick = [this, i] { moveSplit (i, -1); };
+                row->up.onClick = [this, i] { moveSplit (i, 1); };
+            }
+            splitRows.push_back (std::move (row));
+        }
+    showSplits();
+    resized();
+}
+
+void InstrumentPage::showSplits()
+{
+    const auto section = editedSection.has_value() ? editedSection : processor.getSection();
+    if (! section.has_value() || section->parts.size() != splitRows.size())
+        return;
+    for (size_t i = 0; i < splitRows.size(); ++i)
+    {
+        const auto& part = section->parts[i];
+        splitRows[i]->name.setText (sampler::section::nameOf (part).toUpperCase(), juce::dontSendNotification);
+        splitRows[i]->keys.setText (notenames::name (part.low) + " to " + notenames::name (part.high), juce::dontSendNotification);
+    }
+}
+
+juce::String InstrumentPage::getSplitRowText (int part) const
+{
+    if (part < 0 || part >= (int) splitRows.size())
+        return {};
+    return splitRows[(size_t) part]->name.getText() + " " + splitRows[(size_t) part]->keys.getText();
+}
+
+bool InstrumentPage::moveSplit (int part, int semitones)
+{
+    auto section = editedSection.has_value() ? editedSection : processor.getSection();
+    if (! section.has_value() || part < 1 || part >= (int) section->parts.size())
+        return false;
+    auto& below = section->parts[(size_t) part - 1];
+    auto& above = section->parts[(size_t) part];
+    const auto low = above.low + semitones;
+    if (low <= below.low || low > above.high)   // each keeps a key at least
+        return false;
+    above.low = low;
+    below.high = low - 1;
+    editedSection = section;
+    editedAt = juce::Time::getMillisecondCounterHiRes();
+    showSplits();
+    return true;
+}
+
+void InstrumentPage::applyPendingSplits()
+{
+    if (editedSection.has_value())
+    {
+        const auto section = *editedSection;
+        editedSection.reset();
+        if (const auto now = processor.getSection(); ! now.has_value() || ! (*now == section))
+            processor.loadSection (section);
+    }
 }
 
 void InstrumentPage::chooseFile()
 {
-    const auto current = juce::File (processor.getInstrumentFile());
+    const auto folder = sampler::section::folderOf (processor.getInstrumentFile());
     chooser = std::make_unique<juce::FileChooser> ("Load an instrument (SFZ, or one audio file)",
-                                                   current.existsAsFile() ? current.getParentDirectory() : juce::File(),
+                                                   folder.isDirectory() ? folder : juce::File(),
                                                    "*.sfz;*.wav;*.aif;*.aiff;*.flac;*.ogg");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& c)
@@ -302,6 +433,8 @@ void InstrumentPage::chooseFile()
 
 void InstrumentPage::timerCallback()
 {
+    if (editedSection.has_value() && juce::Time::getMillisecondCounterHiRes() - editedAt > 300.0)
+        applyPendingSplits();
     if (processor.isLoadingInstrument() != shownLoading)
         refresh();
     if (notenames::middleCOctave.load() != shownOctave)
@@ -352,11 +485,15 @@ void InstrumentPage::refresh()
     rebuildArticulations();
     clearButton.setEnabled (shownFile.isNotEmpty() || shown != nullptr);
 
-    const juce::File file (shownFile);
+    const auto section = sampler::section::fromText (shownFile);
     nameLabel.setText (shown != nullptr ? shown->name.toUpperCase()
-                       : shownFile.isNotEmpty() ? file.getFileNameWithoutExtension().toUpperCase()
+                       : shownFile.isNotEmpty() ? sampler::section::describe (shownFile).toUpperCase()
                        : juce::String ("NO INSTRUMENT"), juce::dontSendNotification);
-    fileLabel.setText (shownFile.isNotEmpty() ? shownFile : juce::String ("Load an SFZ file, or drop one here"), juce::dontSendNotification);
+    fileLabel.setText (section.has_value() ? "A section of " + juce::String ((int) section->parts.size()) + " SFZ files split over the keys, from "
+                                                 + juce::File (section->parts.front().file).getParentDirectory().getFullPathName()
+                       : shownFile.isNotEmpty() ? shownFile : juce::String ("Load an SFZ file, or drop one here (several: a section)"),
+                       juce::dontSendNotification);
+    rebuildSplits();
 
     updateInfo();
     repaint();
@@ -433,6 +570,12 @@ void InstrumentPage::paint (juce::Graphics& g)
     for (const auto& area : { headArea, infoArea, mapArea, playArea, sendArea })
         DockStyle::drawPanel (g, area.toFloat());
     DockStyle::drawTitle (g, infoArea.reduced (16, 0).withHeight (32), "THE INSTRUMENT");
+    if (! splitRows.empty())
+    {
+        g.setColour (ParagonColours::textDim);
+        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        g.drawText ("SPLITS (LOW TO HIGH)", splitArea.withHeight (22), juce::Justification::bottomLeft);
+    }
     DockStyle::drawTitle (g, mapArea.reduced (16, 0).withHeight (32), "ITS REGIONS: KEYS ACROSS, VELOCITY UP");
     DockStyle::drawTitle (g, playArea.reduced (16, 0).withHeight (32), "HOW IT PLAYS");
     DockStyle::drawTitle (g, sendArea.reduced (16, 0).withHeight (32), "WHERE IT GOES");
@@ -450,6 +593,22 @@ void InstrumentPage::resized()
         auto rows = articulationArea;
         for (auto& b : articulationButtons)
             b->setBounds (rows.removeFromTop (30).reduced (0, 2));
+        splitArea = inside.removeFromTop (splitRows.empty() ? 0 : 24 + 28 * (int) splitRows.size() + 10);
+        auto splits = splitArea.withTrimmedTop (24);
+        for (auto& row : splitRows)
+        {
+            auto line = splits.removeFromTop (28);
+            auto buttons = line.removeFromRight (64);
+            if (row->down.isVisible())
+            {
+                row->down.setBounds (buttons.removeFromLeft (30).reduced (0, 3));
+                buttons.removeFromLeft (4);
+                row->up.setBounds (buttons.removeFromLeft (30).reduced (0, 3));
+            }
+            line.removeFromRight (6);
+            row->keys.setBounds (line.removeFromRight (110));
+            row->name.setBounds (line);
+        }
     }
     area.removeFromLeft (10);
     auto bottom = area.removeFromBottom (150);
@@ -462,12 +621,14 @@ void InstrumentPage::resized()
     auto head = headArea.reduced (18, 14);
     loadButton.setBounds (head.removeFromLeft (130).withSizeKeepingCentre (130, 40));
     head.removeFromLeft (10);
+    sectionButton.setBounds (head.removeFromLeft (150).withSizeKeepingCentre (150, 40));
+    head.removeFromLeft (10);
     clearButton.setBounds (head.removeFromLeft (100).withSizeKeepingCentre (100, 40));
     head.removeFromLeft (24);
     nameLabel.setBounds (head.removeFromTop (30));
     fileLabel.setBounds (head);
 
-    info.setBounds (infoArea.reduced (14, 0).withTrimmedTop (36 + articulationArea.getHeight()).withTrimmedBottom (12));
+    info.setBounds (infoArea.reduced (14, 0).withTrimmedTop (36 + articulationArea.getHeight() + splitArea.getHeight()).withTrimmedBottom (12));
     map.setBounds (mapArea.withTrimmedTop (30).reduced (6, 4));
 
     const auto row = [] (juce::Rectangle<int> panel) { return panel.withTrimmedTop (36).withTrimmedBottom (14).reduced (10, 0); };

@@ -19,6 +19,7 @@
 //   PARAGON_SNAPSHOT_INSTRUMENT=1    a demo instrument made here (invented: sines in 16 zones x 3 velocity layers x 2 round
 //                                    robins over C1 to C6, as "Demo Strings.sfz"), loaded
 //   PARAGON_SNAPSHOT_SFZ=<file>      instead, an SFZ from your computer (none ship with the tests), loaded
+//   PARAGON_SNAPSHOT_SECTION=<file>,<file>...   instead, a section of these SFZ files, split over the keys
 //   PARAGON_SNAPSHOT_SWITCH=<key>    with its keyswitch `key` (a MIDI note number) chosen
 //   PARAGON_SNAPSHOT_NOTES=1         and a C major chord (C2 G2 E3 C4) held on the keyboard, sounding
 //   PARAGON_SNAPSHOT_LOADING=1       the instrument page while an instrument loads, its progress box 62% done
@@ -100,6 +101,12 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
     {
         processor.loadInstrument (juce::File (sfz));
         REQUIRE (processor.waitForInstrument());
+        REQUIRE (processor.getProgram() != nullptr);
+    }
+    if (const auto files = env ("PARAGON_SNAPSHOT_SECTION"); files.isNotEmpty())
+    {
+        processor.loadSection (sampler::section::fromFiles (juce::StringArray::fromTokens (files, ",", "")));
+        REQUIRE (processor.waitForInstrument (120000));
         REQUIRE (processor.getProgram() != nullptr);
     }
     if (const auto key = env ("PARAGON_SNAPSHOT_SWITCH"); key.isNotEmpty())

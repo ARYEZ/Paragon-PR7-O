@@ -8,10 +8,12 @@
 #include "dsp/mixer/MixerEffects.h"
 #include "dsp/sampler/DiskStreamer.h"
 #include "dsp/sampler/Sampler.h"
+#include "dsp/sampler/Section.h"
 #include "dsp/sampler/Sfz.h"
 
 #include <functional>
 #include <map>
+#include <set>
 
 namespace
 {
@@ -922,4 +924,169 @@ TEST_CASE ("SAMPLER 0.3.0: AUTO SUSTAIN tilts a loop on a note still settling, s
     // A steady note isn't tilted.
     CHECK (std::abs (sampler::findSustain (*shaped (98.0, 8.0, curve ({ { 0.0, 0.0 }, { 7.5, 0.0 }, { 8.0, -60.0 } })))
                          .tilt) < 0.3f);
+}
+
+//==============================================================================
+// 0.4.0: SECTIONS, several SFZ split over the keys (the owner: "Split, let's build the all strings section"). Two
+// invented parts laid out as VSCO 2 CE's basses and violins are: the low one switches at c6-d6 (84-86, inside the high
+// one's range), the high one at c2-c#2 (36-37, inside the low one's). Each articulation its own tone, so the pitch
+// tells who played.
+namespace
+{
+    struct TwoParts
+    {
+        Folder folder;
+        juce::File low, high;
+        TwoParts()
+        {
+            folder.wav ("low/nv.wav", 110.0, 1.0);
+            folder.wav ("low/sus_a.wav", 120.0, 1.0);
+            folder.wav ("low/sus_b.wav", 160.0, 1.0);
+            folder.wav ("low/pizz.wav", 140.0, 1.0);
+            folder.wav ("high/sus.wav", 300.0, 1.0);
+            folder.wav ("high/sus2.wav", 500.0, 1.0);
+            folder.wav ("high/pizz.wav", 400.0, 1.0);
+            low = folder.sfz ("Basses-KS.sfz",
+                "<control> default_path=low/\n<global> sw_lokey=c6 sw_hikey=d6 sw_default=c6 amp_veltrack=0\n"
+                "<group> sw_last=c6 sw_label=C6 Sustain Non-Vibrato\n<region> sample=nv.wav lokey=24 hikey=60 pitch_keycenter=36\n"
+                "<group> sw_last=c#6 sw_label=C#6 Sustain Vibrato\n<region> sample=sus_a.wav lokey=24 hikey=47 pitch_keycenter=36\n"
+                "<region> sample=sus_b.wav lokey=48 hikey=60 pitch_keycenter=52\n"
+                "<group> sw_last=d6 sw_label=D6 Pizzicato\n<region> sample=pizz.wav lokey=24 hikey=60 pitch_keycenter=36\n");
+            high = folder.sfz ("Violins-KS.sfz",
+                "<control> default_path=high/\n<global> sw_lokey=c2 sw_hikey=c#2 sw_default=c2 amp_veltrack=0\n"
+                "<group> sw_last=c2 sw_label=C2 Sustain Vibrato\n<region> sample=sus.wav lokey=48 hikey=72 pitch_keycenter=60\n"
+                "<region> sample=sus2.wav lokey=73 hikey=86 pitch_keycenter=84\n"
+                "<group> sw_last=c#2 sw_label=C#2 Pizzicato\n<region> sample=pizz.wav lokey=48 hikey=86 pitch_keycenter=60\n");
+        }
+    };
+
+    // Which tone a note plays, after a switch (none: -1).
+    double heard (const sampler::Program& program, int key, int keyswitch = -1)
+    {
+        auto midi = keyswitch >= 0 ? noteOn (keyswitch) : juce::MidiBuffer();
+        midi.addEvents (noteOn (key, 100, 480), 0, -1, 0);
+        const auto out = render (program, midi, 0.25)[0];
+        if (peakOf (out, 480) < 1.0e-3)
+            return 0.0;
+        return loudestOf (out, { 110.0, 120.0, 140.0, 160.0, 300.0, 400.0, 500.0 }, 4800);
+    }
+
+    std::set<juce::String> filesIn (const sampler::Program& program)
+    {
+        std::set<juce::String> names;
+        for (const auto& r : program.regions)
+            names.insert (juce::File (r.sample->path).getFileName());
+        return names;
+    }
+}
+
+TEST_CASE ("SECTION 0.4.0: kept as text; split where each next part's range begins; only the split's samples loaded", "[sfz][section]")
+{
+    TwoParts files;
+    // Chosen in any order: low to high, the low one up to the key under the high one's lowest.
+    const auto section = sampler::section::fromFiles ({ files.high.getFullPathName(), files.low.getFullPathName(), "/not/there.sfz" });
+    REQUIRE (section.parts.size() == 2);
+    CHECK (section.parts[0].file == files.low.getFullPathName());
+    CHECK (section.parts[0].low == 24);
+    CHECK (section.parts[0].high == 47);
+    CHECK (section.parts[1].file == files.high.getFullPathName());
+    CHECK (section.parts[1].low == 48);
+    CHECK (section.parts[1].high == 86);
+    // Its text, where a file's path would be.
+    const auto text = section.toText();
+    CHECK (sampler::section::isSection (text));
+    CHECK_FALSE (sampler::section::isSection (files.low.getFullPathName()));
+    REQUIRE (sampler::section::fromText (text).has_value());
+    CHECK (*sampler::section::fromText (text) == section);
+    CHECK_FALSE (sampler::section::fromText ("<Section></Section>").has_value());
+    CHECK_FALSE (sampler::section::fromText ("<Section><Part").has_value());
+
+    const auto program = sampler::section::load (section);
+    CHECK (program->problems.isEmpty());
+    CHECK (program->name == "Basses-KS + Violins-KS");
+    // The low part's keys stop at 47: its 48-60 recording (sus_b) isn't loaded; every region is cut to its part's keys.
+    CHECK (filesIn (*program) == std::set<juce::String> { "nv.wav", "sus_a.wav", "pizz.wav", "sus.wav", "sus2.wav" });
+    CHECK (program->numFiles == 6);   // the two pizz.wav are different files
+    CHECK (program->lowestKey() == 24);
+    CHECK (program->highestKey() == 86);
+    for (const auto& r : program->regions)
+    {
+        const auto fromLow = r.sample->path.contains ("/low/");
+        CHECK ((fromLow ? r.hiKey <= 47 : r.loKey >= 48));
+    }
+}
+
+TEST_CASE ("SECTION 0.4.0: one set of keyswitches over the top for every part, matched by name; the parts' own switch keys play notes", "[sampler][section]")
+{
+    TwoParts files;
+    const auto program = sampler::section::load (sampler::section::fromFiles ({ files.low.getFullPathName(), files.high.getFullPathName() }));
+    // Sustain, Sustain Non-Vibrato, Pizzicato: from the first C over the top note (86): 96, 97, 98. Starts on Sustain.
+    REQUIRE (program->articulations.size() == 3);
+    CHECK (program->swLoKey == 96);
+    CHECK (program->swHiKey == 98);
+    CHECK (program->swDefault == 96);
+    CHECK (program->articulations[0].label == "C7 Sustain");
+    CHECK (program->articulations[1].label == "C#7 Sustain Non-Vibrato");
+    CHECK (program->articulations[2].label == "D7 Pizzicato");
+
+    // Sustain (the default): each side of the split plays its own part's sustain.
+    CHECK (heard (*program, 36) == 120.0);
+    CHECK (heard (*program, 60) == 300.0);
+    CHECK (heard (*program, 47) > 0.0);   // the low part's top key
+    // Pizzicato: both parts switch.
+    CHECK (heard (*program, 36, 98) == 140.0);
+    CHECK (heard (*program, 60, 98) == 400.0);
+    // Sustain Non-Vibrato: the low part has it; the high one plays its sustain.
+    CHECK (heard (*program, 36, 97) == 110.0);
+    CHECK (heard (*program, 60, 97) == 300.0);
+    // The parts' own switch keys are notes now: 36 (the high part's) a bass note, 84 (the low part's) a violin note.
+    CHECK (heard (*program, 84) == 500.0);
+    CHECK_FALSE (program->isKeyswitch (36));
+    CHECK_FALSE (program->isKeyswitch (84));
+
+    // The kinds, from VSCO 2 CE's labels.
+    CHECK (sampler::section::kindOf ("C2 Sustain") == "sustain");
+    CHECK (sampler::section::kindOf ("C#6 Sustain Vibrato") == "sustain");
+    CHECK (sampler::section::kindOf ("C6 Sustain Non-Vibrato") == "sustain non-vibrato");
+    CHECK (sampler::section::kindOf ("C#2 Tremolo") == "tremolo");
+    CHECK (sampler::section::kindOf ("D#6 Spiccato") == "spiccato");
+    CHECK (sampler::section::kindOf ("E6 Pizzicato") == "pizzicato");
+    CHECK (sampler::section::kindOf ("C1 Staccato") == "staccato");
+    CHECK (sampler::section::kindOf ("Col legno") == "col legno");
+}
+
+TEST_CASE ("SECTION 0.4.0: a split moved reads only what's new; the rest is the same samples, in memory", "[sfz][section]")
+{
+    TwoParts files;
+    auto section = sampler::section::fromFiles ({ files.low.getFullPathName(), files.high.getFullPathName() });
+    const auto before = sampler::section::load (section);
+    std::map<juce::String, std::shared_ptr<const sampler::Sample>> inMemory;
+    for (const auto& r : before->regions)
+        inMemory[r.sample->path] = r.sample;
+    // The split up two keys: the low part now plays 48-49, so its sus_b is needed.
+    section.parts[0].high = 49;
+    section.parts[1].low = 50;
+    juce::StringArray read;
+    const auto after = sampler::section::load (section, {}, [&] (const juce::String& path) -> std::shared_ptr<const sampler::Sample>
+    {
+        if (const auto it = inMemory.find (path); it != inMemory.end())
+            return it->second;
+        read.add (juce::File (path).getFileName());
+        return nullptr;
+    });
+    CHECK (read == juce::StringArray { "sus_b.wav" });
+    for (const auto& r : after->regions)
+        if (const auto it = inMemory.find (r.sample->path); it != inMemory.end())
+            CHECK (r.sample == it->second);
+    // Key 49 is the low part's now, 50 the high part's.
+    const auto partAt = [&after] (int key)
+    {
+        juce::StringArray parts;
+        for (const auto i : after->byKey[(size_t) key])
+            if (after->regions[(size_t) i].playsUnder (after->swDefault))
+                parts.addIfNotAlreadyThere (after->regions[(size_t) i].sample->path.contains ("/low/") ? "low" : "high");
+        return parts.joinIntoString (",");
+    };
+    CHECK (partAt (49) == "low");
+    CHECK (partAt (50) == "high");
 }

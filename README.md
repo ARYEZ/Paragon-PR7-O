@@ -23,7 +23,7 @@ PR7-O is built in stages, each one released (the plan: `PR7-O PLAN.md`):
 |---|---|---|
 | **1** | Its own plugin: an instrument that loads an SFZ and plays it | **Works (0.1.0)** |
 | **2** | Held notes, VSCO 2 CE first (strings in 0.2.0, the rest in 0.3.0): keyswitches, AUTO SUSTAIN, SFZ loops, dynamics on the mod wheel, expression, polyphony that keeps a chord's edges | **Works (0.3.0)**; release samples and the files' own crossfades still to come |
-| 3 | The libraries: VSCO 2 CE, Sonatina Symphonic Orchestra, Virtual Playing Orchestra; a browser by section; streaming | |
+| 3 | The libraries: VSCO 2 CE, Sonatina Symphonic Orchestra, Virtual Playing Orchestra; a browser by section; streaming | **Sections split over the keys (0.4.0)** |
 | 4 | Articulations: keyswitches (done in 0.2.0), CC or channel | |
 | 5 | Legato (our own) and portamento | |
 | 6 | The stage: sections seated on a drawn stage, simulated mics and room | |

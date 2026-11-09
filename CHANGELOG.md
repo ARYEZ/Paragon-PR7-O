@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.0
+
+**SECTIONS: several instruments split over one keyboard** (our own design; you asked for "the all strings section",
+split). **NEW SECTION...** on the INSTRUMENT page (or drop several `.sfz` files on it at once): choose, say, VSCO 2 CE's
+`Contrabass-KS`, `CelloEns-KS`, `ViolaEns-KS` and `ViolinEns-KS`, and they play as one instrument, each on its own keys:
+basses at the bottom, then cellos, violas, violins.
+
+- **Where the splits go:** PR7-O orders the files low to high and starts each at the bottom of its own range, the one
+  under it stopping a key below. For VSCO's strings: basses C0-B0, cellos C1-B1, violas C2-F#2, violins G2 up (PR7-O's
+  names, middle C = C3). **SPLITS** on the page lists each part's keys; **- / +** move a split a semitone (each part keeps
+  at least one key). The keyboard shades the parts in turn so you can see them.
+- **One keyswitch for all of them:** each file's own switch keys sit inside another part's range (the violins' C1-D#1
+  are cello notes, the basses' and cellos' C5-E5 are violin notes), so a section has switches of its own, just above its
+  top note: for the strings C6 Sustain, C#6 Sustain Non-Vibrato, D6 Tremolo, D#6 Spiccato, E6 Pizzicato, starting on
+  Sustain. The articulations are matched by their names across the files (sustain, tremolo, spiccato, pizzicato...);
+  where a part has no match it plays its nearest (Sustain Non-Vibrato: the basses' own, the others their sustain), and
+  the old switch keys play notes again.
+- **Memory:** each part loads only the recordings its keys need: 450 MB for the four string files split (the four whole
+  would be about 1 GB). Moving a split reuses what's in memory and reads only what's newly needed: on VSCO's strings it
+  took 0.8 s and read nothing new; the whole section loads in about 2.5 s (once the files are in the computer's cache).
+- A section is kept in presets and projects like a file, and moving a split is one undo step (several clicks in a row
+  count as one: it's applied 0.3 s after the last).
+
+Checked on the real files (in the build machine's scratch space): every switch plays the right recording in each of
+the four parts, nothing missing or unread. A demo is rendered. Not checked: listening.
+
+A tip: four sections at VSCO's +20 dB make a big chord peak over 0 dBFS (a ten-note E minor chord reached +2 dBFS);
+turn LEVEL down 6 dB or so for full chords.
+
 ## 0.3.0
 
 **The rest of VSCO 2 Community Edition plays properly**: woodwinds (flute, piccolo, oboe, clarinet, bassoon), brass

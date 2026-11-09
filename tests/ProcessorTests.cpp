@@ -83,7 +83,7 @@ TEST_CASE ("PR7-O is an instrument: no audio in, MIDI in, mono or stereo out", "
     CHECK (processor.getMainBusNumOutputChannels() == 2);
     CHECK (processor.getBus (false, 0)->getName() == "Main");
     CHECK (juce::String (JucePlugin_Name) == "Paragon PR7-O");
-    CHECK (juce::String (JucePlugin_VersionString) == "0.3.0");
+    CHECK (juce::String (JucePlugin_VersionString) == "0.4.0");
 
     juce::AudioProcessor::BusesLayout layout;
     layout.outputBuses.add (juce::AudioChannelSet::stereo());
@@ -393,4 +393,61 @@ TEST_CASE ("0.2.0: a project reopens on the articulation it was saved with, once
     play (*restored, 0.01);
     CHECK (restored->getKeyswitch() == 38);
     dir.deleteRecursively();
+}
+
+TEST_CASE ("SECTION 0.4.0: a section is kept with the project and comes back; moving a split is one undo step", "[processor][section][undo]")
+{
+    // Two invented parts on disk: a low one (40-64, a 110 Hz tone) and a high one (55-84, 440 Hz).
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("low.wav"), *testkit::sine (110.0, 1.0), 24);
+    testkit::writeWav (dir.getChildFile ("high.wav"), *testkit::sine (440.0, 1.0), 24);
+    dir.getChildFile ("Cellos.sfz").replaceWithText ("<region> sample=low.wav lokey=40 hikey=64 pitch_keycenter=45\n");
+    dir.getChildFile ("Violins.sfz").replaceWithText ("<region> sample=high.wav lokey=55 hikey=84 pitch_keycenter=69\n");
+    const auto section = sampler::section::fromFiles ({ dir.getChildFile ("Cellos.sfz").getFullPathName(),
+                                                        dir.getChildFile ("Violins.sfz").getFullPathName() });
+    REQUIRE (section.parts.size() == 2);
+    CHECK (section.parts[0].high == 54);
+
+    juce::MemoryBlock state;
+    {
+        auto processor = makeProcessor();
+        processor->flushUndoStep();
+        processor->loadSection (section);
+        REQUIRE (processor->waitForInstrument());
+        processor->flushUndoStep();
+        REQUIRE (processor->getProgram() != nullptr);
+        REQUIRE (processor->getSection().has_value());
+        CHECK (*processor->getSection() == section);
+        // It plays: under the split the cellos, over it the violins.
+        CHECK_THAT (frequencyOf (play (*processor, 0.6, note (45))[0]), WithinAbs (110.0, 0.5));
+        CHECK_THAT (frequencyOf (play (*processor, 0.6, note (69))[0]), WithinAbs (440.0, 0.5));
+
+        // The split moved up to 60: one undo step.
+        auto moved = section;
+        moved.parts[0].high = 59;
+        moved.parts[1].low = 60;
+        processor->loadSection (moved);
+        REQUIRE (processor->waitForInstrument());
+        processor->flushUndoStep();
+        CHECK (*processor->getSection() == moved);
+        processor->undo();
+        REQUIRE (processor->waitForInstrument());
+        REQUIRE (processor->getSection().has_value());
+        CHECK (*processor->getSection() == section);
+        processor->redo();
+        REQUIRE (processor->waitForInstrument());
+        CHECK (*processor->getSection() == moved);
+        processor->getStateInformation (state);
+    }
+    // The project reopened: the same section, loaded again.
+    auto restored = makeProcessor();
+    restored->setStateInformation (state.getData(), (int) state.getSize());
+    REQUIRE (restored->waitForInstrument());
+    REQUIRE (restored->getSection().has_value());
+    CHECK (restored->getSection()->parts[0].high == 59);
+    REQUIRE (restored->getProgram() != nullptr);
+    CHECK (restored->getProgram()->numFiles == 2);
+    CHECK (restored->getProgram()->name == "Cellos + Violins");
 }

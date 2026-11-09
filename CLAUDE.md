@@ -138,13 +138,34 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   s: looping level spread ≤ the recording's own (strings 4-6 dB, brass 1.5-2.2, woodwinds 0.6-2.9, organ 1-3, rolls
   3.3, piccolo 2.9). Demo WAVs rendered for the owner. Not checked: listening.
 
+## 0.4.0: SECTIONS (the owner: "Split let's build the all strings section")
+
+- **`dsp/sampler/Section.*`** (namespace `sampler::section`): `Section { parts: Part { file, low, high } }`, kept as
+  text (`toText`: `<Section><Part file low high/>...</Section>`) wherever an instrument's path goes: `instrumentFile`,
+  `Rig::instrument`, the state's "Instrument" `file`, undo. `isSection`, `fromText`, `fromFiles` (parts by lowest key;
+  each from its lowest to the key under the next's lowest, the top to its highest; read with
+  `sfz::LoadOptions::audio = false`), `nameOf`, `describe` / `folderOf` (an instrument string, file or section),
+  `load` (each part via `sfz::load` with `loKey / hiKey` (regions cut to them, the rest's samples never read) and
+  `reuse`; problems / unread prefixed with the part's name; `kindOf` (sustain / sustain non-vibrato / tremolo / legato /
+  marcato / spiccato / staccato / pizzicato, else the label without its key name) matches articulations; switches from
+  the first C over the top note (under the lowest if past C8: `base`), default Sustain; a part's region copied once per
+  section switch it plays under (its own kind, a sustain falling back to its other sustain); parts without switches
+  play under all.
+- `sfz::LoadOptions { loKey, hiKey, audio, reuse }`; `prepareRegions` caches each sample's shape and AUTO SUSTAIN points
+  by sample (`analyses`, weak pointers) so reused samples aren't analysed again. The processor's loader passes the
+  current program's samples as `reuse` for every load (files too); `loadSection`, `getSection`.
+- UI: `InstrumentPage` NEW SECTION... (multi-select), several `.sfz` dropped, `SplitRow`s (name, keys, - / + from the
+  second part: `moveSplit (part, semitones)`, each part ≥ 1 key; `editedSection` applied 0.3 s after the last click by
+  the timer, `applyPendingSplits`); `InstrumentKeyboard::tintOf` (odd parts at 0.4); `RigBrowser` names a section's
+  preset by its parts. Snapshot: `PARAGON_SNAPSHOT_SECTION=<file>,<file>...`.
+- On VSCO's four string KS files: splits 24-35 / 36-47 / 48-54 / 55-86, switches 96-100 (C7-E7 SFZ), 450 MB, load
+  2.3 s warm, a split moved 0.8 s with nothing read. A full chord peaks over 0 dBFS (+20 dB per file).
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
-`xfout_*`, `amp_velcurve`), for libraries that use them (VSCO uses neither). The owner asked (0.3.0) whether all the
-strings can be one instrument: today one SFZ per PR7-O (VSCO's keyswitch ranges differ: violins C1-D#1, cellos and
-basses C5-E5). Offered as our own "section" feature with stage 3, split by register or layered (or both), one
-keyswitch switching every section: waiting for the owner's choice. Then (ask the owner): stage 3's library browser by
+`xfout_*`, `amp_velcurve`), for libraries that use them (VSCO uses neither). Sections are split only (0.4.0; layered
+was offered too: not asked for). Then (ask the owner): stage 3's library browser by
 section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
 VPO, stage 4's CC / channel articulations, stage 5 legato, stage 6 the stage and mixer strips (dsp/mixer).
 
