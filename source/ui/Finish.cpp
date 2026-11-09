@@ -11,7 +11,7 @@ namespace Finish
         juce::PropertiesFile::Options settingsOptions()
         {
             juce::PropertiesFile::Options options;
-            options.applicationName = "Paragon PR7-D";   // its own file, so PR7-D and its siblings each remember their own finish
+            options.applicationName = "Paragon PR7-O";   // its own file, so PR7-O and its siblings each remember their own finish
             options.folderName = "Paragon";
             options.filenameSuffix = "settings";
             options.osxLibrarySubFolder = "Application Support";
@@ -37,7 +37,7 @@ namespace Finish
 
         State& state()
         {
-            // Shared by every PR7-D window open in the DAW (they're in one
+            // Shared by every PR7-O window open in the DAW (they're in one
             // process), and only touched on the message thread.
             static State instance;
             return instance;

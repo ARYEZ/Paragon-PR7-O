@@ -74,7 +74,7 @@ jobs:
             [ $try -lt 5 ] && sleep 15
           done
           unzip -q -o pluginval.zip
-          PLUGIN="build/ParagonX1_artefacts/Release/VST3/Paragon PR7-D.vst3"
+          PLUGIN="build/ParagonX1_artefacts/Release/VST3/Paragon PR7-O.vst3"
           RUN="${{ matrix.pluginval_bin }} --strictness-level 10 --validate-in-process --validate"
           if [ "$RUNNER_OS" = "Linux" ]; then
             # pluginval's own Linux VST3 host now and then crashes as it shuts
@@ -122,8 +122,7 @@ jobs:
   # above, zipped, with notes from CHANGELOG.md.
   release:
     name: Release
-    # PR7-O seed: off until PR7-O is its own plugin (stage 1), so CI can't publish PR7-D's 0.70.0 under this repo.
-    if: false && github.event_name == 'push'
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -164,9 +163,9 @@ jobs:
           mkdir release
           # Artifact storage drops file permissions; put the executable flag
           # back on the Linux binary so every host will load it.
-          chmod -R a+x "artifacts/ParagonX1-VST3-Linux/Paragon PR7-D.vst3/Contents/x86_64-linux"
+          chmod -R a+x "artifacts/ParagonX1-VST3-Linux/Paragon PR7-O.vst3/Contents/x86_64-linux"
           for os in Windows Linux; do
-            (cd "artifacts/ParagonX1-VST3-${os}" && zip -qr "../../release/ParagonPR7-D-${TAG}-${os}-VST3.zip" "Paragon PR7-D.vst3")
+            (cd "artifacts/ParagonX1-VST3-${os}" && zip -qr "../../release/ParagonPR7-O-${TAG}-${os}-VST3.zip" "Paragon PR7-O.vst3")
           done
           ls -l release
 
@@ -191,5 +190,5 @@ jobs:
           # --target creates the tag on this exact commit if it doesn't exist yet.
           gh release create "$TAG" release/*.zip \
             --target "$GITHUB_SHA" \
-            --title "Paragon PR7-D ${TAG}" \
+            --title "Paragon PR7-O ${TAG}" \
             --notes-file notes.md

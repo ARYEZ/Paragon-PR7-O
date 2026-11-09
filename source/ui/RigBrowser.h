@@ -74,7 +74,7 @@ private:
     juce::TextButton loadButton { "LOAD" }, saveDetailsButton { "SAVE DETAILS" },
                      saveAsButton { "SAVE CURRENT SOUND AS NEW..." }, deleteButton { "DELETE" },
                      folderButton { "OPEN PRESETS FOLDER" },
-                     defaultButton { "OPEN WITH THIS IN EVERY NEW PR7-D" };   // 0.70.0: THE DEFAULT PRESET
+                     defaultButton { "OPEN WITH THIS IN EVERY NEW PR7-O" };   // 0.70.0: THE DEFAULT PRESET
 public:
     juce::TextButton& getDefaultButton() noexcept { return defaultButton; }   // tests
 private:

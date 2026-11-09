@@ -23,7 +23,7 @@ namespace
         label.setColour (juce::Label::textColourId, ParagonColours::textDim);
     }
 
-    // One line describing a preset: its samples, whether it has a beat, and the sends it uses.
+    // One line describing a preset: its instrument and the sends it uses.
     juce::String describeBlocks (const Rig& rig)
     {
         const auto isOn = [&rig] (const juce::String& id)
@@ -31,12 +31,9 @@ namespace
             const auto found = rig.parameters.find (id);
             return found != rig.parameters.end() && found->second > 0.5f;
         };
-        const auto samples = (int) rig.drumSamples.size();
         juce::StringArray parts;
-        parts.add (samples == 0 ? juce::String ("drum synths") : juce::String (samples) + (samples == 1 ? " sample" : " samples"));
-        const auto& patterns = rig.modulation.drumPatterns;
-        if (std::any_of (patterns.begin(), patterns.end(), [] (const auto& p) { return ! p.isEmpty(); }))
-            parts.add ("a beat");
+        parts.add (rig.instrument.isEmpty() ? juce::String ("no instrument")
+                                            : juce::File (rig.instrument).getFileNameWithoutExtension());
         if (isOn (ParamIDs::delayOn))
             parts.add ("delay");
         if (isOn (ParamIDs::reverbOn))
@@ -316,7 +313,7 @@ void RigBrowser::showDetails()
     loadButton.setEnabled (hasEntry);
     defaultButton.setEnabled (hasEntry);
     defaultButton.setButtonText (hasEntry && processor.isDefaultRig (*entry) ? "THE DEFAULT (PRESS: BACK TO INIT)"
-                                                                            : "OPEN WITH THIS IN EVERY NEW PR7-D");
+                                                                            : "OPEN WITH THIS IN EVERY NEW PR7-O");
 
     juce::String text;
     if (hasEntry)

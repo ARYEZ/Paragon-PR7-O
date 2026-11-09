@@ -71,7 +71,6 @@ namespace
     {
         Window()
         {
-            testkit::useRootKeys (processor);   // (0.59.0: ROOT's keys, as these tests play them)
             editor.reset (processor.createEditor());
             editor->setSize (1600, 900);
             view = dynamic_cast<MainView*> (editor->getChildComponent (0));
@@ -119,125 +118,87 @@ TEST_CASE ("The window opens as big as fits above the taskbar, up to 1824 x 1026
     CHECK (Editor::openingSize ({ 800, 600 }).x == 960);   // never below the smallest size
 }
 
-TEST_CASE ("The window opens on the DRUMS page; GROOVES, FX, PRESETS and SETTINGS cover it; the song strip and OUTPUT stay", "[ui]")
+TEST_CASE ("The window opens on the INSTRUMENT page; FX, PRESETS and SETTINGS cover it; the keyboard and OUTPUT stay", "[ui]")
 {
     Window w;
-    // 0.41.0: no on-screen keyboard anywhere; the SONG track has its strip.
-    CHECK (inside<juce::MidiKeyboardComponent> (*w.view) == nullptr);
-    auto* keyboard = &w.view->getSongTrack();
-    CHECK_FALSE (keyboard->isVisible());   // 0.61.0: hidden when the window opens
-    w.view->setTrackShown (true);
-    CHECK (keyboard->isVisible());
-    CHECK (w.view->getPage() == MainView::Page::drums);
-    CHECK (w.view->getDrumPage().isVisible());
-    checkLayout (*w.view, "drums");
+    auto* keyboard = inside<juce::MidiKeyboardComponent> (*w.view);
+    REQUIRE (keyboard != nullptr);
+    CHECK (keyboard->isVisible());   // shown when the window opens
+    CHECK (keyboard->getRangeStart() == 21);
+    CHECK (keyboard->getRangeEnd() == 108);
+    CHECK (w.view->getPage() == MainView::Page::instrument);
+    CHECK (w.view->getInstrumentPage().isVisible());
+    checkLayout (*w.view, "instrument");
 
-    // The six tabs (0.20.0: MIXER), side by side in the header, the shown page's lit.
+    // The four tabs, side by side in the header, the shown page's lit.
     std::vector<juce::Button*> tabs;
-    for (const auto* id : { "drumsTab", "groovesTab", "mixerTab", "fxTab", "presetsTab", "settingsTab" })
+    for (const auto* id : { "instrumentTab", "fxTab", "presetsTab", "settingsTab" })
     {
         auto* tab = dynamic_cast<juce::Button*> (w.view->findChildWithID (id));
         INFO (id);
         REQUIRE (tab != nullptr);
         CHECK (tab->getBottom() < 64);
-        CHECK (tab->getWidth() > 110);   // six share the group (each its icon and name)
+        CHECK (tab->getWidth() > 150);
         if (! tabs.empty())
             CHECK (tab->getX() >= tabs.back()->getRight());
         tabs.push_back (tab);
     }
     CHECK (tabs[0]->getToggleState());
 
-    const std::pair<MainView::Page, int> pages[] = { { MainView::Page::grooves, 1 }, { MainView::Page::mixer, 2 }, { MainView::Page::fx, 3 },
-                                                     { MainView::Page::presets, 4 }, { MainView::Page::settings, 5 } };
+    const std::pair<MainView::Page, int> pages[] = { { MainView::Page::fx, 1 }, { MainView::Page::presets, 2 }, { MainView::Page::settings, 3 } };
     for (const auto& [page, tab] : pages)
     {
         INFO (tab);
         w.view->showPage (page);
-        CHECK_FALSE (w.view->getDrumPage().isVisible());
+        CHECK_FALSE (w.view->getInstrumentPage().isVisible());
         CHECK (keyboard->isVisible());
         CHECK (tabs[(size_t) tab]->getToggleState());
         checkLayout (*w.view, "page");
     }
     CHECK (w.view->getFxPage().isVisible() == false);   // SETTINGS shown last
-    CHECK (w.view->getGroovesPage().isVisible() == false);
-    tabs[0]->onClick();   // as clicking DRUMS does
-    CHECK (w.view->getDrumPage().isVisible());
+    tabs[0]->onClick();   // as clicking INSTRUMENT does
+    CHECK (w.view->getInstrumentPage().isVisible());
 }
 
-TEST_CASE ("SHOW / HIDE MIDI TRACK (0.61.0): the window opens without the track, shorter; the button and the song's tools bring it back", "[ui][track]")
+TEST_CASE ("SHOW / HIDE KEYBOARD: the window opens with the keyboard; hidden, it's shorter", "[ui]")
 {
     ParagonX1AudioProcessor processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     auto* view = dynamic_cast<MainView*> (editor->getChildComponent (0));
     REQUIRE (view != nullptr);
-
-    // Opens hidden: the view 752 tall, the window that shape (wider than 16:9).
-    CHECK_FALSE (view->isTrackShown());
-    CHECK_FALSE (view->getSongTrack().isVisible());
-    CHECK (view->getHeight() == MainView::heightFor (false));
-    CHECK (MainView::heightFor (false) == 752);
+    CHECK (view->isKeyboardShown());
+    CHECK (view->getHeight() == MainView::height);
     const auto width = editor->getWidth();
-    CHECK (editor->getHeight() == width * 752 / MainView::width);
-    checkLayout (*view, "hidden");
+    CHECK (std::abs (editor->getHeight() - width * 900 / MainView::width) <= 1);
 
-    // The button at the OUTPUT strip's foot says what it will do.
     juce::TextButton* button = nullptr;
     std::vector<juce::TextButton*> buttons;
     findAll (*view, buttons);
     for (auto* b : buttons)
-        if (b->getButtonText() == "SHOW\nMIDI TRACK")
+        if (b->getButtonText() == "HIDE\nKEYBOARD")
             button = b;
     REQUIRE (button != nullptr);
     CHECK (button->isVisible());
-    CHECK (button->getBottom() <= view->getHeight());
     CHECK (button->getX() > 1480);
 
-    // Shown: the track, the full 900, the window taller at the same width.
     button->onClick();
-    CHECK (view->isTrackShown());
-    CHECK (view->getSongTrack().isVisible());
-    CHECK (button->getButtonText() == "HIDE\nMIDI TRACK");
-    CHECK (view->getHeight() == MainView::height);
-    CHECK (editor->getWidth() == width);
-    CHECK (std::abs (editor->getHeight() - width * 900 / MainView::width) <= 1);
-    CHECK (view->getSongTrack().getBottom() <= view->getHeight());
-    checkLayout (*view, "shown");
-
-    // Hidden again: back to the shorter window, same width.
-    button->onClick();
-    CHECK_FALSE (view->getSongTrack().isVisible());
-    CHECK (std::abs (editor->getHeight() - width * 752 / MainView::width) <= 1);
-
-    // A width the person dragged to is kept through it.
-    editor->setSize (1280, 1280 * 752 / 1600);
-    view->setTrackShown (true);
-    CHECK (editor->getWidth() == 1280);
-    CHECK (editor->getHeight() == 720);
-    view->setTrackShown (false);
-
-    // The song's tools bring it back (ADD TO SONG, EDIT PLAY STYLE, the GRID EDITOR, the SONG CREATOR call showSong).
-    view->showSong (true);
-    CHECK (view->isTrackShown());
-    view->setTrackShown (false);
-
-    // THE DRUM MACHINE keeps the full height (it covers everything under the header) and hides the button.
-    view->getDrumPage().showView (DrumPage::View::machine);
-    CHECK (view->getHeight() == MainView::height);
-    CHECK_FALSE (button->isVisible());
-    CHECK_FALSE (view->getSongTrack().isVisible());
-    view->getDrumPage().showView (DrumPage::View::kit);
+    CHECK_FALSE (view->isKeyboardShown());
+    CHECK_FALSE (view->getKeyboard().isVisible());
+    CHECK (button->getButtonText() == "SHOW\nKEYBOARD");
     CHECK (view->getHeight() == MainView::heightFor (false));
-    CHECK (button->isVisible());
+    CHECK (MainView::heightFor (false) == 752);
+    CHECK (editor->getWidth() == width);
+    CHECK (std::abs (editor->getHeight() - width * 752 / MainView::width) <= 1);
+    checkLayout (*view, "hidden");
+    CHECK (button->getBottom() <= view->getHeight());
 
-    // Each window opens with it hidden again (not saved).
-    view->setTrackShown (true);
-    editor.reset();
-    editor.reset (processor.createEditor());
-    view = dynamic_cast<MainView*> (editor->getChildComponent (0));
-    CHECK_FALSE (view->isTrackShown());
+    button->onClick();
+    CHECK (view->getKeyboard().isVisible());
+    CHECK (view->getHeight() == MainView::height);
+    checkLayout (*view, "shown");
 }
 
-TEST_CASE ("Notes play the kit (the processor's keyboard state, as the DAW's notes); others don't", "[ui]")
+TEST_CASE ("Notes from the keyboard play the instrument; its keys are where it plays", "[ui]")
 {
     Window w;
     w.processor.setPlayConfigDetails (0, 2, 48000.0, 256);
@@ -246,21 +207,127 @@ TEST_CASE ("Notes play the kit (the processor's keyboard state, as the DAW's not
     juce::AudioBuffer<float> buffer (2, 256);
     juce::MidiBuffer midi;
     w.processor.processBlock (buffer, midi);
-    CHECK (buffer.getMagnitude (0, 256) == 0.0f);   // silence until a key goes down
+    CHECK (buffer.getMagnitude (0, 256) == 0.0f);   // silence: no instrument, no key
 
-    w.processor.getKeyboardState().noteOn (1, 38, 0.9f);   // the snare, as clicking its key does
+    // An instrument on 48 to 72 only.
+    auto program = sampler::programFrom (testkit::sine (220.0), 60);
+    program->regions[0].loKey = 48;
+    program->regions[0].hiKey = 72;
+    program->index();
+    w.processor.setProgram (std::move (program));
+    CHECK (w.processor.getProgram()->plays (60));
+    CHECK_FALSE (w.processor.getProgram()->plays (80));
+
+    w.processor.getKeyboardState().noteOn (1, 62, 0.9f);   // as clicking the key does
     for (int block = 0; block < 4; ++block)
         w.processor.processBlock (buffer, midi);
     CHECK (buffer.getMagnitude (0, 256) > 0.05f);
-    CHECK (w.processor.getActiveVoices() >= 1);
-    w.processor.getKeyboardState().noteOff (1, 38, 0.0f);
+    CHECK (w.processor.getSampler().getActiveVoices() == 1);
+    CHECK (w.processor.getSampler().isKeyHeld (62));
+    w.processor.getKeyboardState().noteOff (1, 62, 0.0f);
+    for (int block = 0; block < 40; ++block)
+        w.processor.processBlock (buffer, midi);
+    CHECK (w.processor.getSampler().getActiveVoices() == 0);   // released
 
-    w.processor.getKeyboardState().noteOn (1, 72, 0.9f);   // outside the kit: nothing new
-    for (int block = 0; block < 200; ++block)
+    w.processor.getKeyboardState().noteOn (1, 80, 0.9f);   // outside its keys: nothing
+    for (int block = 0; block < 10; ++block)
         w.processor.processBlock (buffer, midi);
     CHECK (buffer.getMagnitude (0, 256) == 0.0f);
-    CHECK (w.processor.getActiveVoices() == 0);
-    w.processor.getKeyboardState().noteOff (1, 72, 0.0f);
+    CHECK (w.processor.getSampler().getActiveVoices() == 0);
+}
 
-    // (0.41.0: the on-screen keyboard and its tinted keys are gone; the kit still plays from notes, as above.)
+TEST_CASE ("THE INSTRUMENT page: empty, then what an instrument holds; LOAD and CLEAR", "[ui]")
+{
+    Window w;
+    auto& page = w.view->getInstrumentPage();
+    CHECK (page.getInfoText().contains ("SFZ"));
+    CHECK_FALSE (page.getClearButton().isEnabled());
+
+    auto program = std::make_shared<sampler::Program>();
+    program->name = "Violins";
+    for (int layer = 0; layer < 3; ++layer)
+        for (int rr = 1; rr <= 2; ++rr)
+        {
+            sampler::Region r;
+            r.sample = testkit::sine (220.0, 0.2);
+            r.loKey = 55;
+            r.hiKey = 96;
+            r.loVel = 1 + layer * 43;
+            r.hiVel = layer == 2 ? 127 : 43 + layer * 43;
+            r.seqLength = 2;
+            r.seqPosition = rr;
+            program->regions.push_back (r);
+        }
+    program->unread.add ("loop_mode=loop_continuous (6)");
+    program->numFiles = 6;
+    program->index();
+    w.processor.setProgram (program, "/libraries/violins.sfz");
+    page.refresh();
+    const auto info = page.getInfoText();
+    INFO (info);
+    CHECK (info.contains ("REGIONS   6"));
+    CHECK (info.contains ("3 velocity layers, 2 round robins"));
+    CHECK (info.contains ("loop_mode=loop_continuous"));
+    CHECK (page.getClearButton().isEnabled());
+    page.getClearButton().onClick();
+    CHECK (w.processor.getProgram() == nullptr);
+    CHECK (w.processor.getInstrumentFile().isEmpty());
+    CHECK (InstrumentPage::isInstrumentFile (juce::File ("/x/strings.sfz")));
+    CHECK (InstrumentPage::isInstrumentFile (juce::File ("/x/cello.WAV")));
+    CHECK_FALSE (InstrumentPage::isInstrumentFile (juce::File ("/x/notes.txt")));
+}
+
+namespace
+{
+    bool inFamily (juce::Colour c)
+    {
+        // Greys, near black and near white (onyx, pearl) or a hue from pink (318) through red to orange (42).
+        const auto hue = c.getHue() * 360.0f;
+        return c.getSaturation() < 0.25f || c.getBrightness() < 0.15f || (c.getSaturation() < 0.12f && c.getBrightness() > 0.85f)
+            || hue >= 318.0f || hue <= 42.0f;
+    }
+}
+
+TEST_CASE ("COLOURS: the look-and-feel's, the keyboard's, the region map's and every pixel of the INSTRUMENT page are the family's", "[colours][ui]")
+{
+    ParagonLookAndFeel look;
+    for (const int id : { (int) juce::Slider::thumbColourId, (int) juce::Slider::trackColourId, (int) juce::Slider::rotarySliderFillColourId,
+                           (int) juce::ToggleButton::tickColourId, (int) juce::TextEditor::highlightColourId, (int) juce::ScrollBar::thumbColourId,
+                           (int) juce::ComboBox::arrowColourId, (int) juce::ListBox::backgroundColourId, (int) juce::TreeView::selectedItemBackgroundColourId })
+    {
+        INFO ("colour id " << juce::String::toHexString (id));
+        CHECK (inFamily (look.findColour (id)));
+    }
+    for (const auto c : { ParagonColours::comp, ParagonColours::modulation, ParagonColours::delay, ParagonColours::reverb,
+                          ParagonColours::filterPitch, ParagonColours::glitch, ParagonColours::pitch, ParagonColours::loFi })
+        CHECK (inFamily (c));
+    for (int v = 1; v <= 127; ++v)   // the region map's boxes, by velocity
+        CHECK (inFamily (ParagonColours::velocityColour ((float) v / 127.0f)));
+
+    // The page with an instrument and a chord sounding, drawn: no pixel outside the family.
+    Window w;
+    w.processor.setPlayConfigDetails (0, 2, 48000.0, 256);
+    w.processor.prepareToPlay (48000.0, 256);
+    auto program = sampler::programFrom (testkit::sine (220.0), 60);
+    program->regions[0].loKey = 40;
+    program->regions[0].hiKey = 80;
+    program->index();
+    w.processor.setProgram (std::move (program), "/libraries/a.sfz");
+    w.view->getInstrumentPage().refresh();
+    for (const auto note : { 48, 55, 64 })
+        w.processor.getKeyboardState().noteOn (1, note, 0.8f);
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    for (int block = 0; block < 10; ++block)
+        w.processor.processBlock (buffer, midi);
+    juce::Thread::sleep (300);
+    juce::Timer::callPendingTimersSynchronously();
+    const auto image = w.editor->createComponentSnapshot (w.editor->getLocalBounds());
+    auto outside = 0;
+    for (int y = 0; y < image.getHeight(); y += 2)
+        for (int x = 0; x < image.getWidth(); x += 2)
+            if (! inFamily (image.getPixelAt (x, y)))
+                ++outside;
+    INFO (outside << " pixels outside the family's colours");
+    CHECK (outside == 0);
 }

@@ -214,11 +214,9 @@ SendPage::SendPage (ParagonX1AudioProcessor& p, Kind k) : kind (k)
         make (controls, reverbMix, "MIX", "How loud the reverb comes back into the mix (the return's level).");
         make (controls, reverbDuck, "DUCK", "Tucks the reverb under what you play; it swells back in the gaps.");
     }
-    for (int i = 0; i < synth::drums::numSlots; ++i)
-        make (sends, drum (i, kind == Kind::delay ? "SendDelay" : "SendReverb"), synth::drums::slotDefaults[(size_t) i].key,
-              "How much of drum " + juce::String (i + 1) + " (" + synth::drums::slotDefaults[(size_t) i].key + ") goes to the "
-                  + (kind == Kind::delay ? "DELAY" : "REVERB") + " (also on the DRUMS page): 0 keeps it dry. A drum on an insert "
-                  "bus sends through the bus instead.");
+    make (sends, kind == Kind::delay ? instSendDelay : instSendReverb, "INSTRUMENT",
+          juce::String ("How much of the instrument goes to the ") + (kind == Kind::delay ? "DELAY" : "REVERB")
+              + " (also on the INSTRUMENT page): 0 keeps it dry. On an insert bus it sends through the bus instead.");
     for (auto* list : { &top, &controls, &sends })
         for (auto& c : *list)
             addAndMakeVisible (*c);
@@ -285,34 +283,24 @@ void SendPage::resized()
     for (auto& c : sends)
         sendList.push_back (c.get());
     SynthPanel::layoutRow (controlRow, row, 110);
-    SynthPanel::layoutRow (sendRow, sendList);   // the drums share the row (20 since 0.2.0)
+    SynthPanel::layoutRow (sendRow, sendList, 110);
 }
 
 //==============================================================================
 SendMatrix::SendMatrix (ParagonX1AudioProcessor& p)
 {
     auto& state = p.getParameters();
-    for (int which = 0; which < synth::numSends; ++which)
-        for (int i = 0; i < synth::drums::numSlots; ++i)
-        {
-            knobs.push_back (std::make_unique<ParamControl> (state, ParamIDs::drum (i, which == 0 ? "SendDelay" : "SendReverb"),
-                                                             synth::drums::slotDefaults[(size_t) i].key,
-                                                             "How much of drum " + juce::String (i + 1) + " (" + synth::drums::slotDefaults[(size_t) i].key
-                                                                 + ") goes to the " + (which == 0 ? "DELAY" : "REVERB") + " (0: it stays dry)"));
-            addAndMakeVisible (*knobs.back());
-        }
+    for (int which = 0; which < fx::numSends; ++which)
+    {
+        knobs.push_back (std::make_unique<ParamControl> (state, which == 0 ? ParamIDs::instSendDelay : ParamIDs::instSendReverb,
+                                                         which == 0 ? "TO DELAY" : "TO REVERB",
+                                                         juce::String ("How much of the instrument goes to the ") + (which == 0 ? "DELAY" : "REVERB")
+                                                             + " (0: it stays dry). On an insert bus, the bus's own sends are used instead."));
+        addAndMakeVisible (*knobs.back());
+    }
     delayToReverb = std::make_unique<ParamControl> (state, ParamIDs::delayToReverb, "DELAY > REVERB",
                                                     "How much of the DELAY's echoes go on into the REVERB");
     addAndMakeVisible (*delayToReverb);
-    for (int which = 0; which < synth::numSends; ++which)
-    {
-        outputs[(size_t) which] = std::make_unique<ParamControl> (state, which == 0 ? ParamIDs::delayOutput : ParamIDs::reverbOutput,
-                                                                  which == 0 ? "DELAY OUT" : "REVERB OUT",
-                                                                  juce::String ("Which of the plugin's outputs the ") + (which == 0 ? "DELAY's echoes" : "REVERB's room")
-                                                                      + " play into: MAIN, or OUT 2 to 16, to mix on its own channel in your DAW "
-                                                                        "(switched on there; until then MAIN).");
-        addAndMakeVisible (*outputs[(size_t) which]);
-    }
 }
 
 void SendMatrix::paint (juce::Graphics& g)
@@ -320,35 +308,13 @@ void SendMatrix::paint (juce::Graphics& g)
     DockStyle::drawPanel (g, getLocalBounds().toFloat());
     g.setColour (ParagonColours::text);
     g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-    g.drawText ("SENDS", juce::Rectangle<int> (14, 6, 200, 20), juce::Justification::centredLeft, false);
-    g.setColour (ParagonColours::textDim);
-    const auto rowTitle = [&] (int row, const char* text)
-    {
-        g.drawText (text, juce::Rectangle<int> (14, knobs[(size_t) (row * synth::drums::numSlots)]->getY(), 90, ParamControl::knobHeight),
-                    juce::Justification::centredLeft, false);
-    };
-    rowTitle (0, "TO DELAY");
-    rowTitle (1, "TO REVERB");
+    g.drawText ("THE INSTRUMENT'S SENDS", juce::Rectangle<int> (14, 6, 300, 20), juce::Justification::centredLeft, false);
 }
 
 void SendMatrix::resized()
 {
     auto area = getLocalBounds().reduced (14, 6);
     area.removeFromTop (20);
-    // At the right: DELAY > REVERB, and each return's OUTPUT at the end of its row.
-    auto right = area.removeFromRight (240);
-    delayToReverb->setBounds (right.removeFromLeft (120).withSizeKeepingCentre (120, ParamControl::knobHeight));
-    area.removeFromLeft (100);
-    const auto h = ParamControl::knobHeight;
-    const auto gap = juce::jmax (0, (area.getHeight() - 2 * h) / 3);
-    for (int which = 0; which < synth::numSends; ++which)
-    {
-        area.removeFromTop (gap);
-        right.removeFromTop (gap);
-        std::vector<juce::Component*> row;
-        for (int i = 0; i < synth::drums::numSlots; ++i)
-            row.push_back (knobs[(size_t) (which * synth::drums::numSlots + i)].get());
-        SynthPanel::layoutRow (area.removeFromTop (h), row);
-        outputs[(size_t) which]->setBounds (right.removeFromTop (h).reduced (6, 0));
-    }
+    SynthPanel::layoutRow (area.withSizeKeepingCentre (area.getWidth(), ParamControl::knobHeight),
+                           { knobs[0].get(), knobs[1].get(), delayToReverb.get() }, 130, 40);
 }

@@ -7,7 +7,7 @@
 #include "ui/ParagonLookAndFeel.h"
 
 // The plugin window. All the content lives in MainView, laid out on a fixed
-// 1600-wide canvas (900 tall with the MIDI track, 752 without); the editor
+// 1600-wide canvas (900 tall with the keyboard, 752 without); the editor
 // just scales it to whatever size the window is, keeping the view's shape.
 class ParagonX1AudioProcessorEditor final : public juce::AudioProcessorEditor
 {
@@ -34,7 +34,7 @@ private:
     juce::TooltipWindow tooltips { this };
 
     void fitShape();     // resize limits and aspect ratio for the view's current height
-    void fitToView();    // after SHOW / HIDE MIDI TRACK: the new shape, then the new size
+    void fitToView();    // after SHOW / HIDE KEYBOARD: the new shape, then the new size
     int chosenWidth = defaultWidth;   // the width the person chose (or opened at)
     bool fittingToView = false;
 

@@ -71,8 +71,8 @@ TEST_CASE ("Undo history steps back and forward and forgets redo after a new edi
 
 namespace
 {
-    const juce::String someTime = ParamIDs::drum (2, "Delay");   // ms, 0 by default
-    const juce::String someFine = ParamIDs::drum (2, "Pitch");   // semitones, 0 by default
+    const juce::String someTime = ParamIDs::instTune;        // cents, 0 by default
+    const juce::String someFine = ParamIDs::instTranspose;   // semitones, 0 by default
 }
 
 TEST_CASE ("Undo and redo take back whole knob moves", "[undo]")
@@ -114,25 +114,25 @@ TEST_CASE ("Undoing a preset change brings back the previous sound", "[undo][rig
 {
     TestRig rig;
     rig.turn (someFine, 5.0f);
+    CHECK (rig.processor.isRigModified());
 
-    const auto* kit = rig.processor.getRigLibrary().findFactory ("Room Kit");
-    REQUIRE (kit != nullptr);
-    rig.processor.loadRig (*kit);
+    const auto* init = rig.processor.getRigLibrary().findFactory ("Init");
+    REQUIRE (init != nullptr);
+    rig.processor.loadRig (*init);
     rig.processor.flushUndoStep();
-    CHECK (rig.processor.getCurrentRig().name == "Room Kit");
+    CHECK_THAT (rig.value (someFine), WithinAbs (0.0, 1.0e-4));
     CHECK_FALSE (rig.processor.isRigModified());
 
     rig.processor.undo();
-    CHECK (rig.processor.getCurrentRig().name == "Init");
     CHECK_THAT (rig.value (someFine), WithinAbs (5.0, 1.0e-4));
     CHECK (rig.processor.isRigModified());   // it was edited before the preset change
 
     rig.processor.redo();
-    CHECK (rig.processor.getCurrentRig().name == "Room Kit");
+    CHECK_THAT (rig.value (someFine), WithinAbs (0.0, 1.0e-4));
     CHECK_FALSE (rig.processor.isRigModified());
 }
 
-TEST_CASE ("A new PR7-D starts on the Init preset", "[undo][rigs]")
+TEST_CASE ("A new PR7-O starts on the Init preset", "[undo][rigs]")
 {
     ParagonX1AudioProcessor processor;
     CHECK (processor.getCurrentRig().name == "Init");

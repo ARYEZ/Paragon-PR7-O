@@ -401,6 +401,27 @@ namespace Icons
                 break;
             }
 
+            case Type::orchestra:
+            {
+                // A violin from the front: its scroll, the neck and strings down the body, the body's two bouts and
+                // waist, and its two f-holes.
+                p.addEllipse (0.455f, 0.0f, 0.09f, 0.09f);
+                p.startNewSubPath (0.5f, 0.09f);
+                p.lineTo (0.5f, 0.78f);
+                p.startNewSubPath (0.5f, 0.3f);
+                p.cubicTo (0.36f, 0.28f, 0.3f, 0.36f, 0.33f, 0.46f);
+                p.cubicTo (0.36f, 0.52f, 0.36f, 0.56f, 0.31f, 0.62f);
+                p.cubicTo (0.24f, 0.8f, 0.36f, 0.97f, 0.5f, 0.97f);
+                p.cubicTo (0.64f, 0.97f, 0.76f, 0.8f, 0.69f, 0.62f);
+                p.cubicTo (0.64f, 0.56f, 0.64f, 0.52f, 0.67f, 0.46f);
+                p.cubicTo (0.7f, 0.36f, 0.64f, 0.28f, 0.5f, 0.3f);
+                p.startNewSubPath (0.41f, 0.58f);
+                p.quadraticTo (0.39f, 0.66f, 0.42f, 0.74f);
+                p.startNewSubPath (0.59f, 0.58f);
+                p.quadraticTo (0.61f, 0.66f, 0.58f, 0.74f);
+                break;
+            }
+
             case Type::grooves:
             {
                 // A MIDI clip: its frame, and four notes in a rhythm across it.

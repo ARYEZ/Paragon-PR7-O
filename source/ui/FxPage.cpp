@@ -98,10 +98,10 @@ FxPage::FxPage (ParagonX1AudioProcessor& processor)
         tab->setColour (juce::TextButton::textColourOnId, ParagonColours::accent);
         addAndMakeVisible (*tab);
     }
-    sendsTab.setTooltip ("The SENDS: DELAY and REVERB, fed by each drum's send; they come back in before the MASTER rack");
+    sendsTab.setTooltip ("The SENDS: DELAY and REVERB, fed by the instrument's sends; they come back in before the MASTER rack");
     masterTab.setTooltip ("The MASTER rack: ECHELON, DOMINION, CONSTRICTOR and the LIMITER, on everything");
     modFxTab.setTooltip ("MOD, MOD 2 and LO-FI: PR7-G's modulation (twice) and lo-fi, on everything, the echoes and reverb too, before the MASTER rack");
-    insertsTab.setTooltip ("The INSERTS: buses A to D, each a DRIVE, GLITCH, MOD and LO-FI on the drums routed to it, before the sends");
+    insertsTab.setTooltip ("The INSERTS: buses A to D, each a DRIVE, GLITCH, MOD and LO-FI the instrument can play through, before the sends");
     insertsTab.onClick = [this] { show (View::inserts); };
     sendsTab.onClick = [this] { show (View::sends); };
     modFxTab.onClick = [this] { show (View::modFx); };
@@ -211,12 +211,13 @@ void FxPage::resized()
         modFxUnits[i]->setBounds (juce::Rectangle<float> ((float) rackArea.getCentreX() - width * 0.5f, (float) rackArea.getY() + (float) i * (height + gap),
                                                           width, height).toNearestInt());
 
-    // SENDS: the two units at the master units' size, the matrix under them.
+    // SENDS: the two units at the master units' size, the instrument's sends under them (a strip as tall as its knobs).
     auto sendsArea = rackArea;
     for (size_t i = 0; i < sendUnits.size(); ++i)
     {
         sendUnits[i]->setBounds (juce::Rectangle<float> ((float) sendsArea.getCentreX() - width * 0.5f, (float) sendsArea.getY(), width, height).toNearestInt());
         sendsArea.removeFromTop (juce::roundToInt (height) + gap);
     }
-    matrix.setBounds (sendsArea.withSizeKeepingCentre (juce::roundToInt (width), sendsArea.getHeight()));
+    matrix.setBounds (sendsArea.withSizeKeepingCentre (juce::roundToInt (width), sendsArea.getHeight())
+                              .withHeight (juce::jmin (sendsArea.getHeight(), ParamControl::knobHeight + 40)));
 }

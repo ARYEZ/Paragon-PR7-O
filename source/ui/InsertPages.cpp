@@ -410,44 +410,36 @@ InsertBusStrip::InsertBusStrip (ParagonX1AudioProcessor& p) : processor (p)
         button.setColour (juce::TextButton::buttonOnColourId, ParagonColours::accentDim.withAlpha (0.6f));
         button.setColour (juce::TextButton::textColourOffId, ParagonColours::textDim);
         button.setColour (juce::TextButton::textColourOnId, ParagonColours::accent);
-        button.setTooltip ("Insert bus " + ParamIDs::insertBusNames[b + 1] + ": its DRIVE, GLITCH, MOD and LO-FI, on the drums routed to it");
+        button.setTooltip ("Insert bus " + ParamIDs::insertBusNames[b + 1] + ": its DRIVE, GLITCH, MOD and LO-FI, on the instrument when it's routed to it");
         button.onClick = [this, b] { setBus (b); };
         addAndMakeVisible (button);
     }
-    for (int i = 0; i < ParamIDs::numDrums; ++i)
+    routeButton.setButtonText ("THE INSTRUMENT");
+    routeButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff0d0a0e));
+    routeButton.setColour (juce::TextButton::buttonOnColourId, ParagonColours::accentDim.withAlpha (0.6f));
+    routeButton.setColour (juce::TextButton::textColourOffId, ParagonColours::textDim);
+    routeButton.setColour (juce::TextButton::textColourOnId, ParagonColours::accent);
+    routeButton.setTooltip ("The instrument into this bus (lit), or click to route it here; click again for NONE (also INSERT BUS on the "
+                            "INSTRUMENT page)");
+    routeButton.onClick = [this]
     {
-        auto& button = drumButtons[(size_t) i];
-        button.setButtonText (synth::drums::slotDefaults[(size_t) i].key);
-        button.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff0d0a0e));
-        button.setColour (juce::TextButton::buttonOnColourId, ParagonColours::accentDim.withAlpha (0.6f));
-        button.setColour (juce::TextButton::textColourOffId, ParagonColours::textDim);
-        button.setColour (juce::TextButton::textColourOnId, ParagonColours::accent);
-        button.setTooltip ("Drum " + juce::String (i + 1) + " (" + synth::drums::slotDefaults[(size_t) i].key + ") into this bus (lit), "
-                           "or click to route it here; click again for NONE (also its INSERT on the DRUMS page)");
-        button.onClick = [this, i]
-        {
-            auto* parameter = processor.getParameters().getParameter (ParamIDs::drum (i, "Insert"));
-            const auto here = juce::roundToInt (parameter->convertFrom0to1 (parameter->getValue())) == bus + 1;
-            parameter->beginChangeGesture();
-            parameter->setValueNotifyingHost (parameter->convertTo0to1 (here ? 0.0f : (float) (bus + 1)));
-            parameter->endChangeGesture();
-            timerCallback();
-        };
-        addAndMakeVisible (button);
-    }
+        auto* parameter = processor.getParameters().getParameter (ParamIDs::instInsert);
+        const auto here = juce::roundToInt (parameter->convertFrom0to1 (parameter->getValue())) == bus + 1;
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost (parameter->convertTo0to1 (here ? 0.0f : (float) (bus + 1)));
+        parameter->endChangeGesture();
+        timerCallback();
+    };
+    addAndMakeVisible (routeButton);
     const char* names[] = { "SendDelay", "SendReverb" };
     const char* labels[] = { "TO DELAY", "TO REVERB" };
     for (int s = 0; s < 2; ++s)
     {
         sends[(size_t) s] = std::make_unique<ParamControl> (p.getParameters(), ParamIDs::ins (0, names[s]), labels[s],
                                                             juce::String ("How much of this bus goes to the ") + (s == 0 ? "DELAY" : "REVERB")
-                                                                + ", after its effects (its drums' own sends aren't used)");
+                                                                + ", after its effects (the instrument's own sends aren't used)");
         addAndMakeVisible (*sends[(size_t) s]);
     }
-    output = std::make_unique<ParamControl> (p.getParameters(), ParamIDs::ins (0, "Output"), "OUTPUT",
-                                             "Which of the plugin's outputs this bus plays into, after its effects: MAIN, or OUT 2 to 16 "
-                                             "(switched on in your DAW; until then MAIN). Its drums' own OUTPUT isn't used.");
-    addAndMakeVisible (*output);
     busButtons[0].setToggleState (true, juce::dontSendNotification);
     timerCallback();
     startTimerHz (10);
@@ -459,7 +451,6 @@ void InsertBusStrip::setBus (int b)
     busButtons[(size_t) bus].setToggleState (true, juce::dontSendNotification);
     sends[0]->attach (ParamIDs::ins (bus, "SendDelay"));
     sends[1]->attach (ParamIDs::ins (bus, "SendReverb"));
-    output->attach (ParamIDs::ins (bus, "Output"));
     timerCallback();
     if (onBusChanged)
         onBusChanged (bus);
@@ -469,11 +460,8 @@ void InsertBusStrip::timerCallback()
 {
     if (! isShowing())   // 0.30.0: a hidden page's timer does nothing
         return;
-    for (int i = 0; i < ParamIDs::numDrums; ++i)
-    {
-        const auto routed = juce::roundToInt (processor.getParameters().getRawParameterValue (ParamIDs::drum (i, "Insert"))->load()) == bus + 1;
-        drumButtons[(size_t) i].setToggleState (routed, juce::dontSendNotification);
-    }
+    const auto routed = juce::roundToInt (processor.getParameters().getRawParameterValue (ParamIDs::instInsert)->load()) == bus + 1;
+    routeButton.setToggleState (routed, juce::dontSendNotification);
 }
 
 void InsertBusStrip::paint (juce::Graphics& g)
@@ -481,7 +469,7 @@ void InsertBusStrip::paint (juce::Graphics& g)
     DockStyle::drawPanel (g, getLocalBounds().toFloat());
     g.setColour (ParagonColours::textDim);
     g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
-    g.drawText ("DRUMS ON THIS BUS", drumButtons[0].getBounds().translated (0, -20).withHeight (14).withWidth (200), juce::Justification::centredLeft, false);
+    g.drawText ("PLAYING INTO THIS BUS", routeButton.getBounds().translated (0, -20).withHeight (14).withWidth (200), juce::Justification::centredLeft, false);
 }
 
 void InsertBusStrip::resized()
@@ -493,16 +481,9 @@ void InsertBusStrip::resized()
         area.removeFromLeft (4);
     }
     area.removeFromLeft (14);
-    auto right = area.removeFromRight (316);
+    auto right = area.removeFromRight (212);
     sends[0]->setBounds (right.removeFromLeft (100));
     right.removeFromLeft (6);
     sends[1]->setBounds (right.removeFromLeft (100));
-    right.removeFromLeft (6);
-    output->setBounds (right);
-    auto drums = area.withSizeKeepingCentre (area.getWidth(), 30).translated (0, 8);
-    for (auto& button : drumButtons)
-    {
-        button.setBounds (drums.removeFromLeft (40).withSizeKeepingCentre (39, 28));
-        drums.removeFromLeft (2);
-    }
+    routeButton.setBounds (area.withSizeKeepingCentre (area.getWidth(), 30).translated (0, 8).removeFromLeft (180).withSizeKeepingCentre (176, 28));
 }

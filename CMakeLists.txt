@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures")
 
-project(ParagonX1 VERSION 0.70.0 LANGUAGES C CXX)
+project(ParagonX1 VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,17 +20,17 @@ option(PARAGON_BUILD_TESTS "Build the unit tests" ON)
 include(cmake/Dependencies.cmake)
 
 juce_add_plugin(ParagonX1
-    PRODUCT_NAME             "Paragon PR7-D" # the drum instrument of the PR7 family: its own name, bundle ID and plugin code, so it installs beside the others
+    PRODUCT_NAME             "Paragon PR7-O" # the orchestra instrument of the PR7 family: its own name, bundle ID and plugin code, so it installs beside the others
     COMPANY_NAME             "Paragon"
-    BUNDLE_ID                "com.paragon.paragonpr7d"
+    BUNDLE_ID                "com.paragon.paragonpr7o"
     PLUGIN_MANUFACTURER_CODE Prgn     # four characters, at least one upper case
-    PLUGIN_CODE              Pr7d     # four characters, exactly one upper case; never PR7-G's Px1a, PR7-B's Pr7b, PR7-V's Pr7v, PR7-C's Pr7c, PR7-E's Pr7e or PR7-K's Pr7k
+    PLUGIN_CODE              Pr7o     # four characters, exactly one upper case; never PR7-G's Px1a, PR7-B's Pr7b, PR7-V's Pr7v, PR7-C's Pr7c, PR7-E's Pr7e, PR7-K's Pr7k or PR7-D's Pr7d
     FORMATS                  VST3
     IS_SYNTH                 TRUE     # an instrument: MIDI in, sound out
     NEEDS_MIDI_INPUT         TRUE
     NEEDS_MIDI_OUTPUT        FALSE
     IS_MIDI_EFFECT           FALSE
-    VST3_CATEGORIES          Instrument Drum
+    VST3_CATEGORIES          Instrument Sampler
     COPY_PLUGIN_AFTER_BUILD  FALSE)
 
 # Inter (SIL Open Font License, see resources/fonts/OFL-LICENSE.txt), built
@@ -43,53 +43,18 @@ juce_add_binary_data(ParagonX1Fonts
         resources/fonts/Inter-SemiBold.ttf
         resources/fonts/InterDisplay-BlackItalic.ttf)
 
-# THE KIT VIEW's pictures (0.14.0): our own 3D kit, rendered once (the kit, each piece glowing, a click map, where
-# each glow goes). See resources/kit/README.md.
-juce_add_binary_data(ParagonX1Kit
-    HEADER_NAME KitImages.h
-    NAMESPACE   KitImages
-    SOURCES
-        resources/kit/kit.jpg
-        resources/kit/kitzones.png
-        resources/kit/kitlayout.txt
-        resources/kit/litkick.png
-        resources/kit/litsnare.png
-        resources/kit/littom1.png
-        resources/kit/littom2.png
-        resources/kit/littom3.png
-        resources/kit/litfloor.png
-        resources/kit/lithihat.png
-        resources/kit/litcrash.png
-        resources/kit/litcrash2.png
-        resources/kit/litride.png
-        resources/kit/litchina.png
-        resources/kit/litsplash.png)
-
 target_sources(ParagonX1
     PRIVATE
         source/Parameters.cpp
         source/RackParameters.cpp
         source/PluginProcessor.cpp
-        source/MixerEffects.cpp
         source/PluginEditor.cpp
-        source/dsp/synth/Drums.cpp
-        source/dsp/synth/MicSim.cpp
-        source/dsp/synth/DrumGizmo.cpp
-        source/dsp/synth/SamplePack.cpp
-        source/dsp/synth/MixPack.cpp
-        source/dsp/synth/DiskStreamer.cpp
-        source/dsp/synth/Instrument.cpp
-        source/dsp/synth/RenderImport.cpp
-        source/grooves/Groove.cpp
-        source/grooves/GrooveLibrary.cpp
-        source/grooves/Rhythm.cpp
-        source/grooves/Riff.cpp
-        source/grooves/SqliteReader.cpp
-        source/grooves/GrooveDatabase.cpp
-        source/song/Song.cpp
-        source/song/PlayStyle.cpp
-        source/song/AmountModel.cpp
-        source/song/Creator.cpp
+        # THE INSTRUMENT (PR7-O 0.1.0): SFZ instruments played by our sampler.
+        source/dsp/sampler/Sample.cpp
+        source/dsp/sampler/Sfz.cpp
+        source/dsp/sampler/Sampler.cpp
+        source/dsp/sampler/DiskStreamer.cpp    # PR7-D's disk streaming, kept for the libraries (plan stage 3)
+        source/dsp/mixer/MixerEffects.cpp      # PR7-D's mixer effects, kept for the stage (plan stage 6)
         # The effects: PR7-E's rack (ECHELON, DOMINION, CONSTRICTOR, the LIMITER) and PR7-G's sends and inserts.
         source/dsp/dominion/Dominion.cpp
         source/dsp/effects/Compressor.cpp
@@ -128,25 +93,8 @@ target_sources(ParagonX1
         source/ui/DockPanels.cpp
         source/ui/SynthControls.cpp
         source/ui/SynthDisplays.cpp
-        source/ui/MultiPointEditor.cpp
-        source/ui/DrumPage.cpp
-        source/ui/LayerPanel.cpp
-        source/ui/KitView.cpp
-        source/ui/MachineView.cpp
-        source/ui/PedalBody.cpp
+        source/ui/InstrumentPage.cpp
         source/ui/ProgressBox.cpp
-        source/ui/ArticulationPanel.cpp
-        source/ui/VelocityCurveEditor.cpp
-        source/ui/MidiInPanel.cpp
-        source/ui/MixerPage.cpp
-        source/ui/GroovesPage.cpp
-        source/ui/TapPanel.cpp
-        source/ui/RiffPanel.cpp
-        source/ui/SongTrack.cpp
-        source/ui/BlockEditor.cpp
-        source/ui/PlayStylePanel.cpp
-        source/ui/SongCreator.cpp
-        source/ui/DrumSeqPage.cpp
         source/ui/FxPage.cpp
         source/ui/SendPages.cpp
         source/ui/ModFxPages.cpp
@@ -178,7 +126,6 @@ target_compile_definitions(ParagonX1
 target_link_libraries(ParagonX1
     PRIVATE
         ParagonX1Fonts
-        ParagonX1Kit
         juce::juce_audio_utils
         juce::juce_dsp
         juce::juce_recommended_warning_flags   # strict warnings for our code only

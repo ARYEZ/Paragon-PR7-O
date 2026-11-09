@@ -6,6 +6,7 @@
 #include "Parameters.h"
 #include "PluginProcessor.h"
 #include "rigs/FactoryRigs.h"
+#include "PluginTestUtils.h"
 
 using Catch::Matchers::WithinAbs;
 
@@ -23,9 +24,9 @@ namespace
 
     // Stand-ins for the tests below: a number in the preset (with a default),
     // another (that can go below zero), an on/off that's off by default.
-    const juce::String someTime = ParamIDs::drum (2, "Delay");    // ms, -1000 to 1000 (0 by default)
-    const juce::String someFine = ParamIDs::drum (2, "Pitch");    // semitones, -24 to 24 (0 by default)
-    const juce::String someSwitch = ParamIDs::drum (2, "Mono");   // off by default
+    const juce::String someTime = ParamIDs::instLevel;           // dB, -60 to 12 (0 by default)
+    const juce::String someFine = ParamIDs::instTranspose;       // semitones, -24 to 24 (0 by default)
+    const juce::String someSwitch = ParamIDs::delayPingPong;     // off by default
 
     struct RigRig   // a processor with its presets in a temporary folder
     {
@@ -66,7 +67,8 @@ TEST_CASE ("A rig survives being written to a file and read back", "[rigs]")
     rig.number = 17;
     rig.favourite = true;
     rig.tags = { "Rock", "High Gain" };
-    rig.parameters = { { "drum3LowPass", 650.0f }, { "drum1Pitch", -4.0f } };
+    rig.parameters = { { "instLevel", -6.5f }, { "instTranspose", -4.0f } };
+    rig.instrument = "/libraries/VSCO 2 CE/Strings/Violin Section.sfz";
 
     const auto restored = Rig::fromXml (*juce::XmlDocument::parse (rig.toXml()->toString()));
     REQUIRE (restored.has_value());
@@ -75,6 +77,7 @@ TEST_CASE ("A rig survives being written to a file and read back", "[rigs]")
     CHECK (restored->favourite);
     CHECK (restored->tags == rig.tags);
     CHECK (restored->parameters == rig.parameters);
+    CHECK (restored->instrument == rig.instrument);
 }
 
 TEST_CASE ("Files that aren't rigs, or are from a newer version, are refused", "[rigs]")
@@ -110,100 +113,43 @@ TEST_CASE ("Every factory rig is valid", "[rigs]")
     CHECK (slots.size() == (int) makeFactoryRigs().size());   // no two in the same slot
 }
 
-TEST_CASE ("PR7-D's factory presets: Init at A01, then kits and beats that say what they are; PR7-E's mixing rigs are gone", "[rigs]")
+TEST_CASE ("PR7-O's factory presets: Init at A01, no instrument, everything at its default; nothing of PR7-D's", "[rigs]")
 {
     const auto rigs = makeFactoryRigs();
-    REQUIRE (rigs.size() >= 5);
+    REQUIRE (rigs.size() == 1);
     CHECK (rigs.front().name == "Init");
     CHECK (rigs.front().getSlotName() == "A01");
-    CHECK (rigs.front().parameters.empty());   // everything at its default: the drum synths, dry, no beat
-    for (const auto& rig : rigs)
-        for (const auto& [id, value] : rig.parameters)
-        {
-            INFO (rig.name << ": " << id);
-            CHECK_FALSE (id.startsWith ("osc"));   // nothing of PR7-K's synth
-            CHECK_FALSE (id.startsWith ("flt"));
-        }
-
-    for (const auto& rig : rigs)
-    {
-        INFO (rig.name);
-        CHECK (rig.notes.isNotEmpty());
-        CHECK_FALSE (rig.tags.isEmpty());
-    }
+    CHECK (rigs.front().parameters.empty());
+    CHECK (rigs.front().instrument.isEmpty());
+    CHECK (rigs.front().notes.isNotEmpty());
 
     RigRig r;
-    for (const auto* mixingRig : { "Lead Vocal", "Kick Punch", "Mix Brighter", "Master Gentle Polish", "Modern Metal Vocal" })
-        CHECK (r.processor.getRigLibrary().findFactory (mixingRig) == nullptr);
+    for (const auto* drumRig : { "Room Kit", "Room Beat", "Djent Kit", "Crocell Metal", "Lead Vocal" })
+        CHECK (r.processor.getRigLibrary().findFactory (drumRig) == nullptr);
 }
 
-TEST_CASE ("Every factory preset plays: its drums sound, stay clean, and fade away; its beat plays with the song", "[rigs]")
+TEST_CASE ("A preset keeps its instrument: saving one, loading another and back loads it again; Init has none", "[rigs]")
 {
-    // A song playing at 120 BPM, for the presets whose sequencer is on.
-    struct Song final : juce::AudioPlayHead
-    {
-        juce::Optional<PositionInfo> getPosition() const override
-        {
-            PositionInfo info;
-            info.setBpm (120.0);
-            info.setIsPlaying (playing);
-            info.setPpqPosition (ppq);
-            return info;
-        }
-        bool playing = false;
-        double ppq = 0.0;
-    };
     RigRig r;
-    Song song;
-    r.processor.setPlayHead (&song);
-    for (const auto& rig : makeFactoryRigs())
-    {
-        INFO (rig.name);
-        r.processor.loadRig (r.entryNamed (rig.name));
-        r.processor.prepareToPlay (48000.0, 256);   // fresh
+    juce::File folder = r.temp.folder.getChildFile ("library");
+    folder.createDirectory();
+    testkit::writeWav (folder.getChildFile ("cello.wav"), *testkit::sine (220.0, 0.1), 16);
+    folder.getChildFile ("cello.sfz").replaceWithText ("<region> sample=cello.wav lokey=36 hikey=76 pitch_keycenter=48\n");
+    r.processor.loadInstrument (folder.getChildFile ("cello.sfz"));
+    REQUIRE (r.processor.waitForInstrument());
+    REQUIRE (r.processor.getProgram() != nullptr);
+    REQUIRE (r.processor.saveCurrentRigAs ("Cello"));
+    CHECK (r.entryNamed ("Cello").rig.instrument == folder.getChildFile ("cello.sfz").getFullPathName());
 
-        juce::AudioBuffer<float> buffer (2, 256);
-        float loudest = 0.0f;
-        auto finite = true;
-        const auto run = [&] (int blocks, bool hits)
-        {
-            for (int block = 0; block < blocks; ++block)
-            {
-                juce::MidiBuffer midi;   // every drum in turn, one every quarter of a second
-                if (hits && block % 47 == 0)
-                    midi.addEvent (juce::MidiMessage::noteOn (1, 36 + (block / 47) % 12, (juce::uint8) 110), 0);
-                r.processor.processBlock (buffer, midi);
-                if (song.playing)
-                    song.ppq += 256.0 / 48000.0 * 2.0;
-                loudest = juce::jmax (loudest, buffer.getMagnitude (0, 0, 256), buffer.getMagnitude (1, 0, 256));
-                for (int ch = 0; ch < 2; ++ch)
-                    for (int i = 0; i < 256; ++i)
-                        finite = finite && std::isfinite (buffer.getSample (ch, i));
-            }
-        };
-        run (48000 * 3 / 256, true);
-        CHECK (finite);
-        CHECK (juce::Decibels::gainToDecibels (loudest) > -24.0f);   // it sounds
-        CHECK (juce::Decibels::gainToDecibels (loudest) < 3.0f);     // and isn't wildly hot (OUTPUT at its -6 dB)
-        run (48000 * 8 / 256, false);
-        // Quiet 8 seconds after the last hit (the cymbal, hit last, rings longest). Its hit is still running, far
-        // below hearing: the kit ends a hit only once it's down to -240 dB (PR7-K's kit, kept as it is).
-        CHECK (buffer.getMagnitude (0, 0, 256) < 1.0e-3f);
+    r.processor.loadRig (*r.processor.getRigLibrary().findFactory ("Init"));
+    CHECK (r.processor.getProgram() == nullptr);
+    CHECK (r.processor.getInstrumentFile().isEmpty());
 
-        // With the song playing: a preset with the sequencer on plays its beat by itself; one without stays silent.
-        const auto beat = r.processor.getDrumSeqSettings().on;
-        song.playing = true;
-        song.ppq = 0.0;
-        loudest = 0.0f;
-        run (48000 * 2 / 256, false);
-        song.playing = false;
-        // 0.27.0: a preset whose drums are a downloaded kit's (Crocell Metal) has nothing to play until the kit's here.
-        const auto needsKit = std::any_of (rig.drumInstruments.begin(), rig.drumInstruments.end(),
-                                           [] (const auto& ref) { return ref.second.contains ("{kit:"); });
-        CHECK ((juce::Decibels::gainToDecibels (loudest) > -24.0f) == (beat && ! needsKit));
-        run (48000 * 8 / 256, false);
-    }
-    r.processor.setPlayHead (nullptr);
+    r.processor.loadRig (r.entryNamed ("Cello"));
+    REQUIRE (r.processor.waitForInstrument());
+    REQUIRE (r.processor.getProgram() != nullptr);
+    CHECK (r.processor.getProgram()->lowestKey() == 36);
+    CHECK_FALSE (r.processor.isRigModified());
 }
 
 TEST_CASE ("A rig's notes are saved with it and kept by Save As", "[rigs]")
@@ -215,13 +161,26 @@ TEST_CASE ("A rig's notes are saved with it and kept by Save As", "[rigs]")
     REQUIRE (loaded.has_value());
     CHECK (loaded->notes == rig.notes);
 
-    // Saving a copy of a factory rig keeps its notes.
+    // A sound made from Init starts with no notes or tags of Init's (it isn't "a blank page")...
     RigRig r;
     r.processor.loadRig (r.entryNamed ("Init"));
-    REQUIRE (r.processor.saveCurrentRigAs ("My Init"));
+    REQUIRE (r.processor.saveCurrentRigAs ("My Strings"));
     const auto* saved = r.processor.getRigLibrary().find (r.processor.getCurrentRig().file);
     REQUIRE (saved != nullptr);
-    CHECK (saved->rig.notes == r.entryNamed ("Init").rig.notes);
+    CHECK (saved->rig.notes.isEmpty());
+    CHECK (saved->rig.tags.isEmpty());
+
+    // ...and a copy of one of yours keeps its notes and tags.
+    auto details = saved->rig;
+    details.tags = { "Strings" };
+    REQUIRE (r.processor.updateRigDetails (*saved, details));
+    auto noted = r.entryNamed ("My Strings").rig;
+    noted.notes = "Long notes for the chorus.";
+    REQUIRE (r.processor.getRigLibrary().overwrite (r.entryNamed ("My Strings").file, noted));
+    r.processor.loadRig (r.entryNamed ("My Strings"));
+    REQUIRE (r.processor.saveCurrentRigAs ("My Strings 2"));
+    CHECK (r.entryNamed ("My Strings 2").rig.notes == "Long notes for the chorus.");
+    CHECK (r.entryNamed ("My Strings 2").rig.tags == juce::StringArray { "Strings" });
 }
 
 TEST_CASE ("The rig library saves, finds, renames and deletes rigs", "[rigs]")
@@ -309,7 +268,7 @@ TEST_CASE ("Rigs are sorted by bank and number, and < > wrap round", "[rigs]")
     CHECK (library.step (&entries.front(), -1) == &entries.back());
     CHECK (library.step (nullptr, 1) == &entries.front());
 
-    CHECK (library.nextFreeNumber (0) == 8);   // the factory presets fill A01 to A07 (0.27.0: A07 Crocell Metal)
+    CHECK (library.nextFreeNumber (0) == 2);   // the factory presets fill A01 (Init)
 }
 
 TEST_CASE ("Saving and loading a preset restores the sound but not the global settings", "[rigs]")
@@ -399,10 +358,10 @@ TEST_CASE ("< and > step through the presets in order", "[rigs]")
 {
     RigRig r;
     r.processor.loadRig (r.entryNamed ("Init"));
-    REQUIRE (r.processor.saveCurrentRigAs ("Second"));   // filed after bank A's factory presets, at A08
-    REQUIRE (r.processor.saveCurrentRigAs ("Third"));    // A09
-    CHECK (r.entryNamed ("Second").rig.getSlotName() == "A08");
-    r.processor.loadRig (r.entryNamed ("Crocell Metal"));   // A07, the last factory one
+    REQUIRE (r.processor.saveCurrentRigAs ("Second"));   // filed after bank A's factory presets, at A02
+    REQUIRE (r.processor.saveCurrentRigAs ("Third"));    // A03
+    CHECK (r.entryNamed ("Second").rig.getSlotName() == "A02");
+    r.processor.loadRig (r.entryNamed ("Init"));   // A01, the only factory one
     r.processor.stepRig (1);
     CHECK (r.processor.getCurrentRig().name == "Second");
     r.processor.stepRig (1);
@@ -451,10 +410,11 @@ TEST_CASE ("Each preset's LEVEL adds to OUTPUT", "[rigs]")
     const auto play = [] (float levelDb)
     {
         RigRig r;
+        testkit::useSample (r.processor, testkit::sine (220.0));
         r.set (ParamIDs::patchLevel, levelDb);
         juce::AudioBuffer<float> buffer (2, 256);
         juce::MidiBuffer midi;
-        midi.addEvent (juce::MidiMessage::noteOn (1, 45, (juce::uint8) 127), 0);   // the high tom (no noise: the same both times)
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0);
         double sum = 0.0;
         for (int block = 0; block < 40; ++block)
         {
@@ -468,11 +428,11 @@ TEST_CASE ("Each preset's LEVEL adds to OUTPUT", "[rigs]")
     CHECK_THAT (play (6.0f) / play (0.0f), WithinAbs (1.9953, 0.01));
 }
 
-TEST_CASE ("Presets live in their own Paragon PR7-D folder, apart from its siblings' rigs", "[rigs]")
+TEST_CASE ("Presets live in their own Paragon PR7-O folder, apart from its siblings' rigs", "[rigs]")
 {
     const auto folder = RigLibrary::defaultFolder();
     CHECK (folder.getFileName() == "Rigs");
-    CHECK (folder.getParentDirectory().getFileName() == "Paragon PR7-D");
+    CHECK (folder.getParentDirectory().getFileName() == "Paragon PR7-O");
     CHECK (folder.getParentDirectory().getParentDirectory().getFileName() == "Paragon");
 
     // PR7-E's (mixing), PR7-B's (bass), PR7-G's (guitar) and PR7-K's (synth) rigs folders sit next to it, and are

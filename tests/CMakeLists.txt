@@ -6,42 +6,12 @@ FetchContent_MakeAvailable(catch2)
 
 add_executable(ParagonX1Tests
     TestMain.cpp
-    DrumTests.cpp
-    DrumKitTests.cpp
-    DrumSeqTests.cpp
-    DrumEditorTests.cpp
-    DrumKitFileTests.cpp
-    KitViewTests.cpp
-    ArticulationTests.cpp
-    MidiInTests.cpp
-    InstrumentTests.cpp
-    MixerTests.cpp
-    AcousticDrumTests.cpp
-    MicSimTests.cpp
-    DrumGizmoTests.cpp
-    LayerTests.cpp
-    RenderImportTests.cpp
-    RiffTests.cpp
-    SamplePackTests.cpp
-    MixPackTests.cpp
-    DrumSeqPluginTests.cpp
+    SamplerTests.cpp
     StackSizeTests.cpp
     ParameterIdTests.cpp
     ProcessorTests.cpp
     RigTests.cpp
     UiTests.cpp
-    MachineTests.cpp
-    NoteMapTests.cpp
-    OutputTests.cpp
-    GrooveTests.cpp
-    GrooveDatabaseTests.cpp
-    GroovePlayerTests.cpp
-    GrooveCatalogueTests.cpp
-    RhythmTests.cpp
-    SongTests.cpp
-    PlayStyleTests.cpp
-    AmountModelTests.cpp
-    GridEditorTests.cpp
     UndoTests.cpp
     EffectTests.cpp
     EqTests.cpp
@@ -70,6 +40,3 @@ target_compile_definitions(ParagonX1Tests PRIVATE
 
 include(${catch2_SOURCE_DIR}/extras/Catch.cmake)
 catch_discover_tests(ParagonX1Tests)
-
-# Test files kept in the repository (tests/data): the groove database made by make_groove_db.py.
-target_compile_definitions(ParagonX1Tests PRIVATE PARAGON_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
