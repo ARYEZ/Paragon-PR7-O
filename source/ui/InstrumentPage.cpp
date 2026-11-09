@@ -27,10 +27,12 @@ InstrumentKeyboard::InstrumentKeyboard (ParagonX1AudioProcessor& p)
     {
         const auto now = processor.getProgram();
         const auto octave = notenames::middleCOctave.load();
-        if (now != shown || octave != shownOctave)
+        const auto chosen = processor.getKeyswitch();
+        if (now != shown || octave != shownOctave || chosen != shownSwitch)
         {
             shown = now;
             shownOctave = octave;
+            shownSwitch = chosen;
             setOctaveForMiddleC (octave);
             repaint();
         }
@@ -54,7 +56,9 @@ void InstrumentKeyboard::drawWhiteNote (int note, juce::Graphics& g, juce::Recta
                                         juce::Colour lineColour, juce::Colour textColour)
 {
     juce::MidiKeyboardComponent::drawWhiteNote (note, g, area, isDown, isOver, lineColour, textColour);
-    if (plays (note) && ! isDown)
+    if (switches (note) && ! isDown)
+        markSwitch (g, note, area.withTrimmedTop (area.getHeight() * 0.62f).reduced (1.0f, 0.0f));
+    else if (plays (note) && ! isDown)
     {
         const auto band = area.withTrimmedTop (area.getHeight() * 0.62f).reduced (1.0f, 0.0f);
         ParagonColours::setFill (g, ParagonColours::accent.withAlpha (0.32f), band);
@@ -66,12 +70,21 @@ void InstrumentKeyboard::drawBlackNote (int note, juce::Graphics& g, juce::Recta
                                         juce::Colour noteFillColour)
 {
     juce::MidiKeyboardComponent::drawBlackNote (note, g, area, isDown, isOver, noteFillColour);
-    if (plays (note) && ! isDown)
+    if (switches (note) && ! isDown)
+        markSwitch (g, note, area.withTrimmedTop (area.getHeight() * 0.7f).reduced (area.getWidth() * 0.2f, 2.0f));
+    else if (plays (note) && ! isDown)
     {
         const auto band = area.withTrimmedTop (area.getHeight() * 0.7f).reduced (area.getWidth() * 0.2f, 2.0f);
         ParagonColours::setFill (g, ParagonColours::accent.withAlpha (0.6f), band);
         g.fillRect (band);
     }
+}
+
+void InstrumentKeyboard::markSwitch (juce::Graphics& g, int note, juce::Rectangle<float> band)
+{
+    // A keyswitch: the family's orange, the chosen one full, the others faint.
+    g.setColour (ParagonColours::familyOrange.withAlpha (note == shownSwitch ? 0.95f : 0.4f));
+    g.fillRect (band);
 }
 
 //==============================================================================
@@ -84,13 +97,21 @@ RegionMap::RegionMap (ParagonX1AudioProcessor& p) : processor (p)
 void RegionMap::setProgram (std::shared_ptr<const sampler::Program> p)
 {
     program = std::move (p);
+    shownSwitch = processor.getKeyswitch();
+    rebuild();
+}
+
+void RegionMap::rebuild()
+{
     boxes.clear();
     if (program != nullptr)
     {
-        // One box per place (keys x velocities): its round robins counted, not drawn on top of each other.
+        // One box per place (keys x velocities): its round robins counted, not drawn on top of each other. Only the
+        // articulation chosen (and what every articulation plays).
         std::map<std::array<int, 4>, int> places;
         for (const auto& r : program->regions)
-            ++places[{ r.loKey, r.hiKey, r.loVel, r.hiVel }];
+            if (r.playsUnder (shownSwitch))
+                ++places[{ r.loKey, r.hiKey, r.loVel, r.hiVel }];
         for (const auto& [place, count] : places)
             boxes.push_back ({ place[0], place[1], place[2], place[3], count });
     }
@@ -106,6 +127,11 @@ void RegionMap::setProgram (std::shared_ptr<const sampler::Program> p)
 
 void RegionMap::timerCallback()
 {
+    if (const auto chosen = processor.getKeyswitch(); chosen != shownSwitch)
+    {
+        shownSwitch = chosen;
+        rebuild();
+    }
     std::array<bool, 128> now {};
     for (int k = 0; k < 128; ++k)
         now[(size_t) k] = processor.getSampler().isKeyHeld (k);
@@ -178,6 +204,16 @@ void RegionMap::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+juce::String articulationName (const sampler::Program::Articulation& a)
+{
+    const auto sfzName = juce::MidiMessage::getMidiNoteName (a.lo, true, true, 4);   // SFZ's: c4 = 60
+    auto label = a.label.trim();
+    if (label.startsWithIgnoreCase (sfzName + " ") || label.equalsIgnoreCase (sfzName))
+        label = notenames::name (a.lo) + label.substring (sfzName.length());
+    return label;
+}
+
+//==============================================================================
 InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map (p)
 {
     auto& state = processor.getParameters();
@@ -211,7 +247,14 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     add (playControls, ParamIDs::instTranspose, "TRANSPOSE", "Every note this many semitones higher or lower (the samples pitched, not other samples chosen)");
     add (playControls, ParamIDs::instTune, "TUNE", "Fine tuning, in cents (100 to a semitone)");
     add (playControls, ParamIDs::instRelease, "RELEASE", "The instrument's release times (how long a note takes to fade once let go) times this");
-    add (playControls, ParamIDs::instVoices, "POLYPHONY", "How many notes can sound at once; past it, the oldest (a released one first) fades out in 10 ms");
+    add (playControls, ParamIDs::instVoices, "POLYPHONY", "How many notes can sound at once; past it one fades out in 10 ms: the oldest let go, "
+                                                          "else the oldest held that isn't the chord's lowest or highest");
+    add (playControls, ParamIDs::instDynamics, "DYNAMICS", "VELOCITY: how hard you play picks the recording (as the file says). MOD WHEEL: "
+                                                           "a held note (sustain, tremolo) starts every dynamic at once and the mod wheel "
+                                                           "crossfades between them, soft to loud, as you hold it; shorts still go by velocity");
+    add (playControls, ParamIDs::instAutoSustain, "AUTO SUSTAIN", "A held note longer than its recording keeps going: it crossfades back into the "
+                                                                  "steady part of the recording before the bow comes off (our own; for files "
+                                                                  "without loops, as VSCO 2's)");
     add (sendControls, ParamIDs::instSendDelay, "SEND DELAY", "How much of the instrument goes to the DELAY (FX page: switch it on there)");
     add (sendControls, ParamIDs::instSendReverb, "SEND REVERB", "How much of the instrument goes to the REVERB (FX page: switch it on there)");
     add (sendControls, ParamIDs::instInsert, "INSERT BUS", "Play it through an insert bus's DRIVE, GLITCH, MOD and LO-FI (FX page, INSERTS). "
@@ -261,6 +304,43 @@ void InstrumentPage::timerCallback()
 {
     if (processor.isLoadingInstrument() != shownLoading)
         refresh();
+    if (notenames::middleCOctave.load() != shownOctave)
+    {
+        shownOctave = notenames::middleCOctave.load();
+        rebuildArticulations();   // (their names follow NOTE NAMES)
+    }
+    if (const auto chosen = processor.getKeyswitch(); chosen != shownSwitch && shown != nullptr)
+    {
+        shownSwitch = chosen;
+        const auto lit = shown->articulationOf (chosen);
+        for (int i = 0; i < (int) articulationButtons.size(); ++i)
+            articulationButtons[(size_t) i]->setToggleState (i == lit, juce::dontSendNotification);
+        updateInfo();
+    }
+}
+
+void InstrumentPage::rebuildArticulations()
+{
+    articulationButtons.clear();
+    shownSwitch = -2;   // lit again by the timer
+    if (shown == nullptr)
+        return;
+    for (const auto& a : shown->articulations)
+    {
+        auto button = std::make_unique<juce::TextButton> (articulationName (a).toUpperCase());
+        button->setClickingTogglesState (false);
+        button->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff0d0a0e));
+        button->setColour (juce::TextButton::buttonOnColourId, ParagonColours::accentDim.withAlpha (0.6f));
+        button->setColour (juce::TextButton::textColourOffId, ParagonColours::textDim);
+        button->setColour (juce::TextButton::textColourOnId, ParagonColours::accent);
+        button->setTooltip ("Switch to it (as its keyswitch key, " + notenames::name (a.lo) + ", does)");
+        const auto key = a.lo;
+        button->onClick = [this, key] { processor.chooseKeyswitch (key); };
+        addAndMakeVisible (*button);
+        articulationButtons.push_back (std::move (button));
+    }
+    resized();
+    timerCallback();
 }
 
 void InstrumentPage::refresh()
@@ -269,6 +349,7 @@ void InstrumentPage::refresh()
     shownFile = processor.getInstrumentFile();
     shownLoading = processor.isLoadingInstrument();
     map.setProgram (shown);
+    rebuildArticulations();
     clearButton.setEnabled (shownFile.isNotEmpty() || shown != nullptr);
 
     const juce::File file (shownFile);
@@ -277,6 +358,13 @@ void InstrumentPage::refresh()
                        : juce::String ("NO INSTRUMENT"), juce::dontSendNotification);
     fileLabel.setText (shownFile.isNotEmpty() ? shownFile : juce::String ("Load an SFZ file, or drop one here"), juce::dontSendNotification);
 
+    updateInfo();
+    repaint();
+}
+
+void InstrumentPage::updateInfo()
+{
+    const auto keyswitch = shown != nullptr && ! shown->articulations.empty() ? processor.getKeyswitch() : sampler::Program::anyKeyswitch;
     juce::String text;
     if (shownLoading)
         text << "LOADING...\n\nIts samples are read into memory; a big instrument takes a while.\n";
@@ -302,10 +390,26 @@ void InstrumentPage::refresh()
         text << "REGIONS   " << (int) shown->regions.size() << " (from " << shown->numFiles << (shown->numFiles == 1 ? " file)" : " files)") << "\n";
         if (lo >= 0)
             text << "KEYS      " << notenames::name (lo) << " to " << notenames::name (hi) << "\n"
-                 << "AT " << notenames::name (probe) << "     " << shown->velocityLayersAt (probe) << " velocity layer"
-                 << (shown->velocityLayersAt (probe) == 1 ? "" : "s") << ", " << shown->roundRobinsAt (probe) << " round robin"
-                 << (shown->roundRobinsAt (probe) == 1 ? "" : "s") << "\n";
+                 << "AT " << notenames::name (probe) << "     " << shown->velocityLayersAt (probe, keyswitch) << " velocity layer"
+                 << (shown->velocityLayersAt (probe, keyswitch) == 1 ? "" : "s") << ", " << shown->roundRobinsAt (probe, keyswitch)
+                 << " round robin" << (shown->roundRobinsAt (probe, keyswitch) == 1 ? "" : "s")
+                 << (keyswitch != sampler::Program::anyKeyswitch && shown->articulationOf (keyswitch) >= 0
+                         ? " (" + articulationName (shown->articulations[(size_t) shown->articulationOf (keyswitch)]).toLowerCase() + ")"
+                         : juce::String())
+                 << "\n";
         text << "MEMORY    " << juce::String ((double) shown->bytes / (1024.0 * 1024.0), 1) << " MB (whole samples, in memory)\n";
+        auto heldRegions = 0, autoLoops = 0, fileLoops = 0;
+        for (const auto& r : shown->regions)
+        {
+            heldRegions += r.held ? 1 : 0;
+            autoLoops += r.autoLoop ? 1 : 0;
+            fileLoops += r.loop != sampler::Region::Loop::none ? 1 : 0;
+        }
+        text << "HELD      " << heldRegions << " of its regions sustain (MOD WHEEL dynamics work on these)\n";
+        if (fileLoops > 0)
+            text << "LOOPS     " << fileLoops << " regions loop as the file says\n";
+        if (autoLoops > 0)
+            text << "AUTO SUSTAIN  " << autoLoops << " regions can go on past their recording\n";
         if (! shown->unread.isEmpty())
         {
             text << "\nNOT PLAYED YET (later versions: loops and crossfades 0.2.0, keyswitches 0.4.0...):\n";
@@ -322,7 +426,6 @@ void InstrumentPage::refresh()
         }
     }
     info.setText (text, false);
-    repaint();
 }
 
 void InstrumentPage::paint (juce::Graphics& g)
@@ -341,11 +444,18 @@ void InstrumentPage::resized()
     headArea = area.removeFromTop (78);
     area.removeFromTop (10);
     infoArea = area.removeFromLeft (440);
+    {
+        auto inside = infoArea.reduced (14, 0).withTrimmedTop (36);
+        articulationArea = inside.removeFromTop (articulationButtons.empty() ? 0 : 30 * (int) articulationButtons.size() + 12);
+        auto rows = articulationArea;
+        for (auto& b : articulationButtons)
+            b->setBounds (rows.removeFromTop (30).reduced (0, 2));
+    }
     area.removeFromLeft (10);
     auto bottom = area.removeFromBottom (150);
     area.removeFromBottom (10);
     mapArea = area;
-    playArea = bottom.removeFromLeft (bottom.getWidth() * 64 / 100);
+    playArea = bottom.removeFromLeft (bottom.getWidth() * 72 / 100);
     bottom.removeFromLeft (10);
     sendArea = bottom;
 
@@ -357,7 +467,7 @@ void InstrumentPage::resized()
     nameLabel.setBounds (head.removeFromTop (30));
     fileLabel.setBounds (head);
 
-    info.setBounds (infoArea.reduced (14, 0).withTrimmedTop (36).withTrimmedBottom (12));
+    info.setBounds (infoArea.reduced (14, 0).withTrimmedTop (36 + articulationArea.getHeight()).withTrimmedBottom (12));
     map.setBounds (mapArea.withTrimmedTop (30).reduced (6, 4));
 
     const auto row = [] (juce::Rectangle<int> panel) { return panel.withTrimmedTop (36).withTrimmedBottom (14).reduced (10, 0); };

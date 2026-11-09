@@ -148,8 +148,8 @@ TEST_CASE ("SFZ: what isn't read yet is listed; missing files, release samples a
     CHECK (program->problems.joinIntoString ("|").contains ("missing: gone.wav"));
     const auto unread = program->unread.joinIntoString ("|");
     INFO (unread);
-    CHECK (unread.contains ("loop_mode=loop_continuous (1)"));
-    CHECK (unread.contains ("loop_start (1)"));
+    CHECK (program->regions[0].loop == sampler::Region::Loop::continuous);   // 0.2.0: loops are read
+    CHECK_FALSE (unread.contains ("loop_"));
     CHECK (unread.contains ("xfin_locc1 (1)"));
     CHECK (unread.contains ("release / legato samples (1)"));
     CHECK (unread.contains ("*sine"));
@@ -301,7 +301,7 @@ TEST_CASE ("SAMPLER: the envelope: attack rises, decay to sustain; note off rele
     CHECK (window (played, 1.0) > 0.4);   // still playing long after its note-off
 }
 
-TEST_CASE ("SAMPLER: POLYPHONY: past it the oldest note fades in 10 ms (no click); MIDI channel; all notes off", "[sampler]")
+TEST_CASE ("SAMPLER: POLYPHONY: past it a note fades in 10 ms (no click); MIDI channel; all notes off", "[sampler]")
 {
     auto program = sampler::programFrom (testkit::sine (220.0, 3.0), 60);
     program->regions[0].velTrack = 0.0f;
@@ -314,8 +314,9 @@ TEST_CASE ("SAMPLER: POLYPHONY: past it the oldest note fades in 10 ms (no click
         chord.addEvent (juce::MidiMessage::noteOn (1, 48 + 2 * k, (juce::uint8) 100), k * 2400);
     const auto out = render (*program, chord, 0.5, settings, &s);
     CHECK (s.getActiveVoices() == 4);
-    CHECK_FALSE (s.isKeyHeld (48));   // the oldest two went
-    CHECK_FALSE (s.isKeyHeld (50));
+    CHECK (s.isKeyHeld (48));         // (0.2.0) the chord's lowest kept
+    CHECK_FALSE (s.isKeyHeld (50));   // the oldest inner two went
+    CHECK_FALSE (s.isKeyHeld (52));
     CHECK (s.isKeyHeld (58));
     // No jump bigger than the notes themselves make: the stolen voices faded.
     auto biggestStep = 0.0f;
@@ -430,4 +431,332 @@ TEST_CASE ("Kept for later stages: disk streaming reads a file as it is", "[stre
         streamer.consumed (stream, 0, frame);
     }
     CHECK (streamer.getUnderruns() == 0);
+}
+
+//==============================================================================
+// 0.2.0: what VSCO 2 CE's strings ask for. Every file here is invented, laid out as theirs are (measured on the real
+// files in the scratchpad, never committed).
+namespace
+{
+    // A tone shaped as a bowed note: `attack` seconds up, steady, `release` seconds of bow-off at the end.
+    std::shared_ptr<sampler::Sample> bowed (double hz, double seconds, double attack = 0.3, double release = 0.6, float level = 0.4f)
+    {
+        auto s = std::make_shared<sampler::Sample>();
+        s->name = "bowed";
+        s->sampleRate = sampleRate;
+        const auto n = (size_t) (seconds * sampleRate);
+        s->channels.assign (1, std::vector<float> (n));
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto t = (double) i / sampleRate;
+            const auto shape = std::min ({ 1.0, t / attack, (seconds - t) / release });
+            s->channels[0][i] = (float) (level * std::max (0.0, shape) * std::sin (juce::MathConstants<double>::twoPi * hz * t));
+        }
+        return s;
+    }
+
+    // A plucked note: a quick attack, falling 40 dB a second.
+    std::shared_ptr<sampler::Sample> plucked (double hz, double seconds)
+    {
+        auto s = std::make_shared<sampler::Sample>();
+        s->name = "plucked";
+        s->sampleRate = sampleRate;
+        const auto n = (size_t) (seconds * sampleRate);
+        s->channels.assign (1, std::vector<float> (n));
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto t = (double) i / sampleRate;
+            s->channels[0][i] = (float) (0.5 * std::min (1.0, t / 0.005) * std::pow (10.0, -2.0 * t) * std::sin (juce::MathConstants<double>::twoPi * hz * t));
+        }
+        return s;
+    }
+
+    double levelOver (const std::vector<float>& x, double hz, double from, double length = 0.2)
+    {
+        return levelAt (x, hz, (size_t) (from * sampleRate), (size_t) (length * sampleRate));
+    }
+}
+
+TEST_CASE ("SFZ 0.2.0: each <control> holds for the regions after it; keyswitches read as VSCO 2 CE writes them", "[sfz][keyswitch]")
+{
+    Folder f;
+    f.wav ("Strings/Violin Section/susVib/sus_A3.wav", 220.0, 0.5);
+    f.wav ("Strings/Violin Section/Pizz/pizz_A3.wav", 330.0, 0.5);
+    // As ViolinEns-KS.sfz: a <control> per articulation, its own default_path (Windows separators), keys by name.
+    const auto file = f.sfz ("ViolinKS.sfz",
+        "<control>\ndefault_path=Strings\\Violin Section\\susVib\\\n\n"
+        "<group> //Begin Sustain Vibrato Group\nsw_default=c2\nsw_lokey=c2\nsw_hikey=d#2\nsw_last=c2\nsw_label=C2 Sustain Vibrato\n"
+        "ampeg_attack=0.001\nampeg_release=0.8\nampeg_dynamic=1\n"
+        "<region>\nsample=sus_A3.wav\nlokey=55\nhikey=60\npitch_keycenter=57\nlovel=0\nhivel=127\nvolume=20\n"
+        "<control>\ndefault_path=Strings\\Violin Section\\Pizz\\\n\n"
+        "<group> //Begin Pizzicato Group 1\nsw_lokey=c2\nsw_hikey=d#2\nsw_last=d#2\nsw_label=D#2 Pizzicato\nlorand=0.0 hirand=1.0\n"
+        "<region>\nsample=pizz_A3.wav\nlokey=55\nhikey=60\npitch_keycenter=57\n");
+    const auto program = sampler::sfz::load (file);
+    INFO (program->problems.joinIntoString ("|"));
+    REQUIRE (program->problems.isEmpty());
+    REQUIRE (program->regions.size() == 2);
+    CHECK (program->regions[0].sample->name == "sus_A3");    // each from its own <control>'s folder
+    CHECK (program->regions[1].sample->name == "pizz_A3");
+    CHECK_THAT (program->regions[0].gain, WithinAbs (10.0, 1.0e-4));   // volume=20: +20 dB
+    CHECK (program->unread.isEmpty());   // ampeg_dynamic, sw_label: read
+    CHECK (program->swLoKey == 36);
+    CHECK (program->swHiKey == 39);
+    CHECK (program->swDefault == 36);
+    REQUIRE (program->articulations.size() == 2);
+    CHECK (program->articulations[0].label == "C2 Sustain Vibrato");
+    CHECK (program->articulations[1].lo == 39);
+    CHECK (program->articulations[1].label == "D#2 Pizzicato");
+    CHECK (program->isKeyswitch (37));
+    CHECK_FALSE (program->isKeyswitch (40));
+    CHECK (program->articulationOf (39) == 1);
+}
+
+TEST_CASE ("SAMPLER 0.2.0: KEYSWITCHES: the default plays; a switch key chooses and is silent; the chosen one stays", "[sampler][keyswitch]")
+{
+    auto program = std::make_shared<sampler::Program>();
+    const auto region = [&] (std::shared_ptr<const sampler::Sample> s, int sw)
+    {
+        sampler::Region r;
+        r.sample = std::move (s);
+        r.loKey = 50;
+        r.hiKey = 70;
+        r.keyCenter = 60;
+        r.velTrack = 0.0f;
+        r.swLoLast = r.swHiLast = sw;
+        program->regions.push_back (r);
+    };
+    region (testkit::sine (220.0, 1.0), 36);
+    region (testkit::sine (330.0, 1.0), 37);
+    program->swLoKey = 36;
+    program->swHiKey = 39;
+    program->swDefault = 36;
+    program->articulations = { { 36, 36, "Sustain" }, { 37, 37, "Tremolo" } };
+    sampler::prepareRegions (*program);
+    program->index();
+
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    const auto first = render (*program, noteOn (60), 0.2, {}, &s)[0];
+    CHECK (s.getKeyswitch() == 36);
+    CHECK (loudestOf (first, { 220.0, 330.0 }) == 220.0);
+    CHECK (levelAt (first, 330.0, 0, 4800) < 1.0e-4);
+    // The switch key: no sound of its own; from then on the other articulation.
+    s.reset();
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 37, (juce::uint8) 100), 0);
+    const auto switched = render (*program, midi, 0.1, {}, &s)[0];
+    CHECK (peakOf (switched) == 0.0);
+    CHECK (s.getKeyswitch() == 37);
+    const auto after = render (*program, noteOn (60), 0.2, {}, &s)[0];
+    CHECK (loudestOf (after, { 220.0, 330.0 }) == 330.0);
+    CHECK (levelAt (after, 220.0, 0, 4800) < 1.0e-4);
+    // Chosen from the page (as its ARTICULATIONS button does).
+    s.chooseKeyswitch (36);
+    s.reset();
+    CHECK (loudestOf (render (*program, noteOn (60), 0.2, {}, &s)[0], { 220.0, 330.0 }) == 220.0);
+}
+
+TEST_CASE ("SAMPLER 0.2.0: a loop goes round seamlessly; loop_sustain stops at note-off; its crossfade keeps the level", "[sampler][loop]")
+{
+    // A 1 s sine of whole cycles (so a plain loop over whole cycles joins exactly): the loop's frames continue as the
+    // sine would.
+    auto program = sampler::programFrom (testkit::sine (240.0, 1.0), 60);
+    auto& r = program->regions[0];
+    r.velTrack = 0.0f;
+    r.loop = sampler::Region::Loop::continuous;
+    r.loopStart = 12000;
+    r.loopEnd = 36000;   // 24000 frames: 120 cycles
+    r.loopCrossfade = 0;
+    sampler::prepareRegions (*program);
+    const auto out = render (*program, noteOn (60), 3.0)[0];
+    auto worst = 0.0;
+    for (size_t i = 0; i < out.size(); ++i)
+        worst = std::max (worst, std::abs ((double) out[i] - 0.5 * std::sin (juce::MathConstants<double>::twoPi * 240.0 * (double) i / sampleRate)));
+    CHECK (worst < 1.0e-4);   // 3 s from a 1 s file, as one unbroken sine
+
+    // loop_sustain, let go at 2 s: it stops going round and plays on to the file's end (its release here 3 s, long).
+    r.loop = sampler::Region::Loop::sustain;
+    r.release = 3.0f;
+    auto midi = noteOn (60);
+    midi.addEvent (juce::MidiMessage::noteOff (1, 60), (int) (2.0 * sampleRate));
+    const auto sustained = render (*program, midi, 3.5, {}, nullptr)[0];
+    CHECK (peakOf (sustained, (size_t) (1.9 * sampleRate), (size_t) (2.0 * sampleRate)) > 0.4);
+    // After the note-off, at most the frames to the loop's end and the file's last third remain: under 1 s.
+    CHECK (peakOf (sustained, (size_t) (3.0 * sampleRate)) == 0.0);
+
+    // A crossfaded loop over a noise-like signal (uncorrelated across the join): its level steady through the crossfade.
+    auto noise = std::make_shared<sampler::Sample>();
+    noise->sampleRate = sampleRate;
+    noise->channels.assign (1, std::vector<float> (48000));
+    juce::Random random (3);
+    for (auto& x : noise->channels[0])
+        x = 0.5f * (random.nextFloat() * 2.0f - 1.0f);
+    auto np = sampler::programFrom (noise, 60);
+    auto& nr = np->regions[0];
+    nr.velTrack = 0.0f;
+    nr.loop = sampler::Region::Loop::continuous;
+    nr.loopStart = 12000;
+    nr.loopEnd = 40000;
+    nr.loopCrossfade = 9600;   // 0.2 s
+    const auto noisy = render (*np, noteOn (60), 2.5)[0];
+    const auto plain = rms (noisy, 4800, 24000);
+    for (double t = 0.65; t < 2.3; t += 0.05)
+    {
+        INFO (t);
+        CHECK_THAT (db (rms (noisy, (size_t) (t * sampleRate), (size_t) ((t + 0.05) * sampleRate)) / plain), WithinAbs (0.0, 1.0));
+    }
+}
+
+TEST_CASE ("SAMPLER 0.2.0: AUTO SUSTAIN: a bowed note held past its recording keeps going at its level; a plucked one doesn't loop", "[sampler][autosustain]")
+{
+    auto program = sampler::programFrom (bowed (220.0, 4.0), 60);
+    program->regions[0].velTrack = 0.0f;
+    program->regions[0].release = 0.3f;
+    sampler::prepareRegions (*program);
+    const auto& r = program->regions[0];
+    REQUIRE (r.held);
+    REQUIRE (r.autoLoop);
+    // Its loop in the steady part: after the attack (0.3 s) and before the bow-off (the last 0.6 s).
+    CHECK ((double) r.loopStart / sampleRate > 0.6);
+    CHECK ((double) r.loopEnd / sampleRate < 3.6);
+    CHECK (r.loopCrossfade > (int) (0.2 * sampleRate));
+
+    const auto steady = [] (const std::vector<float>& x, double at) { return levelOver (x, 220.0, at); };
+    const auto on = render (*program, noteOn (60), 12.0)[0];
+    const auto level = steady (on, 1.5);
+    REQUIRE (level > 0.3);
+    for (double t = 2.0; t < 11.5; t += 0.25)
+    {
+        INFO (t);
+        CHECK_THAT (db (steady (on, t) / level), WithinAbs (0.0, 1.5));   // the whole 12 s, near its level
+    }
+    // Let go, it releases as ever.
+    auto midi = noteOn (60);
+    midi.addEvent (juce::MidiMessage::noteOff (1, 60), (int) (8.0 * sampleRate));
+    const auto released = render (*program, midi, 9.5)[0];
+    CHECK (peakOf (released, (size_t) (8.5 * sampleRate)) < 0.01);
+    // AUTO SUSTAIN off: the recording as it is, gone after 4 s.
+    sampler::Sampler::Settings off;
+    off.autoSustain = false;
+    const auto plain = render (*program, noteOn (60), 6.0, off)[0];
+    CHECK (peakOf (plain, (size_t) (4.05 * sampleRate)) == 0.0);
+
+    // A plucked note isn't held: nothing loops (and MOD WHEEL leaves it to velocity).
+    auto pluck = sampler::programFrom (plucked (220.0, 4.0), 60);
+    CHECK_FALSE (pluck->regions[0].held);
+    CHECK_FALSE (pluck->regions[0].autoLoop);
+    CHECK (sampler::isSustained (*bowed (220.0, 4.0)));
+    CHECK_FALSE (sampler::isSustained (*plucked (220.0, 4.0)));
+}
+
+TEST_CASE ("SAMPLER 0.2.0: DYNAMICS ON THE MOD WHEEL: a held note's layers crossfade by the wheel; shorts keep velocity", "[sampler][modwheel]")
+{
+    // Two held layers (pp 220 Hz, ff 330 Hz; velocity 1-63, 64-127) and a short (440 Hz, any velocity) on another key.
+    auto program = std::make_shared<sampler::Program>();
+    const auto add = [&] (std::shared_ptr<const sampler::Sample> s, int lo, int hi, int key)
+    {
+        sampler::Region r;
+        r.sample = std::move (s);
+        r.loKey = r.hiKey = r.keyCenter = key;
+        r.loVel = lo;
+        r.hiVel = hi;
+        r.velTrack = 0.0f;   // level from the layers alone (the wheel's own curve tested below)
+        program->regions.push_back (r);
+    };
+    add (bowed (220.0, 4.0), 1, 63, 60);
+    add (bowed (330.0, 4.0), 64, 127, 60);
+    add (plucked (440.0, 1.0), 1, 127, 62);
+    sampler::prepareRegions (*program);
+    program->index();
+    sampler::Sampler::Settings wheel;
+    wheel.dynamics = sampler::Sampler::Dynamics::modWheel;
+    const auto withWheel = [&] (int cc, int velocity = 100)
+    {
+        auto midi = juce::MidiBuffer();
+        midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, cc), 0);
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) velocity), 1);
+        return render (*program, midi, 1.0, wheel)[0];
+    };
+    // The layers' middles are 32 and 95.5 (in velocity): the wheel at the bottom plays pp alone, at the top ff alone,
+    // half way between the middles both at equal power (each 3 dB down).
+    const auto low = withWheel (0), high = withWheel (127), middle = withWheel (63);
+    CHECK (levelOver (low, 220.0, 0.6) > 0.35);
+    CHECK (levelOver (low, 330.0, 0.6) < 1.0e-3);
+    CHECK (levelOver (high, 330.0, 0.6) > 0.35);
+    CHECK (levelOver (high, 220.0, 0.6) < 1.0e-3);
+    CHECK_THAT (db (levelOver (middle, 220.0, 0.6) / levelOver (low, 220.0, 0.6)), WithinAbs (-3.0, 0.6));
+    CHECK_THAT (db (levelOver (middle, 330.0, 0.6) / levelOver (high, 330.0, 0.6)), WithinAbs (-3.0, 0.6));
+    // The note's velocity doesn't choose a held layer on the wheel: a soft note with the wheel up plays ff.
+    CHECK (levelOver (withWheel (127, 10), 330.0, 0.6) > 0.35);
+    // Moving the wheel while the note is held moves it.
+    auto midi = juce::MidiBuffer();
+    midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, 0), 0);
+    midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+    midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, 127), (int) (1.0 * sampleRate));
+    const auto moved = render (*program, midi, 2.0, wheel)[0];
+    CHECK (levelOver (moved, 220.0, 0.6) > 0.35);
+    CHECK (levelOver (moved, 330.0, 1.5) > 0.35);
+    CHECK (levelOver (moved, 220.0, 1.5) < 1.0e-3);
+    // A short still goes by velocity (amp_veltrack 100 here: velocity 64 about 12 dB under 127), whatever the wheel.
+    program->regions[2].velTrack = 1.0f;
+    const auto shortAt = [&] (int velocity)
+    {
+        auto m = juce::MidiBuffer();
+        m.addEvent (juce::MidiMessage::controllerEvent (1, 1, 0), 0);
+        m.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) velocity), 1);
+        return levelOver (render (*program, m, 0.2, wheel)[0], 440.0, 0.0, 0.05);
+    };
+    CHECK_THAT (db (shortAt (64) / shortAt (127)), WithinAbs (20.0 * std::log10 (std::pow (64.0 / 127.0, 2.0)), 0.3));
+    // The wheel's own level curve: amp_veltrack 100 on the held layers, the wheel half way down about 12 dB down.
+    program->regions[0].velTrack = program->regions[1].velTrack = 1.0f;
+    const auto top = levelOver (withWheel (127), 330.0, 0.6);
+    const auto half = withWheel (95);   // the ff layer's middle: it alone, at velocity 95.5
+    CHECK_THAT (db (levelOver (half, 330.0, 0.6) / top), WithinAbs (20.0 * std::log10 (std::pow (95.5 / 127.0, 2.0)), 0.5));
+}
+
+TEST_CASE ("SAMPLER 0.2.0: CC 11 EXPRESSION scales everything (its squared curve)", "[sampler]")
+{
+    auto program = sampler::programFrom (testkit::sine (220.0, 1.0), 60);
+    program->regions[0].velTrack = 0.0f;
+    auto midi = noteOn (60);
+    midi.addEvent (juce::MidiMessage::controllerEvent (1, 11, 64), 0);
+    const auto softer = render (*program, midi, 0.4)[0];
+    const auto full = render (*program, noteOn (60), 0.4)[0];
+    CHECK_THAT (db (levelOver (softer, 220.0, 0.1) / levelOver (full, 220.0, 0.1)), WithinAbs (20.0 * std::log10 (std::pow (64.0 / 127.0, 2.0)), 0.1));
+}
+
+TEST_CASE ("SAMPLER 0.2.0: POLYPHONY counts notes; past it a big chord keeps its lowest and highest notes", "[sampler]")
+{
+    // Every note three layers deep (on the wheel): one note, three voices.
+    auto program = std::make_shared<sampler::Program>();
+    for (int layer = 0; layer < 3; ++layer)
+    {
+        sampler::Region r;
+        r.sample = bowed (220.0, 4.0);
+        r.loKey = 40;
+        r.hiKey = 80;
+        r.keyCenter = 60;
+        r.loVel = 1 + 42 * layer;
+        r.hiVel = layer == 2 ? 127 : 42 + 42 * layer;
+        program->regions.push_back (r);
+    }
+    sampler::prepareRegions (*program);
+    program->index();
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    sampler::Sampler::Settings settings;
+    settings.dynamics = sampler::Sampler::Dynamics::modWheel;
+    settings.polyphony = 4;
+    juce::MidiBuffer chord;
+    for (const auto key : { 48, 52, 55, 60, 64, 67 })   // one after another, lowest first
+        chord.addEvent (juce::MidiMessage::noteOn (1, key, (juce::uint8) 100), (key - 48) * 100);
+    render (*program, chord, 0.3, settings, &s);
+    CHECK (s.getActiveNotes() == 4);
+    CHECK (s.getActiveVoices() == 12);
+    CHECK (s.isKeyHeld (48));    // the bass kept
+    CHECK (s.isKeyHeld (67));    // the top kept
+    CHECK_FALSE (s.isKeyHeld (52));   // the oldest inner notes went
+    CHECK_FALSE (s.isKeyHeld (55));
+    CHECK (s.isKeyHeld (60));
+    CHECK (s.isKeyHeld (64));
 }

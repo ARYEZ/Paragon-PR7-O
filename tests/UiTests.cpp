@@ -6,6 +6,8 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "PluginTestUtils.h"
+#include "NoteNames.h"
+#include "ui/InstrumentPage.h"
 
 using Catch::Matchers::WithinAbs;
 
@@ -330,4 +332,59 @@ TEST_CASE ("COLOURS: the look-and-feel's, the keyboard's, the region map's and e
                 ++outside;
     INFO (outside << " pixels outside the family's colours");
     CHECK (outside == 0);
+}
+
+TEST_CASE ("THE INSTRUMENT page 0.2.0: an instrument's articulations, named as the keyboard names keys; clicking switches; the map shows the one chosen", "[ui][keyswitch]")
+{
+    Window w;
+    w.processor.setPlayConfigDetails (0, 2, 48000.0, 256);
+    w.processor.prepareToPlay (48000.0, 256);
+    auto program = std::make_shared<sampler::Program>();
+    for (const auto sw : { 36, 37 })
+        for (int rr = 1; rr <= (sw == 36 ? 1 : 3); ++rr)
+        {
+            sampler::Region r;
+            r.sample = testkit::sine (220.0, 0.3);
+            r.loKey = 55;
+            r.hiKey = 70;
+            r.swLoLast = r.swHiLast = sw;
+            r.seqLength = sw == 36 ? 1 : 3;
+            r.seqPosition = rr;
+            program->regions.push_back (r);
+        }
+    program->swLoKey = 36;
+    program->swHiKey = 39;
+    program->swDefault = 36;
+    program->articulations = { { 36, 36, "C2 Sustain Vibrato" }, { 37, 37, "C#2 Spiccato" } };   // labels in SFZ's naming
+    sampler::prepareRegions (*program);
+    program->index();
+    w.processor.setProgram (program, "/libraries/ks.sfz");
+    auto& page = w.view->getInstrumentPage();
+    page.refresh();
+    REQUIRE (page.getNumArticulations() == 2);
+    notenames::middleCOctave = 3;   // NOTE NAMES: C3 (Cubase): note 36 is C1
+    CHECK (articulationName (program->articulations[0]) == "C1 Sustain Vibrato");
+    notenames::middleCOctave = 4;
+    CHECK (articulationName (program->articulations[0]) == "C2 Sustain Vibrato");
+    notenames::middleCOctave = 3;
+    CHECK (articulationName ({ 40, 40, "Legato" }) == "Legato");   // a label without its key's name stays as it is
+    // Clicking the second switches (at the next block).
+    page.getArticulationButton (1).onClick();
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    w.processor.processBlock (buffer, midi);
+    CHECK (w.processor.getKeyswitch() == 37);
+    juce::Thread::sleep (300);
+    juce::Timer::callPendingTimersSynchronously();
+    CHECK (page.getArticulationButton (1).getToggleState());
+    CHECK_FALSE (page.getArticulationButton (0).getToggleState());
+    CHECK (page.getInfoText().contains ("3 round robins"));
+    // Its keyswitch is kept with the project.
+    juce::MemoryBlock state;
+    w.processor.getStateInformation (state);
+    const auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
+    REQUIRE (xml != nullptr);
+    const auto* instrument = xml->getChildByName ("Instrument");
+    REQUIRE (instrument != nullptr);
+    CHECK (instrument->getIntAttribute ("keyswitch") == 37);
 }

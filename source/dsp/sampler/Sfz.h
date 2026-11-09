@@ -12,14 +12,20 @@
 // plays (which keys, which velocities, which round robin) and how (its root key, tuning, level, pan, envelope). Most
 // open orchestral libraries (VSCO 2, Sonatina, Virtual Playing Orchestra) come as SFZ files beside their WAVs.
 //
-// Read in 0.1.0 (the text side is PR7-D's reader: comments, #define, #include (8 deep), <control> default_path,
-// note_offset / octave_offset, <global> <master> <group> <region> each passing its settings on):
+// Read (the text side is PR7-D's reader: comments, #define, #include (8 deep), <global> <master> <group> <region> each
+// passing its settings on; 0.2.0: each <control> header's default_path, note_offset and octave_offset hold for the
+// regions after it, until the next <control>: VSCO 2 CE's keyswitch files start every articulation with its own):
 //   sample, key / lokey / hikey (numbers or names: c4 = 60), pitch_keycenter, lovel / hivel, lochan / hichan,
 //   seq_length / seq_position (round robins), lorand / hirand (random choice), tune (pitch), transpose, pitch_keytrack,
 //   volume, amplitude, pan, amp_veltrack, offset, end, ampeg_delay / attack / hold / decay / sustain / release,
-//   loop_mode (one_shot: the note plays to its end; the others: see below), bend_up / bend_down, trigger (attack only).
-// Not read yet, and listed as such (`unread`): loops (loop_start / loop_end: held notes stop at the sample's end), release
-// samples, crossfades on the mod wheel (plan stage 2), keyswitches (stage 4), filters, LFOs, other envelopes, curves.
+//   bend_up / bend_down, trigger (attack only).
+//   0.2.0: KEYSWITCHES (sw_lokey / sw_hikey: the keys that switch, and don't sound; sw_last, or sw_lolast / sw_hilast:
+//   the switch a region plays under; sw_default: the one at the start; sw_label: its name); LOOPS (loop_mode no_loop /
+//   one_shot / loop_continuous / loop_sustain, loop_start / loop_end in frames, loop_crossfade in seconds: crossfaded
+//   with a curve that keeps the level for how alike its two sides are, measured as it loads); ampeg_dynamic
+//   (it re-reads the envelope when a controller moves it: PR7-O's envelope has no controllers, so it changes nothing).
+// Not read yet, and listed as such (`unread`): release samples, crossfades on controllers (xfin / xfout), filters, LFOs,
+// other envelopes, curves.
 namespace sampler
 {
     struct Region
@@ -39,6 +45,21 @@ namespace sampler
         float delay = 0.0f, attack = 0.0f, hold = 0.0f, decay = 0.0f, sustain = 1.0f, release = 0.001f;   // seconds; sustain 0-1
         bool oneShot = false;
         float bendUp = 200.0f, bendDown = -200.0f;   // cents at the wheel's ends
+        // 0.2.0, KEYSWITCHES: the switches it plays under (-1: any).
+        int swLoLast = -1, swHiLast = -1;
+        // 0.2.0, LOOPS: the file's (loop_mode, in frames; crossfade in frames), or AUTO SUSTAIN's (our own, for a held
+        // recording without loop points: `autoLoop`, found when it loads; only while AUTO SUSTAIN is on).
+        enum class Loop { none, continuous, sustain };
+        Loop loop = Loop::none;
+        juce::int64 loopStart = 0, loopEnd = 0;
+        int loopCrossfade = 0;
+        float loopLikeness = 0.0f;    // how alike the two sides of the crossfade are (-1 to 1): sets its curve
+        bool autoLoop = false;
+        // A HELD recording: one that sustains (no one_shot, longer than 2.5 s, and shaped like a bowed or blown note:
+        // isSustained), as against a short (spiccato, pizzicato). MOD WHEEL dynamics and AUTO SUSTAIN work on these only.
+        bool held = false;
+
+        bool playsUnder (int keyswitch) const noexcept { return swLoLast < 0 || (keyswitch >= swLoLast && keyswitch <= swHiLast); }
 
         bool covers (int key, int velocity, int channel) const noexcept
         {
@@ -57,14 +78,24 @@ namespace sampler
         juce::StringArray unread;     // opcodes read nowhere yet, with how many regions use each ("loop_mode=loop_continuous (12)")
         size_t bytes = 0;             // audio held in memory
         int numFiles = 0;
+        // 0.2.0, KEYSWITCHES: the keys that switch (-1: none), the one it starts on, and each switch's name (in the order
+        // the file gives them; one entry per sw_last range).
+        int swLoKey = -1, swHiKey = -1, swDefault = -1;
+        struct Articulation { int lo = -1, hi = -1; juce::String label; };
+        std::vector<Articulation> articulations;
+        bool isKeyswitch (int key) const noexcept { return swLoKey >= 0 && key >= swLoKey && key <= swHiKey; }
+        int articulationOf (int keyswitch) const noexcept;   // its index in `articulations` (-1: none)
         // The audio thread's round-robin counters, one per region (only the sampler playing this program writes them).
         mutable std::vector<int> sequence;
 
         bool plays (int key) const noexcept { return key >= 0 && key < 128 && ! byKey[(size_t) key].empty(); }
         int lowestKey() const noexcept;    // -1: none
         int highestKey() const noexcept;
-        int velocityLayersAt (int key) const;   // different velocity ranges at a key
-        int roundRobinsAt (int key) const;      // most regions sharing one velocity range at a key
+        // At a key (0.2.0: under keyswitch `keyswitch`; anyKeyswitch: every region): its different velocity ranges, and
+        // the most regions sharing one.
+        static constexpr int anyKeyswitch = -2;
+        int velocityLayersAt (int key, int keyswitch = anyKeyswitch) const;
+        int roundRobinsAt (int key, int keyswitch = anyKeyswitch) const;
         void index();                           // byKey and sequence, from regions
     };
 
@@ -79,4 +110,24 @@ namespace sampler
 
     // An instrument of one sample over the whole keyboard (its root key `keyCenter`). Tests, and a single WAV loaded.
     std::shared_ptr<Program> programFrom (std::shared_ptr<const Sample> sample, int keyCenter = 60);
+
+    // AUTO SUSTAIN (0.2.0, our own design): where a held recording's steady part lies, to loop it with a long crossfade.
+    // Its level in 50 ms windows; the "body" the median of its middle; steady from the first window within 3 dB of the
+    // body (plus 0.3 s) to the last (less 0.1 s): the bow-off after it is left out. The loop: the last stretch of that,
+    // up to 4 s (80% of it), crossfaded over up to 1 s (40% of the stretch). Its start then moved (by up to 25 ms, a
+    // cycle of the lowest string) to where the sound around the crossfade's middle best matches the sound a loop's
+    // length later, so the two sides don't cancel; `likeness` how well (their correlation there). None (found false)
+    // when the steady part is under 1.5 s or the file is silent.
+    struct SustainPoints { bool found = false; juce::int64 start = 0, end = 0; int crossfade = 0; float likeness = 0.0f; };
+    // Whether a recording is shaped like a held note (our own rule, measured on VSCO 2 CE's strings: of 431 regions,
+    // sustains, tremolos, spiccatos and pizzicatos, it misjudged 3, all contrabass): its loudest moment no more than
+    // 13 dB over the median of its middle three fifths, and that middle's first quarter no more than 9 dB louder than
+    // its last (a plucked or bounced note peaks at its start and keeps falling).
+    bool isSustained (const Sample&);
+    SustainPoints findSustain (const Sample&);
+    // Sets each region's `held` and AUTO SUSTAIN points (regions without loops of their own). Called by sfz::load and
+    // programFrom; tests that build regions by hand call it too.
+    void prepareRegions (Program&);
+    // How alike a loop's two sides are over its crossfade (their correlation, -1 to 1), for its curve.
+    float loopLikeness (const Sample&, juce::int64 loopStart, juce::int64 loopEnd, int crossfade);
 }

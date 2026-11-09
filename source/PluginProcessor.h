@@ -119,6 +119,10 @@ public:
     juce::String getLoadProblem() const;   // why the last load gave nothing (empty: it didn't fail)
     bool waitForInstrument (int timeoutMs = 60000);   // the load finished and installed (tests; snapshots)
     const sampler::Sampler& getSampler() const noexcept { return sampler; }
+    // 0.2.0, KEYSWITCHES: the articulation chosen (its keyswitch key; -1 none), and choosing one (as pressing its key
+    // does; applied at the next block). Kept in the project, not in presets (a preset's instrument starts on its default).
+    int getKeyswitch() const noexcept { return sampler.getKeyswitch(); }
+    void chooseKeyswitch (int key) noexcept { sampler.chooseKeyswitch (key); }
     juce::ChangeBroadcaster instrumentBroadcaster;   // a new instrument (or none) installed, a load started or failed
 
     // The keyboard on the INSTRUMENT page plays into this, with the DAW's MIDI.
@@ -266,6 +270,7 @@ private:
     std::atomic<const sampler::Program*> programForAudio { nullptr };
     std::vector<std::pair<std::shared_ptr<const sampler::Program>, double>> retiredPrograms;
     juce::String instrumentFile;
+    int pendingKeyswitch = -1;   // a project's articulation, waiting for its instrument
     std::unique_ptr<juce::ThreadPool> loaderPool;
     std::atomic<int> pendingLoads { 0 }, loadGeneration { 0 };
     std::atomic<double> loadProgress { 0.0 };

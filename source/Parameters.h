@@ -29,6 +29,11 @@ namespace ParamIDs
     inline constexpr auto instSendDelay  = "instSendDelay";  // 0 to 1: into the DELAY
     inline constexpr auto instSendReverb = "instSendReverb"; // 0 to 1: into the REVERB
     inline constexpr auto instInsert    = "instInsert";      // insertBusNames' index: an insert bus it plays through (0 none)
+    // 0.2.0 (version hint 43): DYNAMICS (dynamicsNames: velocity as the file says, or the mod wheel crossfading a held
+    // note's layers) and AUTO SUSTAIN (held recordings without loops go round their steady part). In presets.
+    inline constexpr auto instDynamics    = "instDynamics";
+    inline constexpr auto instAutoSustain = "instAutoSustain";
+    inline const juce::StringArray dynamicsNames { "Velocity", "Mod Wheel" };   // saved by index: only append
     // Global, like OUTPUT: they suit the player's controller, not a sound.
     inline constexpr auto midiChannel = "midiChannel";       // midiChannelNames' index (0: any)
     inline constexpr auto noteNames = "noteNames";           // notenames::choiceNames: middle C is C3 or C4 (PR7-D 0.35.1's)

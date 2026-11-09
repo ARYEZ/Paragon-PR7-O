@@ -12,6 +12,7 @@ namespace
     // parameters start at 42, after PR7-D's last (41).
     constexpr int firstVersion = 1;
     constexpr int pr7o010 = 42;   // PR7-O 0.1.0: the instrument, MIDI CHANNEL, NOTE NAMES
+    constexpr int pr7o020 = 43;   // PR7-O 0.2.0: DYNAMICS, AUTO SUSTAIN
 
     const ToText asDb = [] (float value, int) { return juce::String (value, 1) + " dB"; };
     const ToText asPercent = [] (float value, int) { return juce::String (juce::roundToInt (value * 100.0f)) + "%"; };
@@ -80,10 +81,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         add (layout, instRelease, "Release", logRange (0.1, 10.0), 1.0f,
              [] (float v, int) { return "x" + juce::String (v, v < 1.0f ? 2 : 1); }, pr7o010);
         add (layout, instVoices, "Polyphony", { 8.0f, (float) sampler::Sampler::maxPolyphony, 1.0f }, 128.0f,
-             [] (float v, int) { return juce::String (juce::roundToInt (v)) + " voices"; }, pr7o010);
+             [] (float v, int) { return juce::String (juce::roundToInt (v)) + " notes"; }, pr7o010);   // (0.2.0: notes, not voices)
         add (layout, instSendDelay, "Send Delay", { 0.0f, 1.0f, 0.01f }, 0.0f, asPercent, pr7o010);
         add (layout, instSendReverb, "Send Reverb", { 0.0f, 1.0f, 0.01f }, 0.0f, asPercent, pr7o010);
         addChoice (layout, instInsert, "Insert Bus", insertBusNames, 0, pr7o010);
+        addChoice (layout, instDynamics, "Dynamics", dynamicsNames, 0, pr7o020);
+        addSwitch (layout, instAutoSustain, "Auto Sustain", true, pr7o020);
         addChoice (layout, midiChannel, "MIDI Channel", midiChannelNames, 0, pr7o010);
         addChoice (layout, noteNames, "Note Names", notenames::choiceNames, 0, pr7o010);
     }

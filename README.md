@@ -22,9 +22,9 @@ PR7-O is built in stages, each one released (the plan: `PR7-O PLAN.md`):
 | Stage | What | Now |
 |---|---|---|
 | **1** | Its own plugin: an instrument that loads an SFZ and plays it | **Works (0.1.0)** |
-| 2 | Held notes: loops, release samples, dynamics on the mod wheel, expression, voice stealing for big chords | Next |
+| **2** | Held notes, starting with VSCO 2 CE's strings: keyswitches, AUTO SUSTAIN, SFZ loops, dynamics on the mod wheel, expression, polyphony that keeps a chord's edges | **Works (0.2.0)**; release samples and the files' own crossfades still to come |
 | 3 | The libraries: VSCO 2 CE, Sonatina Symphonic Orchestra, Virtual Playing Orchestra; a browser by section; streaming | |
-| 4 | Articulations: keyswitches, CC or channel; the list on screen | |
+| 4 | Articulations: keyswitches (done in 0.2.0), CC or channel | |
 | 5 | Legato (our own) and portamento | |
 | 6 | The stage: sections seated on a drawn stage, simulated mics and room | |
 | 7 | ORCHESTRATE MY RIFF | |
@@ -50,9 +50,16 @@ What the SFZ reader plays in 0.1.0: `sample`, keys (`key`, `lokey`, `hikey`, `pi
 velocities (`lovel`, `hivel`), MIDI channels, round robins (`seq_length`, `seq_position`), random choice (`lorand`,
 `hirand`), pitch (`tune`, `transpose`, `pitch_keytrack`), level (`volume`, `amplitude`, `pan`, `amp_veltrack`),
 `offset`, `end`, the amplitude envelope (`ampeg_delay` / `attack` / `hold` / `decay` / `sustain` / `release`),
-`loop_mode=one_shot`, `bend_up` / `bend_down`; `#define`, `#include`, `<control>` `default_path`, `note_offset`,
-`octave_offset`, and the `<global>` `<master>` `<group>` `<region>` headers. Not yet: loops, release samples,
-crossfades (stage 2), keyswitches (stage 4), filters and other modulation.
+`loop_mode` (one_shot, loop_continuous, loop_sustain), `loop_start`, `loop_end`, `loop_crossfade`, keyswitches
+(`sw_lokey`, `sw_hikey`, `sw_last`, `sw_lolast`, `sw_hilast`, `sw_default`, `sw_label`), `bend_up` / `bend_down`;
+`#define`, `#include`, `<control>` `default_path`, `note_offset`, `octave_offset` (each `<control>` for the regions
+after it), and the `<global>` `<master>` `<group>` `<region>` headers. Not yet: release samples, the files' own
+crossfades (`xfin` / `xfout`), filters and other modulation.
+
+**VSCO 2 Community Edition** (Versilian Studios, CC0: credit them, and don't sell the samples on their own): get it from
+its GitHub page (github.com/sgossner/VSCO-2-CE, the SFZ branch) and load its `.sfz` files from the folder's top level.
+Its 31 string instruments load completely in 0.2.0; the `-KS` files hold every articulation, switched from C1-D#1 (the
+violins, violas, solo violin) or C5-E5 (cellos, basses), as PR7-O names notes by default.
 
 PR7-O ships no samples, and never reads locked formats (Kontakt, Opus, Spitfire's player...). Check each library's
 licence before releasing music made with it.

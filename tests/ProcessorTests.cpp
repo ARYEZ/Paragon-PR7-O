@@ -83,7 +83,7 @@ TEST_CASE ("PR7-O is an instrument: no audio in, MIDI in, mono or stereo out", "
     CHECK (processor.getMainBusNumOutputChannels() == 2);
     CHECK (processor.getBus (false, 0)->getName() == "Main");
     CHECK (juce::String (JucePlugin_Name) == "Paragon PR7-O");
-    CHECK (juce::String (JucePlugin_VersionString) == "0.1.0");
+    CHECK (juce::String (JucePlugin_VersionString) == "0.2.0");
 
     juce::AudioProcessor::BusesLayout layout;
     layout.outputBuses.add (juce::AudioChannelSet::stereo());
@@ -365,4 +365,32 @@ TEST_CASE ("Fuzz: any settings, changed as notes play, never crash it or make it
     }
     CHECK (finite);
     CHECK (loudest < 1000.0f);   // nothing ran away (it can be loud: many notes at +12 dB, into the effects)
+}
+
+TEST_CASE ("0.2.0: a project reopens on the articulation it was saved with, once its instrument has loaded", "[processor][state][keyswitch]")
+{
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("a.wav"), *testkit::sine (220.0, 0.5), 24);
+    dir.getChildFile ("ks.sfz").replaceWithText ("<group> sw_lokey=c2 sw_hikey=d#2 sw_default=c2 sw_last=c2 sw_label=C2 Sustain\n<region> sample=a.wav lokey=50 hikey=70\n"
+                                                 "<group> sw_lokey=c2 sw_hikey=d#2 sw_last=d2 sw_label=D2 Spiccato\n<region> sample=a.wav lokey=50 hikey=70\n");
+    juce::MemoryBlock state;
+    {
+        auto processor = makeProcessor();
+        processor->loadInstrument (dir.getChildFile ("ks.sfz"));
+        REQUIRE (processor->waitForInstrument());
+        play (*processor, 0.01);
+        CHECK (processor->getKeyswitch() == 36);   // its default
+        processor->chooseKeyswitch (38);
+        play (*processor, 0.01);
+        CHECK (processor->getKeyswitch() == 38);
+        processor->getStateInformation (state);
+    }
+    auto restored = makeProcessor();
+    restored->setStateInformation (state.getData(), (int) state.getSize());
+    REQUIRE (restored->waitForInstrument());
+    play (*restored, 0.01);
+    CHECK (restored->getKeyswitch() == 38);
+    dir.deleteRecursively();
 }

@@ -74,13 +74,55 @@ the owner, a release per stage. Siblings: PR7-G (guitar), PR7-B (bass), PR7-V (v
   ABOUT. FX page: `SendMatrix` is the instrument's two sends + DELAY > REVERB; `InsertBusStrip`'s THE INSTRUMENT
   button routes it. Icon `Icons::Type::orchestra` (a violin).
 
+## Stage 2 done in 0.2.0: VSCO 2 CE's strings (the owner: "Let's start VSCO 2 CE, strings first")
+
+The owner chose **VSCO 2 Community Edition** (Versilian Studios; CC0, asks for credit and that the samples aren't sold
+on their own) and **strings first**. The library was read from `github.com/sgossner/VSCO-2-CE` (branch `SFZ`: 75
+instruments at its top level, samples under `Strings/...`, 44.1 kHz stereo 16-bit) into the scratchpad, never
+committed. What its 31 string files use (counted): sample, lokey / hikey / pitch_keycenter, lovel / hivel, volume (+20 dB
+on most regions: the recordings peak -19 to -41 dBFS), ampeg_attack / release / dynamic, seq / rand round robins on
+shorts, tune, group_label, a `<control> default_path` per articulation, and keyswitches in the 5 `-KS` files (violins,
+violas, solo violin at c2-d#2 = notes 36-39; cellos c6-d#6 and basses c6-e6 = 84-88, above their ranges). **No loops,
+no release samples, no xfin / xfout.** Sustains are 7-17 s, steady, ending in a ~1 s bow-off. So stage 2 became:
+- `Sfz.*`: `<control>` opcodes positional (each region carries "control.<name>": the 0.1.0 reader kept only the last
+  default_path); keyswitches (`Region::swLoLast / swHiLast`, `playsUnder`; `Program::swLoKey / swHiKey / swDefault`,
+  `articulations` {lo, hi, label}, `isKeyswitch`, `articulationOf`); loops (`Region::Loop` none / continuous / sustain,
+  `loopStart / loopEnd` frames, `loopCrossfade` frames, `loopLikeness`); `held` and AUTO SUSTAIN points
+  (`prepareRegions`, called by `sfz::load` and `programFrom`: tests that build regions by hand call it);
+  `isSustained` (peak ≤ 13 dB over the median of the middle 3/5, the middle's first quarter ≤ 9 dB over its last;
+  fitted on VSCO: 3 of 431 regions misjudged, all contrabass) + longer than 2.5 s + not one_shot = held;
+  `findSustain` (levels in 50 ms windows; steady = within 3 dB of the body, +0.3 s / -0.1 s; loop up to 4 s, 80% of
+  it; crossfade up to 1 s, 40% of the loop; start nudged ±25 ms (coarse 4 frames, then 1) to the best correlation of a
+  40 ms window at the crossfade's middle; `loopLikeness` = the correlation over the whole crossfade);
+  `velocityLayersAt / roundRobinsAt (key, keyswitch)`.
+- `Sampler.*`: voices on the heap (`std::vector`, 1024 slots; `noteScratch` / `idScratch` preallocated: nothing big on
+  the audio thread's stack); keyswitch state (program change: `swDefault`, else the first articulation (our choice);
+  `chooseKeyswitch` from the page via `pendingSwitch`); loops read two positions in the crossfade with weights
+  (1-t, t) / sqrt (w1² + w2² + 2 r w1 w2), r = the loop's likeness (linear when alike, equal power when not); a sustain
+  loop stops at note-off (`stopAtWrap` inside its crossfade); `Settings::dynamics` (velocity / modWheel) and
+  `autoSustain`; MOD WHEEL: held regions ignore velocity at note-on, all their layers start, each voice's `wheelGain` =
+  sqrt share between neighbouring layers' middles (in velocity) x the velocity curve at the wheel's value, ramped
+  across each piece; CC 11 squared, with LEVEL / PAN; POLYPHONY in notes (`noteId`), `makeRoom`: oldest released note,
+  else the oldest held that isn't the lowest / highest of 3+ held keys; `getActiveNotes`, `getModWheel`,
+  `getExpression`, `getKeyswitch`.
+- Parameters (hint 43, `pr7o020`): `instDynamics` (`dynamicsNames` Velocity / Mod Wheel), `instAutoSustain` (on);
+  POLYPHONY reads in notes. The processor keeps the chosen keyswitch in the project ("Instrument" child's
+  `keyswitch`; applied once its instrument is installed: `pendingKeyswitch`).
+- UI: the INSTRUMENT page's ARTICULATIONS buttons (`articulationName`: a label starting with its key's SFZ name gets
+  the plugin's name, following NOTE NAMES), info per articulation (`updateInfo`), HELD / LOOPS / AUTO SUSTAIN counts,
+  DYNAMICS and AUTO SUSTAIN controls; `InstrumentKeyboard::markSwitch` (keyswitch keys familyOrange, the chosen
+  0.95, others 0.4); `RegionMap` filtered to the chosen articulation (`rebuild` on a switch).
+- Checked on the real files (temporary probes, not committed): all 31 load, 0 problems, 0 unread; AUTO SUSTAIN's
+  level over 12-24 s of looping vs the recording's own steady part on 64 notes of 5 instruments: the same spread
+  (median 4-6 dB, the bowing's swell). Demo WAVs rendered for the owner. Not checked: listening.
+
 ## The plan (`PR7-O PLAN.md`), next
 
-Stage 2 (0.2.0), held notes: SFZ loops (`loop_mode`, `loop_start` / `loop_end`, crossfaded), release samples
-(`trigger=release`, `rt_decay`), dynamics on the mod wheel (`xfin_*` / `xfout_*`, `amp_velcurve`), CC 11 expression, a
-polyphony / stealing scheme for big chords. Ask the owner which library to start with (VSCO 2 CE is the most complete
-single download) and which sections matter most for their music. Stage 3 brings disk streaming (DiskStreamer) and the
-libraries' quirks (tested on generated copies laid out like them). Stage 6 gives sections mixer strips (dsp/mixer).
+Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
+`xfout_*`, `amp_velcurve`), for libraries that use them (VSCO's strings don't). Then (ask the owner): the rest of VSCO
+(brass, woodwinds, percussion, choir has none in VSCO), stage 3's library browser by section and disk streaming
+(DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), stage 4's CC / channel articulations,
+stage 5 legato, stage 6 the stage and mixer strips (dsp/mixer).
 
 ## Rules (from the owner and the family's CLAUDE.md files)
 
@@ -130,6 +172,8 @@ libraries' quirks (tested on generated copies laid out like them). Stage 6 gives
 - **Screenshots** via `xvfb-run -a build/tests/ParagonX1Tests "[snapshot]"` with `PARAGON_SNAPSHOT=<png>`:
   `PARAGON_SNAPSHOT_WIDTH` (1600; 3200 for 2x), `PARAGON_SNAPSHOT_PAGE=instrument|fx|presets|settings`,
   `PARAGON_SNAPSHOT_INSTRUMENT=1` (a generated demo instrument: 16 zones x 3 layers x 2 round robins),
+  `PARAGON_SNAPSHOT_SFZ=<file>` (an SFZ from disk, e.g. VSCO's `ViolinEns-KS.sfz` in the scratchpad),
+  `PARAGON_SNAPSHOT_SWITCH=<note>` (that keyswitch chosen),
   `PARAGON_SNAPSHOT_NOTES=1` (a chord held), `PARAGON_SNAPSHOT_LOADING=1` (the progress box), `PARAGON_SNAPSHOT_KEYBOARD=0`,
   `PARAGON_SNAPSHOT_FX=eq|dominion|comp|limiter|sends|delay|reverb|modfx|mod|mod2|lofi|inserts|insdrive|insglitch|insmod|inslofi`
   (`PARAGON_SNAPSHOT_BUS=1-4`, `PARAGON_SNAPSHOT_MATCH=1`, `PARAGON_SNAPSHOT_RACK=1`), `PARAGON_SNAPSHOT_PRESET`,

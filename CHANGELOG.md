@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.2.0
+
+**VSCO 2 Community Edition's strings play properly.** Built against the real files (Versilian Studios' open library,
+CC0: its 31 string instruments, violin, viola and cello sections, solo violin, contrabass, read in the build machine's
+scratch space, never shipped): all 31 now load with no problems and nothing left unread.
+
+**Keyswitch instruments** (VSCO's `-KS` files, and any SFZ with `sw_lokey` / `sw_hikey` / `sw_last` / `sw_lolast` /
+`sw_hilast` / `sw_default` / `sw_label`): the keys in the switching range choose an articulation and don't sound; it
+starts on the file's default. Before, a keyswitch file played every articulation at once. The INSTRUMENT page lists the
+**articulations** (click one to switch, the chosen one lit), the keyboard marks the switching keys in orange (the chosen
+one brighter), and the region map shows the chosen articulation's regions. A label written with its key's name in SFZ's
+naming ("C2 Sustain", middle C = C4) shows the plugin's name for that key instead, as the keyboard and NOTE NAMES do
+(C1 with Cubase-style names). The articulation chosen is kept with the project.
+
+**Each `<control>` header now holds for the regions after it** (`default_path`, `note_offset`, `octave_offset`).
+VSCO's keyswitch files start each articulation with its own `<control>` and folder; 0.1.0 kept only the last, so most
+of their samples would have been looked for in the wrong folder.
+
+**AUTO SUSTAIN** (our own design; on by default): VSCO's sustains are 7-17 s recordings with no loop points that end
+with the bow coming off, so a note held longer used to fade out. Now a held note crossfades back into the steady part
+of its own recording before the bow-off, for as long as you hold it. Where to loop is found as the instrument loads:
+the stretch within 3 dB of the note's typical level, the loop up to 4 s long with a crossfade up to 1 s, its start
+nudged (by up to 25 ms) to where the sound lines up best, so the two sides don't cancel. Measured on 64 of VSCO's
+sustain and tremolo notes held for 25 s: the level over the looped part (12-24 s) moves no more than over the recording's
+own steady part (the spread of 0.2 s levels, median 4-6 dB in both: the bowing's natural swell). Not checked: whether the joins can be heard (your
+ears).
+
+**Loops in SFZ files** (`loop_mode` loop_continuous / loop_sustain, `loop_start`, `loop_end`, `loop_crossfade`), for
+libraries that have them: crossfaded with a curve that keeps the level for how alike the loop's two ends are.
+
+**DYNAMICS: MOD WHEEL** (our own design; VELOCITY is the default, as the file says): a held note (sustain, tremolo)
+starts every one of its velocity layers at once and the mod wheel crossfades between them, soft to loud, while you hold
+it (equal power between neighbouring layers), and sets the level as velocity would. Shorts (spiccato, pizzicato) still
+go by velocity. Which recordings count as held is our own rule from the files' shapes (a held note stays near its level;
+a plucked or bounced one peaks at its start and falls): of 431 VSCO string regions it misjudged 3, all contrabass.
+
+**CC 11 (EXPRESSION)** turns the instrument down (the squared curve SFZ uses for velocity: 64 is about 12 dB down).
+
+**POLYPHONY counts notes**, not voices (a note on the mod wheel plays several), and past it a big chord keeps its
+lowest and highest notes: the oldest note let go goes first, then the oldest held inner note.
+
+Also read now: `ampeg_dynamic` (it changes nothing here: PR7-O's envelope has no controllers to follow).
+
+Not yet: release samples (`trigger=release`), crossfades written in the file (`xfin` / `xfout`): VSCO's strings use
+neither. A tip: VSCO's files raise every sample by 20 dB, so a loud chord can go over 0 dBFS; turn LEVEL down a few dB.
+
 ## 0.1.0
 
 The first Paragon PR7-O: the PR7 family's orchestra instrument, made from Paragon PR7-D 0.70.0 with the drums taken

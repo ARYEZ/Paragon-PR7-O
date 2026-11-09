@@ -26,24 +26,26 @@ namespace sampler
         return -1;
     }
 
-    int Program::velocityLayersAt (int key) const
+    int Program::velocityLayersAt (int key, int keyswitch) const
     {
         if (key < 0 || key >= 128)
             return 0;
         std::set<std::pair<int, int>> ranges;
         for (const auto i : byKey[(size_t) key])
-            ranges.insert ({ regions[(size_t) i].loVel, regions[(size_t) i].hiVel });
+            if (keyswitch == anyKeyswitch || regions[(size_t) i].playsUnder (keyswitch))
+                ranges.insert ({ regions[(size_t) i].loVel, regions[(size_t) i].hiVel });
         return (int) ranges.size();
     }
 
-    int Program::roundRobinsAt (int key) const
+    int Program::roundRobinsAt (int key, int keyswitch) const
     {
         if (key < 0 || key >= 128)
             return 0;
         std::map<std::pair<int, int>, int> perRange;
         auto most = 0;
         for (const auto i : byKey[(size_t) key])
-            most = juce::jmax (most, ++perRange[{ regions[(size_t) i].loVel, regions[(size_t) i].hiVel }]);
+            if (keyswitch == anyKeyswitch || regions[(size_t) i].playsUnder (keyswitch))
+                most = juce::jmax (most, ++perRange[{ regions[(size_t) i].loVel, regions[(size_t) i].hiVel }]);
         return most;
     }
 
@@ -60,6 +62,187 @@ namespace sampler
         sequence.assign (regions.size(), 0);
     }
 
+    int Program::articulationOf (int keyswitch) const noexcept
+    {
+        for (int i = 0; i < (int) articulations.size(); ++i)
+            if (keyswitch >= articulations[(size_t) i].lo && keyswitch <= articulations[(size_t) i].hi)
+                return i;
+        return -1;
+    }
+
+    namespace
+    {
+        // A recording's level in 50 ms windows (both sides), and the median of its middle three fifths.
+        struct Levels { std::vector<float> windows; int window = 1; float body = 0.0f; };
+        Levels levelsOf (const Sample& sample)
+        {
+            Levels result;
+            result.window = juce::jmax (1, (int) (0.05 * sample.sampleRate));
+            const auto count = sample.length() / result.window;
+            if (count < 8)
+                return result;
+            result.windows.resize ((size_t) count);
+            for (int w = 0; w < count; ++w)
+            {
+                double sum = 0.0;
+                for (const auto& c : sample.channels)
+                    for (int i = w * result.window; i < (w + 1) * result.window; ++i)
+                        sum += (double) c[(size_t) i] * c[(size_t) i];
+                result.windows[(size_t) w] = (float) std::sqrt (sum / (double) (result.window * (int) sample.channels.size()));
+            }
+            std::vector<float> middle (result.windows.begin() + count / 5, result.windows.begin() + count * 4 / 5);
+            std::nth_element (middle.begin(), middle.begin() + (long) middle.size() / 2, middle.end());
+            result.body = middle[middle.size() / 2];
+            return result;
+        }
+    }
+
+    bool isSustained (const Sample& sample)
+    {
+        const auto levels = levelsOf (sample);
+        if (levels.windows.empty() || levels.body < 1.0e-6f)
+            return false;
+        const auto& w = levels.windows;
+        const auto count = (int) w.size();
+        const auto peak = *std::max_element (w.begin(), w.end());
+        const auto from = count / 5, to = count * 4 / 5, quarter = juce::jmax (1, (to - from) / 4);
+        double early = 0.0, late = 0.0;
+        for (int i = from; i < from + quarter; ++i)
+            early += w[(size_t) i];
+        for (int i = to - quarter; i < to; ++i)
+            late += w[(size_t) i];
+        const auto peakDb = juce::Decibels::gainToDecibels (peak / levels.body);
+        const auto fallDb = juce::Decibels::gainToDecibels ((float) ((early + 1.0e-12) / (late + 1.0e-12)));
+        return peakDb <= 13.0f && fallDb <= 9.0f;
+    }
+
+    SustainPoints findSustain (const Sample& sample)
+    {
+        SustainPoints points;
+        const auto levels = levelsOf (sample);
+        if (levels.windows.empty() || levels.body < 1.0e-6f)
+            return points;
+        const auto rate = sample.sampleRate;
+        const auto near = levels.body * 0.7f;   // within 3 dB
+        int first = -1, last = -1;
+        for (int w = 0; w < (int) levels.windows.size(); ++w)
+            if (levels.windows[(size_t) w] >= near)
+            {
+                if (first < 0)
+                    first = w;
+                last = w;
+            }
+        const auto steadyStart = (juce::int64) first * levels.window + (juce::int64) (0.3 * rate);
+        const auto steadyEnd = (juce::int64) (last + 1) * levels.window - (juce::int64) (0.1 * rate);
+        const auto steady = steadyEnd - steadyStart;
+        if (steady < (juce::int64) (1.5 * rate))
+            return points;
+        const auto span = juce::jmin ((juce::int64) (4.0 * rate), steady * 4 / 5);
+        points.found = true;
+        points.end = steadyEnd;
+        points.start = steadyEnd - span;
+        points.crossfade = (int) juce::jmin ((juce::int64) (1.0 * rate), span * 2 / 5);
+        // The start moved to where the sound a loop's length before the crossfade's middle best matches it (mono, a
+        // 40 ms window): coarse steps of 4 frames, then each frame around the best.
+        const auto window = juce::jmax (16, (int) (0.04 * rate)), reach = (int) (0.025 * rate);
+        const auto middle = points.end - points.crossfade / 2 - window / 2;
+        const auto mono = [&sample] (juce::int64 i)
+        {
+            float sum = 0.0f;
+            for (const auto& c : sample.channels)
+                sum += c[(size_t) i];
+            return sum;
+        };
+        std::vector<float> here ((size_t) window);
+        for (int i = 0; i < window; ++i)
+            here[(size_t) i] = mono (middle + i);
+        const auto likenessAt = [&] (int shift)
+        {
+            // The frames a loop's length earlier, the loop's start moved by `shift`.
+            const auto back = middle - (points.end - (points.start + shift));
+            if (back < 0 || back + window > sample.length())
+                return -2.0;
+            double xy = 0.0, xx = 0.0, yy = 0.0;
+            for (int i = 0; i < window; ++i)
+            {
+                const auto x = (double) here[(size_t) i], y = (double) mono (back + i);
+                xy += x * y;
+                xx += x * x;
+                yy += y * y;
+            }
+            return xx > 0.0 && yy > 0.0 ? xy / std::sqrt (xx * yy) : 0.0;
+        };
+        auto best = 0;
+        auto bestLikeness = -3.0;
+        for (int shift = -reach; shift <= reach; shift += 4)
+            if (const auto l = likenessAt (shift); l > bestLikeness)
+                bestLikeness = l, best = shift;
+        for (int shift = best - 4; shift <= best + 4; ++shift)
+            if (const auto l = likenessAt (shift); l > bestLikeness)
+                bestLikeness = l, best = shift;
+        points.start = juce::jlimit<juce::int64> ((juce::int64) points.crossfade, points.end - 2, points.start + best);
+        points.likeness = (float) loopLikeness (sample, points.start, points.end, points.crossfade);
+        return points;
+    }
+
+    float loopLikeness (const Sample& sample, juce::int64 loopStart, juce::int64 loopEnd, int crossfade)
+    {
+        // Their correlation over the crossfade: the frames before the loop's end against those before its start.
+        if (crossfade <= 0 || loopStart < crossfade || loopEnd > sample.length())
+            return 0.0f;
+        double xy = 0.0, xx = 0.0, yy = 0.0;
+        for (const auto& c : sample.channels)
+            for (juce::int64 i = 0; i < crossfade; ++i)
+            {
+                const auto x = (double) c[(size_t) (loopEnd - crossfade + i)], y = (double) c[(size_t) (loopStart - crossfade + i)];
+                xy += x * y;
+                xx += x * x;
+                yy += y * y;
+            }
+        return xx > 0.0 && yy > 0.0 ? (float) juce::jlimit (-1.0, 1.0, xy / std::sqrt (xx * yy)) : 0.0f;
+    }
+
+    void prepareRegions (Program& program)
+    {
+        // Each sample's shape and points worked out once, however many regions play it.
+        std::map<const Sample*, SustainPoints> found;
+        std::map<const Sample*, bool> shapes;
+        const auto sustained = [&shapes] (const Sample& s)
+        {
+            auto it = shapes.find (&s);
+            if (it == shapes.end())
+                it = shapes.emplace (&s, isSustained (s)).first;
+            return it->second;
+        };
+        for (auto& r : program.regions)
+        {
+            if (r.sample == nullptr)
+                continue;
+            r.held = ! r.oneShot && (double) r.sample->length() / r.sample->sampleRate > 2.5 && sustained (*r.sample);
+            r.autoLoop = false;
+            if (r.loop != Region::Loop::none)
+            {
+                // The file's own loop: its crossfade's curve from how alike its two sides are.
+                r.loopLikeness = loopLikeness (*r.sample, r.loopStart, r.loopEnd, r.loopCrossfade);
+                continue;
+            }
+            if (! r.held)
+                continue;
+            auto it = found.find (r.sample.get());
+            if (it == found.end())
+                it = found.emplace (r.sample.get(), findSustain (*r.sample)).first;
+            const auto& points = it->second;
+            if (points.found && points.start > r.offset && points.end <= r.lastFrame())
+            {
+                r.autoLoop = true;
+                r.loopStart = points.start;
+                r.loopEnd = points.end;
+                r.loopCrossfade = points.crossfade;
+                r.loopLikeness = points.likeness;
+            }
+        }
+    }
+
     std::shared_ptr<Program> programFrom (std::shared_ptr<const Sample> sample, int keyCenter)
     {
         auto program = std::make_shared<Program>();
@@ -73,6 +256,7 @@ namespace sampler
         r.sample = std::move (sample);
         r.keyCenter = keyCenter;
         program->regions.push_back (std::move (r));
+        prepareRegions (*program);
         program->index();
         return program;
     }
@@ -134,25 +318,27 @@ namespace sampler
                 return result;
             }
 
-            // The headers and their opcodes, each region with everything it inherits; and <control>'s.
-            std::vector<Opcodes> parse (const juce::String& text, Opcodes& control)
+            // The headers and their opcodes, each region with everything it inherits, and the <control> in force where it's
+            // written (its opcodes as "control.<name>": 0.2.0, a new <control> replaces the one before).
+            std::vector<Opcodes> parse (const juce::String& text)
             {
                 std::vector<Opcodes> regions;
-                Opcodes global, master, group, current;
+                Opcodes control, global, master, group, current;
                 juce::String header;
                 const auto flush = [&]
                 {
                     if (header == "region")
                     {
                         Opcodes r;
+                        for (const auto& [k, v] : control)
+                            r["control." + k] = v;
                         for (const auto* level : { &global, &master, &group, &current })
                             for (const auto& [k, v] : *level)
                                 r[k] = v;
                         regions.push_back (std::move (r));
                     }
                     else if (header == "control")
-                        for (const auto& [k, v] : current)
-                            control[k] = v;
+                        control = current;
                     else if (header == "global")
                         global = current;
                     else if (header == "master")
@@ -235,12 +421,14 @@ namespace sampler
                     "seq_length", "seq_position", "lorand", "hirand", "tune", "pitch", "transpose", "pitch_keytrack",
                     "volume", "gain", "amplitude", "pan", "amp_veltrack", "offset", "end",
                     "ampeg_delay", "ampeg_attack", "ampeg_hold", "ampeg_decay", "ampeg_sustain", "ampeg_release",
-                    "bend_up", "bend_down", "trigger", "default_path", "note_offset", "octave_offset" };
+                    "bend_up", "bend_down", "trigger", "default_path", "note_offset", "octave_offset",
+                    "sw_lokey", "sw_hikey", "sw_last", "sw_lolast", "sw_hilast", "sw_default", "sw_label",
+                    "loop_mode", "loopmode", "loop_start", "loopstart", "loop_end", "loopend", "loop_crossfade", "ampeg_dynamic" };
                 return names;
             }
             bool doesNothingToSound (const juce::String& opcode)
             {
-                return opcode.endsWith ("_label") || opcode.startsWith ("label_cc") || opcode.startsWith ("hint_")
+                return opcode.startsWith ("control.") || opcode.endsWith ("_label") || opcode.startsWith ("label_cc") || opcode.startsWith ("hint_")
                     || opcode == "group" || opcode == "output" || opcode == "polyphony" || opcode == "note_polyphony";
             }
         }
@@ -270,34 +458,40 @@ namespace sampler
             program->name = file.getFileNameWithoutExtension();
             program->source = file;
             std::map<juce::String, juce::String> defines;
-            Opcodes control;
-            const auto parsed = parse (preprocess (file, defines, 0, program->problems), control);
+            const auto parsed = parse (preprocess (file, defines, 0, program->problems));
             if (parsed.empty() && program->problems.isEmpty())
                 program->problems.add ("no regions in " + file.getFileName());
 
-            const auto defaultPath = control.count ("default_path") ? control["default_path"].replaceCharacter ('\\', '/') : juce::String();
-            const auto keyShift = (int) number (control, "note_offset", 0.0f) + 12 * (int) number (control, "octave_offset", 0.0f);
-            const auto keyOf = [keyShift] (const juce::String& text)
-            {
-                const auto k = noteNumber (text);
-                return k < 0 ? -1 : k + keyShift;
-            };
-
             std::map<juce::String, int> unread;   // "opcode" or "opcode=value" -> regions
             std::map<juce::String, std::shared_ptr<const Sample>> loaded;   // path -> sample (each file once)
-            std::vector<std::pair<Region, juce::String>> pending;           // regions and their files' paths
+            struct Pending { Region region; juce::String path; float crossfadeSeconds = 0.0f; };
+            std::vector<Pending> pending;                                  // regions, their files' paths, loop crossfades
             auto skippedRelease = 0, skippedGenerators = 0;
 
             for (const auto& op : parsed)
             {
                 for (const auto& [k, v] : op)
-                    if (k == "loop_mode")
+                    if (k == "loop_mode" || k == "loopmode")
                     {
-                        if (v.toLowerCase() != "one_shot" && v.toLowerCase() != "no_loop")
-                            ++unread[k + "=" + v];   // loops: plan stage 2
+                        const auto mode = v.toLowerCase();
+                        if (mode != "one_shot" && mode != "no_loop" && mode != "loop_continuous" && mode != "loop_sustain")
+                            ++unread[k + "=" + v];
                     }
                     else if (! readOpcodes().count (k) && ! doesNothingToSound (k))
                         ++unread[k];
+                // The <control> in force here.
+                const auto controlValue = [&op] (const char* name, const juce::String& otherwise = {})
+                {
+                    const auto it = op.find (juce::String ("control.") + name);
+                    return it != op.end() ? it->second : otherwise;
+                };
+                const auto defaultPath = controlValue ("default_path").replaceCharacter ('\\', '/');
+                const auto keyShift = controlValue ("note_offset", "0").getIntValue() + 12 * controlValue ("octave_offset", "0").getIntValue();
+                const auto keyOf = [keyShift] (const juce::String& text)
+                {
+                    const auto k = noteNumber (text);
+                    return k < 0 ? -1 : k + keyShift;
+                };
                 const auto* sampleName = find (op, "sample");
                 if (sampleName == nullptr || sampleName->isEmpty())
                     continue;
@@ -343,22 +537,66 @@ namespace sampler
                 r.decay = juce::jmax (0.0f, number (op, "ampeg_decay", 0.0f));
                 r.sustain = juce::jlimit (0.0f, 1.0f, number (op, "ampeg_sustain", 100.0f) / 100.0f);
                 r.release = juce::jmax (0.0f, number (op, "ampeg_release", 0.001f));
-                if (const auto* mode = find (op, "loop_mode"))
-                    r.oneShot = mode->toLowerCase() == "one_shot";
+                const auto* mode = find (op, "loop_mode");
+                if (mode == nullptr)
+                    mode = find (op, "loopmode");
+                const auto modeName = mode != nullptr ? mode->toLowerCase() : juce::String();
+                r.oneShot = modeName == "one_shot";
+                const auto* loopStart = find (op, "loop_start") != nullptr ? find (op, "loop_start") : find (op, "loopstart");
+                const auto* loopEnd = find (op, "loop_end") != nullptr ? find (op, "loop_end") : find (op, "loopend");
+                if ((modeName == "loop_continuous" || modeName == "loop_sustain") && loopStart != nullptr && loopEnd != nullptr
+                    && loopEnd->getLargeIntValue() > loopStart->getLargeIntValue())
+                {
+                    r.loop = modeName == "loop_continuous" ? Region::Loop::continuous : Region::Loop::sustain;
+                    r.loopStart = juce::jmax<juce::int64> (0, loopStart->getLargeIntValue());
+                    r.loopEnd = loopEnd->getLargeIntValue();
+                    r.loopCrossfade = -1;   // seconds read below, frames once the sample's rate is known
+                }
+                // Keyswitches: the program's switching keys and default; this region's switch.
+                if (const auto* lo = find (op, "sw_lokey"); lo != nullptr && keyOf (*lo) >= 0)
+                {
+                    const auto hi = find (op, "sw_hikey") != nullptr ? keyOf (*find (op, "sw_hikey")) : keyOf (*lo);
+                    program->swLoKey = program->swLoKey < 0 ? keyOf (*lo) : juce::jmin (program->swLoKey, keyOf (*lo));
+                    program->swHiKey = juce::jmax (program->swHiKey, hi);
+                }
+                if (const auto* d = find (op, "sw_default"); d != nullptr && keyOf (*d) >= 0 && program->swDefault < 0)
+                    program->swDefault = keyOf (*d);
+                if (const auto* last = find (op, "sw_last"); last != nullptr && keyOf (*last) >= 0)
+                    r.swLoLast = r.swHiLast = keyOf (*last);
+                else if (const auto* lolast = find (op, "sw_lolast"); lolast != nullptr && keyOf (*lolast) >= 0)
+                {
+                    r.swLoLast = keyOf (*lolast);
+                    const auto* hilast = find (op, "sw_hilast");
+                    r.swHiLast = hilast != nullptr && keyOf (*hilast) >= 0 ? keyOf (*hilast) : r.swLoLast;
+                }
+                if (r.swLoLast >= 0)
+                {
+                    auto known = false;
+                    for (const auto& a : program->articulations)
+                        known = known || (a.lo == r.swLoLast && a.hi == r.swHiLast);
+                    if (! known)
+                    {
+                        const auto* label = find (op, "sw_label");
+                        program->articulations.push_back ({ r.swLoLast, r.swHiLast,
+                                                            label != nullptr && label->isNotEmpty() ? label->trim()
+                                                                : "Keyswitch " + juce::MidiMessage::getMidiNoteName (r.swLoLast, true, true, 4) });
+                    }
+                }
+                const auto crossfadeSeconds = juce::jmax (0.0f, number (op, "loop_crossfade", 0.0f));
                 r.bendUp = number (op, "bend_up", 200.0f);
                 r.bendDown = number (op, "bend_down", -200.0f);
                 if (r.loKey > r.hiKey || r.loVel > r.hiVel)
                     continue;
 
                 const auto path = (defaultPath + *sampleName).replaceCharacter ('\\', '/');
-                pending.emplace_back (std::move (r), path);
+                pending.push_back ({ std::move (r), path, crossfadeSeconds });
             }
 
             // The audio: each file once, in the order the regions name them.
             std::vector<juce::String> files;
-            for (const auto& [r, path] : pending)
-                if (loaded.emplace (path, nullptr).second)
-                    files.push_back (path);
+            for (const auto& p : pending)
+                if (loaded.emplace (p.path, nullptr).second)
+                    files.push_back (p.path);
             for (size_t f = 0; f < files.size(); ++f)
             {
                 if (progress && ! progress ((double) f / (double) files.size()))
@@ -380,18 +618,31 @@ namespace sampler
             if (progress)
                 progress (1.0);
 
-            for (auto& [r, path] : pending)
-                if (auto sample = loaded[path]; sample != nullptr && r.offset < sample->length() - 1)
+            for (auto& p : pending)
+            {
+                auto& r = p.region;
+                if (auto sample = loaded[p.path]; sample != nullptr && r.offset < sample->length() - 1)
                 {
+                    if (r.loop != Region::Loop::none)
+                    {
+                        // A loop past the file's end, or too short to play, isn't one.
+                        r.loopEnd = juce::jmin (r.loopEnd, (juce::int64) sample->length() - 1);
+                        if (r.loopEnd - r.loopStart < 2)
+                            r.loop = Region::Loop::none;
+                        r.loopCrossfade = (int) juce::jlimit<juce::int64> (0, (r.loopEnd - r.loopStart) / 2,
+                                                                          (juce::int64) (p.crossfadeSeconds * sample->sampleRate));
+                    }
                     r.sample = std::move (sample);
                     program->regions.push_back (std::move (r));
                 }
+            }
             if (skippedRelease > 0)
                 program->unread.add ("release / legato samples (" + juce::String (skippedRelease) + ")");
             if (skippedGenerators > 0)
                 program->unread.add ("built-in sounds such as *sine (" + juce::String (skippedGenerators) + ")");
             for (const auto& [opcode, count] : unread)
                 program->unread.add (opcode + " (" + juce::String (count) + ")");
+            prepareRegions (*program);
             program->index();
             return program;
         }

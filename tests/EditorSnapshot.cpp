@@ -18,6 +18,8 @@
 //                                    example user presets), =settings
 //   PARAGON_SNAPSHOT_INSTRUMENT=1    a demo instrument made here (invented: sines in 16 zones x 3 velocity layers x 2 round
 //                                    robins over C1 to C6, as "Demo Strings.sfz"), loaded
+//   PARAGON_SNAPSHOT_SFZ=<file>      instead, an SFZ from your computer (none ship with the tests), loaded
+//   PARAGON_SNAPSHOT_SWITCH=<key>    with its keyswitch `key` (a MIDI note number) chosen
 //   PARAGON_SNAPSHOT_NOTES=1         and a C major chord (C2 G2 E3 C4) held on the keyboard, sounding
 //   PARAGON_SNAPSHOT_LOADING=1       the instrument page while an instrument loads, its progress box 62% done
 //   PARAGON_SNAPSHOT_KEYBOARD=0      the keyboard hidden (the shorter window)
@@ -94,6 +96,19 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
     const auto demo = env ("PARAGON_SNAPSHOT_INSTRUMENT") == "1" || env ("PARAGON_SNAPSHOT_RACK") == "1" || page == "presets";
     if (demo)
         processor.setProgram (demoInstrument(), "C:/Libraries/Demo Orchestra/Strings/Demo Strings.sfz");
+    if (const auto sfz = env ("PARAGON_SNAPSHOT_SFZ"); sfz.isNotEmpty())
+    {
+        processor.loadInstrument (juce::File (sfz));
+        REQUIRE (processor.waitForInstrument());
+        REQUIRE (processor.getProgram() != nullptr);
+    }
+    if (const auto key = env ("PARAGON_SNAPSHOT_SWITCH"); key.isNotEmpty())
+    {
+        processor.chooseKeyswitch (key.getIntValue());
+        juce::AudioBuffer<float> buffer (2, 256);
+        juce::MidiBuffer midi;
+        processor.processBlock (buffer, midi);
+    }
     if (page == "presets")
     {
         processor.saveCurrentRigAs ("Demo Strings Hall");
@@ -119,8 +134,10 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
     // A chord held on the keyboard, played for a moment so it's sounding.
     if (env ("PARAGON_SNAPSHOT_NOTES") == "1")
     {
-        for (const auto note : { 36, 43, 52, 60 })
-            processor.getKeyboardState().noteOn (1, note, 0.8f);
+        const auto* program = processor.getProgram().get();
+        const auto lowest = program != nullptr ? program->lowestKey() : 36;
+        for (const auto note : { 0, 7, 16, 24 })   // C major from the instrument's lowest C (C2 G2 E3 C4 on the demo)
+            processor.getKeyboardState().noteOn (1, (lowest + 11) / 12 * 12 + note, 0.8f);
         juce::AudioBuffer<float> buffer (2, 256);
         juce::MidiBuffer midi;
         for (int block = 0; block < 40; ++block)

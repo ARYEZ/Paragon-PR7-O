@@ -599,6 +599,9 @@ sampler::Sampler::Settings ParagonX1AudioProcessor::getSamplerSettings() const n
     s.releaseScale = param (ParamIDs::instRelease);
     s.polyphony = juce::roundToInt (param (ParamIDs::instVoices));
     s.channel = juce::roundToInt (param (ParamIDs::midiChannel));
+    s.dynamics = juce::roundToInt (param (ParamIDs::instDynamics)) == 1 ? sampler::Sampler::Dynamics::modWheel
+                                                                       : sampler::Sampler::Dynamics::velocity;
+    s.autoSustain = isOn (ParamIDs::instAutoSustain);
     return s;
 }
 
@@ -805,6 +808,9 @@ void ParagonX1AudioProcessor::installProgram (std::shared_ptr<const sampler::Pro
     program = std::move (newProgram);
     programForAudio = program.get();
     instrumentFile = file;
+    // The project's articulation, once its instrument is in (the sampler takes it after it sees the new program).
+    if (program != nullptr && pendingKeyswitch >= 0 && program->isKeyswitch (pendingKeyswitch))
+        sampler.chooseKeyswitch (std::exchange (pendingKeyswitch, -1));
     instrumentBroadcaster.sendChangeMessage();
 }
 
@@ -1205,7 +1211,7 @@ void ParagonX1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty (rigFactoryKey, currentRig.factoryName, nullptr);
     state.setProperty (rigModifiedKey, rigModified.load(), nullptr);
     if (instrumentFile.isNotEmpty())
-        state.appendChild (juce::ValueTree (instrumentKey, { { "file", instrumentFile } }), nullptr);
+        state.appendChild (juce::ValueTree (instrumentKey, { { "file", instrumentFile }, { "keyswitch", sampler.getKeyswitch() } }), nullptr);
     if (! midiLinks.isEmpty())
         state.appendChild (juce::ValueTree::fromXml (*midiLinks.toXml()), nullptr);
     if (auto xml = state.createXml())
@@ -1221,9 +1227,11 @@ void ParagonX1AudioProcessor::setStateInformation (const void* data, int sizeInB
 
     auto state = juce::ValueTree::fromXml (*xml);
     juce::String instrument;
+    auto keyswitch = -1;
     if (auto saved = state.getChildWithName (instrumentKey); saved.isValid())
     {
         instrument = saved["file"].toString();
+        keyswitch = (int) saved.getProperty ("keyswitch", -1);
         state.removeChild (saved, nullptr);
     }
     // MIDI LEARN's links: the project's, if it has any (else the ones this instance has: its default).
@@ -1241,6 +1249,7 @@ void ParagonX1AudioProcessor::setStateInformation (const void* data, int sizeInB
         else
             startLoading (instrument, false);
     }
+    pendingKeyswitch = keyswitch;   // chosen once its instrument is in (0.2.0)
 
     // Restoring the project changed parameters, which marked the preset as modified; put back what was saved instead.
     const auto rigFile = state[rigFileKey].toString();
