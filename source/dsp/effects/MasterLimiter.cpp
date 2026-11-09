@@ -444,13 +444,34 @@ namespace effects
         return (int) std::lround ((s.truePeak ? 1.0 : 0.25) * 0.001 * sampleRate);
     }
 
+    const std::array<int, 3>& MasterLimiter::oversamplingLatency()
+    {
+        // The same filters prepare() makes, measured once.
+        static const auto measured = []
+        {
+            std::array<int, 3> latency {};
+            for (size_t i = 0; i < latency.size(); ++i)
+            {
+                // (initialised as prepare() does: its whole-sample latency is set up there)
+                juce::dsp::Oversampling<float> filters (2, i + 1, juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple, true, true);
+                filters.initProcessing (512);
+                latency[i] = (int) filters.getLatencyInSamples();
+            }
+            return latency;
+        }();
+        return measured;
+    }
+
     int MasterLimiter::getLatencySamples (const Settings& s) const noexcept
     {
         if (! s.on || limiter::isLegacy (s.style))
             return 0;
         const auto c = configurationFor (s);
         const auto factor = 1 << c.oversampling;
-        auto latency = c.oversampling > 0 ? (int) oversamplers[(size_t) c.oversampling - 1]->getLatencyInSamples() : 0;
+        // (PR7-O 0.4.0: from the delays measured once, not the oversamplers themselves: the processor's timer asks this
+        // on the message thread, and the oversamplers are replaced by prepare() on the host's; before the first prepare
+        // there were none. pluginval's parameter fuzzing crashed here about one run in eight.)
+        auto latency = c.oversampling > 0 ? oversamplingLatency()[(size_t) c.oversampling - 1] : 0;
         const auto coreTruePeak = c.truePeak && factor <= 2;   // at 4x and up the samples are close enough
         latency += (c.lookahead + (coreTruePeak ? limiter::TruePeakDetector::delay : 0)) / factor;
         if (const auto last = postLookahead (s); last >= 0)

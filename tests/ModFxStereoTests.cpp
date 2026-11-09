@@ -1,6 +1,6 @@
 // MOD, MOD 2 and LO-FI (PR7-K's stage 7c): each side kept its own (where PR7-G's mono chain summed them), where
 // they sit (after the sends' returns, before the LIMITER), off changing nothing, the displays against the sound,
-// CPU, the FX page's view and pages. Played with a saw as a drum sample (PluginTestUtils.h). (The effects themselves: ModFxTests.cpp, PR7-G's own tests.)
+// CPU, the FX page's view and pages. Played with a saw as the instrument (PluginTestUtils.h). (The effects themselves: ModFxTests.cpp, PR7-G's own tests.)
 #include "TestUtils.h"
 #include "PluginTestUtils.h"
 
@@ -31,13 +31,13 @@ namespace
             REQUIRE (parameter != nullptr);
             parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
         }
-        // A saw at `note`'s pitch, `held` seconds long, from slot 0, hit at the start; `seconds` in all. Both channels.
+        // A saw at `note`'s pitch, `held` seconds long, the instrument, played at the start; `seconds` in all. Both channels.
         std::array<std::vector<float>, 2> play (int note, double held, double seconds)
         {
             juce::MidiBuffer starts;   // as MIDI from the DAW (the on-screen keyboard's presses land by the clock: not repeatable)
             std::array<std::vector<float>, 2> out;
             juce::AudioBuffer<float> buffer (2, blockSize);
-            testkit::useSample (processor, 0, testkit::saw (noteHz (note), held));
+            testkit::useSample (processor, testkit::saw (noteHz (note), held));
             starts.addEvent (juce::MidiMessage::noteOn (1, testkit::keyFor (0), 0.8f), 0);
             const auto blocks = (int) (seconds * sampleRate) / blockSize;
             for (int b = 0; b < blocks; ++b)
@@ -97,7 +97,7 @@ TEST_CASE ("MOD / LO-FI: every type keeps a sound on the left on the left (PR7-G
                 continue;
             INFO (effects::Modulation::typeNames[type] << (stereo ? " STEREO" : ""));
             Plugin p;
-            p.set (ParamIDs::drum (0, "Pan"), -1.0f);
+            p.set (ParamIDs::instPan, -1.0f);
             p.set (ParamIDs::modOn, 1.0f);
             p.set (ParamIDs::modType, (float) type);
             p.set (ParamIDs::modStereo, stereo ? 1.0f : 0.0f);
@@ -111,7 +111,7 @@ TEST_CASE ("MOD / LO-FI: every type keeps a sound on the left on the left (PR7-G
     {
         INFO (effects::LoFi::typeNames[type]);
         Plugin p;
-        p.set (ParamIDs::drum (0, "Pan"), -1.0f);
+        p.set (ParamIDs::instPan, -1.0f);
         p.set (ParamIDs::lofiOn, 1.0f);
         p.set (ParamIDs::lofiType, (float) type);
         p.set (ParamIDs::lofiNoise, 0.0f);   // (NOISE's hiss is on both sides, as a phone line's)
@@ -179,6 +179,7 @@ TEST_CASE ("MOD / LO-FI: after the sends' returns (the reverb's tail goes throug
     {
         Plugin p;
         p.set (ParamIDs::reverbOn, 1.0f);
+        p.set (ParamIDs::instSendReverb, 1.0f);
         p.set (ParamIDs::reverbMix, 1.0f);
         p.set (ParamIDs::reverbType, 2.0f);   // HALL
         p.set (ParamIDs::reverbSize, 0.8f);
@@ -282,7 +283,8 @@ TEST_CASE ("MOD / LO-FI: CPU, the kit through AEON, the Rotary and the cassette"
         for (int run = 0; run < 3; ++run)
         {
             Plugin p;
-                if (on)
+            testkit::useSample (p.processor, testkit::saw (110.0, 2.0));
+            if (on)
             {
                 p.set (ParamIDs::modOn, 1.0f);
                 p.set (ParamIDs::modType, (float) (int) Type::flanger);   // AEON: two pedals (one a side), oversampled
@@ -295,7 +297,7 @@ TEST_CASE ("MOD / LO-FI: CPU, the kit through AEON, the Rotary and the cassette"
             const auto started = juce::Time::getMillisecondCounterHiRes();
             for (int b = 0; b < (int) (4.0 * sampleRate) / blockSize; ++b)
             {
-                juce::MidiBuffer midi;   // a drum every eighth of a second, round the kit
+                juce::MidiBuffer midi;   // a note every eighth of a second, round an octave
                 if (b % 23 == 0)
                     midi.addEvent (juce::MidiMessage::noteOn (1, testkit::keyFor ((b / 23) % 12), (juce::uint8) 100), 0);
                 p.processor.processBlock (buffer, midi);
@@ -305,7 +307,7 @@ TEST_CASE ("MOD / LO-FI: CPU, the kit through AEON, the Rotary and the cassette"
         return best;
     };
     const auto off = cpu (false), on = cpu (true);
-    WARN ("the kit, a hit every eighth of a second: MOD / LO-FI off " << off << "% of one core; AEON, Rotary and cassette on " << on << "%");
+    WARN ("a 2 s saw, a note every eighth of a second: MOD / LO-FI off " << off << "% of one core; AEON, Rotary and cassette on " << on << "%");
     CHECK (on < off + 15.0);   // generous for CI machines
 }
 

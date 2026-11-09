@@ -8,7 +8,7 @@ namespace Logo
         // are 0.24 wide and bars 0.2 tall: chunky, for a bold silhouette.
         constexpr float slant = 0.3f;     // how far the top leans right, per unit of height
         constexpr float spacing = 0.1f;
-        constexpr float letterWidths[] = { 0.8f, 0.84f, 0.8f, 0.4f, 0.82f };   // P, R, 7, dash, D
+        constexpr float letterWidths[] = { 0.8f, 0.84f, 0.8f, 0.4f, 0.82f };   // P, R, 7, dash, O
         constexpr float totalWidth = 0.8f + 0.84f + 0.8f + 0.4f + 0.82f + 4.0f * spacing + slant;
 
         // The two speed cuts, as fractions of the height from the top.
@@ -37,7 +37,16 @@ namespace Logo
             addPolygon (path, { { 0.24f, 0.2f }, { 0.56f, 0.2f }, { 0.56f, 0.4f }, { 0.24f, 0.4f } }, x);
         }
 
-        // The letters, 1 unit tall, upright: [0] is P, R and "-D", [1] is the 7.
+        // PR7-O's O, built from the P's parts: the bowl's bevelled corners on all four corners, carried down the whole
+        // height (0.24 sides, 0.2 bars), its counter a hole (the path fills even-odd).
+        void addO (juce::Path& path, float x)
+        {
+            addPolygon (path, { { 0.18f, 0.0f }, { 0.64f, 0.0f }, { 0.82f, 0.18f }, { 0.82f, 0.82f }, { 0.64f, 1.0f },
+                                { 0.18f, 1.0f }, { 0.0f, 0.82f }, { 0.0f, 0.18f } }, x);
+            addPolygon (path, { { 0.24f, 0.2f }, { 0.58f, 0.2f }, { 0.58f, 0.8f }, { 0.24f, 0.8f } }, x);
+        }
+
+        // The letters, 1 unit tall, upright: [0] is P, R and "-O", [1] is the 7.
         std::pair<juce::Path, juce::Path> letterPaths()
         {
             juce::Path pr, seven;
@@ -55,15 +64,11 @@ namespace Logo
                                  { 0.5f, 0.2f }, { 0.0f, 0.2f } }, x);
             x += letterWidths[2] + spacing;
 
-            // "-D" (the drums): a dash at mid height, clear of the speed cuts,
-            // and a D built from the P's parts: its bowl, with the same
-            // bevelled corners, carried down the whole height (0.24 stem and
-            // right side, 0.2 bars), its counter a hole (the path fills even-odd).
+            // "-O" (the orchestra): a dash at mid height, clear of the speed cuts, and the O.
             addPolygon (pr, { { 0.0f, 0.42f }, { 0.4f, 0.42f }, { 0.4f, 0.6f }, { 0.0f, 0.6f } }, x);
             x += letterWidths[3] + spacing;
 
-            addPolygon (pr, { { 0.0f, 0.0f }, { 0.64f, 0.0f }, { 0.82f, 0.18f }, { 0.82f, 0.82f }, { 0.64f, 1.0f }, { 0.0f, 1.0f } }, x);
-            addPolygon (pr, { { 0.24f, 0.2f }, { 0.58f, 0.2f }, { 0.58f, 0.8f }, { 0.24f, 0.8f } }, x);
+            addO (pr, x);
 
             // Lean them forward: the top moves right, the baseline stays put.
             const auto lean = juce::AffineTransform (1.0f, -slant, slant, 0.0f, 1.0f, 0.0f);
@@ -134,15 +139,14 @@ namespace Logo
         const auto box = area.withSizeKeepingCentre (n, n);
         const auto lean = juce::AffineTransform (1.0f, -slant, slant, 0.0f, 1.0f, 0.0f);
 
-        // "7D": the 7 at 0, the D 0.9 letters on; 2.02 letter heights wide with the lean.
+        // "7O": the 7 at 0, the O 0.9 letters on; 2.02 letter heights wide with the lean.
         const auto h = 0.40f * n, top = box.getY() + 0.15f * n;
         const auto left = box.getCentreX() - 2.02f * h * 0.5f;
         juce::Path seven, d;
         d.setUsingNonZeroWinding (false);
         addPolygon (seven, { { 0.0f, 0.0f }, { 0.8f, 0.0f }, { 0.8f, 0.2f }, { 0.44f, 1.0f }, { 0.18f, 1.0f },
                              { 0.5f, 0.2f }, { 0.0f, 0.2f } }, 0.0f);
-        addPolygon (d, { { 0.0f, 0.0f }, { 0.64f, 0.0f }, { 0.82f, 0.18f }, { 0.82f, 0.82f }, { 0.64f, 1.0f }, { 0.0f, 1.0f } }, 0.9f);
-        addPolygon (d, { { 0.24f, 0.2f }, { 0.58f, 0.2f }, { 0.58f, 0.8f }, { 0.24f, 0.8f } }, 0.9f);
+        addO (d, 0.9f);
         const auto place = lean.scaled (h).translated (left, top);
         seven.applyTransform (place);
         d.applyTransform (place);

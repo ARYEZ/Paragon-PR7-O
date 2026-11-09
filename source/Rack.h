@@ -14,11 +14,16 @@
 #include "dsp/effects/Reverb.h"
 #include "dsp/eq/EqMatchSession.h"
 #include "dsp/eq/ParametricEq.h"
-#include "dsp/synth/Drums.h"
 #include "rigs/CompPresets.h"
 #include "rigs/DominionPresets.h"
 
-// THE RACK (PR7-K's stage 7a): PR7-E 0.18.1's four effects after the drums, in PR7-E's order: ECHELON (the EQ), DOMINION,
+// The sends (DELAY, REVERB) and the insert buses (A to D).
+namespace fx
+{
+    inline constexpr int numSends = 2, numInsertBuses = 4;
+}
+
+// THE RACK (PR7-K's stage 7a): PR7-E 0.18.1's four effects after the instrument, in PR7-E's order: ECHELON (the EQ), DOMINION,
 // CONSTRICTOR (its bands, then the full-band compressor), [OUTPUT], the LIMITER. Kept together on the heap: the
 // effects' filter banks and buffers are far bigger than a thread's stack can hold a copy of (Windows: 1 MB), and
 // the tests build the processor on the stack.
@@ -50,12 +55,12 @@ struct Rack
     effects::MasterLimiter limiter;   // with its OUTPUT TRIM and DITHER
     double sampleRate = 48000.0;
 
-    // THE SENDS (PR7-K's stage 7b): PR7-G's DELAY and REVERB, each fed its own mix from the kit (each drum at its
+    // THE SENDS (PR7-K's stage 7b): PR7-G's DELAY and REVERB, each fed its own mix from the instrument (at its
     // SEND amount), returning only their echoes / reverb into the mix before ECHELON.
     effects::Delay delay;
     effects::Reverb reverb;
-    std::array<juce::AudioBuffer<float>, synth::numSends> sends;   // 2 channels each, the prepared block size
-    std::array<std::atomic<float>, synth::numSends> returnPeak {};   // each return's peak in the last block (the units' meters)
+    std::array<juce::AudioBuffer<float>, fx::numSends> sends;   // 2 channels each, the prepared block size
+    std::array<std::atomic<float>, fx::numSends> returnPeak {};   // each return's peak in the last block (the units' meters)
 
     // MOD, MOD 2 and LO-FI (stage 7c): PR7-G's modulation block twice and its LO-FI, on the whole sound (the returns
     // included), before ECHELON.
@@ -64,30 +69,24 @@ struct Rack
     std::atomic<float> loFiPeak { 0.0f };   // LO-FI's output peak in the last block, while it's on (its unit's meter)
 
     // THE INSERT BUSES (stage 7d): A to D, each PR7-G's DRIVE and GLITCH (mono there: one a side here), MOD and LO-FI,
-    // on the drums routed to it, before the sends (the bus sends at its own amounts) and the mix.
+    // on the instrument when it's routed to it, before the sends (the bus sends at its own amounts) and the mix.
     struct InsertBus
     {
         std::array<effects::Drive, 2> drive;
         std::array<effects::Glitch, 2> glitch;
         effects::Modulation modulation;
         effects::LoFi loFi;
-        juce::AudioBuffer<float> buffer;   // 2 channels, the prepared block size: what the kit plays into it
+        juce::AudioBuffer<float> buffer;   // 2 channels, the prepared block size: what the instrument plays into it
         std::atomic<float> peak { 0.0f };  // its output's peak in the last block (0 while nothing's routed to it)
-        bool used = false;                 // a drum is routed to it (only then does it run)
+        bool used = false;                 // the instrument is routed to it (only then does it run)
         std::array<float, 2> driveDc {};   // what the DC blocker after the DRIVE takes off each side (see processInsertBuses)
         // Its parameters (ParamIDs::insDriveSettings... order), found once: a bus's IDs are made strings.
         std::array<std::atomic<float>*, std::size (ParamIDs::insDriveSettings)> drive_ {};
         std::array<std::atomic<float>*, std::size (ParamIDs::insGlitchSettings)> glitch_ {};
         std::array<std::atomic<float>*, std::size (ParamIDs::insLofiSettings)> lofi_ {};
-        std::array<std::atomic<float>*, synth::numSends> sends_ {};
-        std::atomic<float>* output_ = nullptr;   // which output it plays into (0.3.0)
+        std::array<std::atomic<float>*, fx::numSends> sends_ {};
     };
-    std::array<InsertBus, synth::numInsertBuses> buses;
-
-    // THE OUTPUTS (0.3.0): OUT 2 to 16 skip the master chain, so they're held back by its latency (CONSTRICTOR's and
-    // the LIMITER's look-ahead) to stay in time with MAIN. A ring per side of each, written every block.
-    juce::AudioBuffer<float> auxDelay;   // 2 x (numOutputs - 1) channels
-    int auxDelayWrite = 0;
+    std::array<InsertBus, fx::numInsertBuses> buses;
 
     void setFolder (const juce::File& presetsFolder)
     {

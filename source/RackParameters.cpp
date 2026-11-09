@@ -324,9 +324,6 @@ void addSendParameters (juce::AudioProcessorValueTreeState::ParameterLayout& lay
     layout.add (makeFloat (ParamIDs::reverbPreDelay, "Reverb Pre-Delay", { 0.0f, effects::Reverb::maxPreDelayMs, 1.0f }, 20.0f, v, asWholeMs));
     layout.add (makeFloat (ParamIDs::reverbDuck, "Reverb Duck", { 0.0f, 1.0f, 0.01f }, 0.0f, v, asPercent));
     layout.add (makeFloat (ParamIDs::delayToReverb, "Delay To Reverb", { 0.0f, 1.0f, 0.01f }, 0.0f, v, asPercent));
-    // PR7-D 0.3.0 (version hint 25): which of the plugin's outputs each return plays into.
-    layout.add (makeChoice (ParamIDs::delayOutput, "Delay Output", 25, ParamIDs::outputNames, 0));
-    layout.add (makeChoice (ParamIDs::reverbOutput, "Reverb Output", 25, ParamIDs::outputNames, 0));
 }
 
 void addModFxParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
@@ -449,6 +446,5 @@ void addInsertParameters (juce::AudioProcessorValueTreeState::ParameterLayout& l
 
         layout.add (makeFloat (id ("SendDelay"), name + "Send Delay", { 0.0f, 1.0f, 0.01f }, 1.0f, v, asPercent));
         layout.add (makeFloat (id ("SendReverb"), name + "Send Reverb", { 0.0f, 1.0f, 0.01f }, 1.0f, v, asPercent));
-        layout.add (makeChoice (id ("Output"), name + "Output", 25, ParamIDs::outputNames, 0));   // PR7-D 0.3.0
     }
 }

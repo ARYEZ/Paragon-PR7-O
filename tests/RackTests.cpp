@@ -1,5 +1,5 @@
-// THE RACK (PR7-K's stage 7a): PR7-E 0.18.1's ECHELON, DOMINION, CONSTRICTOR and LIMITER after the kit,
-// measured from what the plugin plays (steady sines as drum samples: PluginTestUtils.h). (Each effect's own tests came with it from PR7-E: EqTests, DominionTests,
+// THE RACK (PR7-K's stage 7a): PR7-E 0.18.1's ECHELON, DOMINION, CONSTRICTOR and LIMITER after the instrument,
+// measured from what the plugin plays (steady sines as the instrument's regions: PluginTestUtils.h). (Each effect's own tests came with it from PR7-E: EqTests, DominionTests,
 // CompressorTests, MultibandTests, LimiterTests, MasterLimiterTests.)
 #include "TestUtils.h"
 #include "PluginTestUtils.h"
@@ -8,6 +8,8 @@
 #include "PluginProcessor.h"
 #include "ui/FxPage.h"
 #include "ui/MainView.h"
+
+#include <set>
 
 namespace
 {
@@ -26,17 +28,25 @@ namespace
             REQUIRE (parameter != nullptr);
             parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
         }
-        // Notes (MIDI note numbers, as pitches) held for `seconds`: each a sine at that pitch, from its own drum slot (the
-        // first note slot 0, the next slot 1...), so a slot's PAN, VOLUME and routing set beforehand apply to it. Both channels.
+        // Each note's own pan and level (by its place in `play`'s list), as PR7-D's drum slots had.
+        std::map<int, std::pair<float, float>> voices;
+        // Notes (MIDI note numbers, as pitches) held for `seconds`: each a sine at that pitch, a region of its own on its
+        // key. Both channels.
         std::array<std::vector<float>, 2> play (std::initializer_list<int> notes, double seconds, float velocity = 0.8f)
         {
             juce::MidiBuffer starts;   // as MIDI from the DAW (the on-screen keyboard's presses land by the clock: not repeatable)
-            int slot = 0;
+            std::vector<testkit::Tone> tones;
+            std::set<int> keys;
+            int index = 0;
             for (const auto note : notes)
             {
-                testkit::useSample (processor, slot, testkit::sine (noteHz (note), seconds + 1.0));
-                starts.addEvent (juce::MidiMessage::noteOn (1, testkit::keyFor (slot++), velocity), 0);
+                const auto [pan, level] = voices.count (index) ? voices[index] : std::pair { 0.0f, 0.0f };
+                tones.push_back ({ note, testkit::sine (noteHz (note), seconds + 1.0), pan, level });
+                ++index;
+                if (keys.insert (note).second)
+                    starts.addEvent (juce::MidiMessage::noteOn (1, note, velocity), 0);
             }
+            testkit::useTones (processor, tones);
             std::array<std::vector<float>, 2> out;
             juce::AudioBuffer<float> buffer (2, blockSize);
             for (int done = 0; done < (int) (seconds * sampleRate); done += blockSize)
@@ -142,7 +152,7 @@ TEST_CASE ("RACK: left and right stay apart through all four", "[rack]")
     for (const auto side : { 0, 1 })
     {
         Plugin p;
-        p.set (ParamIDs::drum (0, "Pan"), side == 0 ? -1.0f : 1.0f);
+        p.voices[0] = { side == 0 ? -1.0f : 1.0f, 0.0f };
         p.set (ParamIDs::eqOn, 1.0f);
         p.set (ParamIDs::eqBand (0, "Used"), 1.0f);
         p.set (ParamIDs::eqBand (0, "Freq"), 1000.0f);
@@ -166,9 +176,8 @@ TEST_CASE ("RACK: left and right stay apart through all four", "[rack]")
     // LINK (on by default) turns both sides down together, so the stereo picture doesn't move: the quiet right side
     // is turned down with the loud left one.
     Plugin linked;
-    linked.set (ParamIDs::drum (0, "Pan"), -1.0f);
-    linked.set (ParamIDs::drum (1, "Pan"), 1.0f);
-    linked.set (ParamIDs::drum (1, "Level"), -20.0f);
+    linked.voices[0] = { -1.0f, 0.0f };
+    linked.voices[1] = { 1.0f, -20.0f };
     linked.set (ParamIDs::compOn, 1.0f);
     linked.set (ParamIDs::compThreshold, -30.0f);
     linked.set (ParamIDs::compRatio, 10.0f);

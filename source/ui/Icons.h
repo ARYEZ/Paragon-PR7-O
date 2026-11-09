@@ -30,7 +30,9 @@ namespace Icons
                       // PR7-D 0.4.0: the grooves
                       grooves,
                       // PR7-D 0.20.0: the mixer
-                      mixer };
+                      mixer,
+                      // PR7-O 0.1.0: the instrument (a violin)
+                      orchestra };
 
     juce::Path get (Type type);
 

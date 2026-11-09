@@ -7,8 +7,8 @@
 // Parameter IDs are saved in DAW projects and presets, so never rename one
 // once it has shipped. Add new parameters with a new ID instead.
 //
-// PR7-D keeps PR7-K 0.24.0's IDs for everything it kept (the drums, the drum sequencer, the effects), so PR7-K's
-// .pr7kit, .pr7seq and effect preset files load here; PR7-K's synth parameters are gone.
+// PR7-O keeps the PR7 family's IDs for the effects it took from PR7-D (PR7-E's rack, PR7-G's sends, MOD, LO-FI and
+// insert buses), so the same names mean the same knobs across the family. The drums' are gone.
 namespace ParamIDs
 {
     // Global: not part of a preset.
@@ -18,137 +18,26 @@ namespace ParamIDs
     // Saved with each preset: its own level, to balance presets against each other.
     inline constexpr auto patchLevel = "patchLevel";
 
-    // THE DRUMS (PR7-K's stage 6a, version hint 20): the kit's own settings, then each slot's, "drum1".."drum12" plus
-    // a setting. (PR7-K's drumsOn is gone: here the kit always plays.)
-    inline constexpr auto drumsRoot     = "drumsRoot";       // the kit's C: a MIDI note
-    inline constexpr auto drumsLevel    = "drumsLevel";      // dB
-    inline constexpr auto drumsVelocity = "drumsVelocity";   // 0 to 1
-    // THE NOTE MAP (PR7-D 0.2.0, version hint 24): which notes play which drum (notemap::layoutNames). Global, like
-    // OUTPUT: it suits the player's controller and grooves, not a sound, so presets leave it alone.
-    inline constexpr auto drumsMap      = "drumsMap";
-    inline constexpr int numDrums = 36;   // 12 until PR7-D 0.2.0 (drum13 to drum20: version hint 24), 20 until 0.17.0
-                                          // (drum21 to drum23, the articulations: hint 26), 23 until 0.33.0 (drum24 to
-                                          // drum29: tom 4, the hat's shoulder, the chokes: hint 35), 29 until 0.36.0 (drum30
-                                          // to drum36: crashes 3 to 6, the FX crash, china 2, tom 5: hint 38)
-    // THE HI-HAT PEDAL (0.17.0, hint 26): the CC 4 values where the hat's openness steps begin (closed, open 1, open 2,
-    // open 3; below the last, open 4). Global, like the note map: they suit the player's pedal, not a sound.
-    // Presets, kits and projects saved before 0.17.0 load with the three drums it added switched off (their notes play
-    // the drums they played before, through the stand-ins), so they sound as they did.
-    inline const juce::StringArray articulationsAddedOff { "drum21On", "drum22On", "drum23On" };
-    // The same for 0.33.0's six (older presets, kits and projects: off, so their notes play the stand-ins).
-    // A drum's layer (0.29.0) is saved as instrument numDrums + slot, so its number moves when drums are added: files
-    // saved with version (a preset's or project's parameterVersion, a kit file's version) 1 or 2 counted 23 drums, 3
-    // (0.33.0 to 0.35.x) 29, 4 (0.36.0) 36.
-    // 0.50.0: up to three LAYERS per drum: instrument numDrums x (1 + n) + slot (layer n = 0, 1, 2).
-    inline constexpr int numLayers = 3;
-    inline constexpr int numInstruments = (1 + numLayers) * numDrums;
-    inline constexpr int drumsSavedBy (int version) noexcept { return version < 3 ? 23 : version < 4 ? 29 : numDrums; }
-    inline constexpr int instrumentIndexFrom (int saved, int version) noexcept
-    {
-        const auto then = drumsSavedBy (version);
-        // 0.50.0: layers 2 and 3 after the first's (block 2, 3), counted the same way.
-        return saved >= then && saved < (1 + numLayers) * then ? (saved / then) * numDrums + saved % then : saved;
-    }
-    // The same for 0.36.0's seven (older presets, kits and projects: off, so their notes play the stand-ins).
-    // 0.39.0: the routes that start on a drum bus (mixer::defaultRouteOf). A preset or project saved before it that doesn't
-    // say has them on the channel's OUTPUT, as it was.
-    inline const juce::StringArray routesOnBuses039 { "mix1Route", "mix2Route", "mix3Route", "mix4Route", "mix6Route", "mix7Route", "mix8Route" };
-    inline const juce::StringArray slotsAdded036Off { "drum30On", "drum31On", "drum32On", "drum33On", "drum34On", "drum35On", "drum36On" };
-    inline const juce::StringArray slotsAdded033Off { "drum24On", "drum25On", "drum26On", "drum27On", "drum28On", "drum29On" };
-    inline const juce::StringArray drumsPedalSteps { "drumsPedal1", "drumsPedal2", "drumsPedal3", "drumsPedal4" };
-    // THE MIXER (0.20.0, hint 29): each mic channel's settings, "mix<n>" plus a setting (n = 1 to 13, mixer::Channel + 1).
-    // OUTPUT is global, like the drums' (notInRigs).
-    inline juce::String mix (int channel, const char* what) { return "mix" + juce::String (channel + 1) + what; }
-    inline constexpr const char* mixSettings[] = { "Level", "Pan", "Mute", "Solo", "Phase", "Bleed", "BleedOn", "Offset", "Release", "Output",
-                                                   "Route" };   // 0.21.0 (hint 30): mixer::routeNames' index, in presets
-    // THE MIXER's BUSES (0.21.0, hint 30): "mixBus<n>" plus a setting (n = 1 to 8). OUTPUT global, ROUTE in presets.
-    // 0.40.0: a mixer setting's place in mixSettings, worked out when compiling (the audio thread looked them up by name).
-    consteval int mixSetting (std::string_view what)
-    {
-        for (int i = 0; i < (int) std::size (mixSettings); ++i)
-            if (std::string_view (mixSettings[i]) == what)
-                return i;
-        throw "not a mixer setting";
-    }
-    inline juce::String mixBus (int bus, const char* what) { return "mixBus" + juce::String (bus + 1) + what; }
-    inline constexpr const char* busSettings[] = { "Level", "Pan", "Mute", "Solo", "Phase", "Output", "Route" };
-    inline constexpr auto mixMuteMode = "mixMuteMode";   // mixer::muteModeNames' index (in presets)
-    // SIMULATED MICS AND ROOM (0.26.0, hint 33): the kit's synth drums through the mixer's mic channels, and the room
-    // the room and ambience mics hear (micsim::roomNames' index; its decay, times its own; its tone). In presets and kits.
-    inline constexpr auto drumsMicSim = "drumsMicSim";
-    // A DRUM'S LAYER (0.29.0, hint 34): a sample (or folder of hits) of the user's played with the drum, "drum<n>LayerLevel"
-    // (dB, -60: off) and "drum<n>LayerOut": where it plays (0: the drum's own way; 1 + n: the mixer's mic channel n, its
-    // own fader). Saved by index: only append.
-    inline const juce::StringArray layerOutNames { "With The Drum", "Kick In", "Kick Out", "Snare Top", "Snare Btm", "Hi-Hat",
-                                                   "Tom 1", "Tom 2", "Tom 3", "Cymbals", "Overheads", "Room", "Ambience", "Other",
-                                                   "User 1", "User 2", "User 3", "User 4", "User 5", "User 6", "User 7", "User 8",
-                                                   "User 9", "User 10", "User 11", "User 12", "User 13", "User 14", "User 15",
-                                                   "User 16" };
-    // 0.70.0: a drum's MIXER CHANNEL (its "MixOut"): 0 its own way (VOLUME, PAN, INSERT, OUTPUT, as always), else a mic
-    // channel + 1, as layerOutNames (only append).
-    inline const juce::StringArray mixOutNames = []
-    {
-        auto names = layerOutNames;
-        names.set (0, "Its Own Way");
-        return names;
-    }();   // (0.34.0: USER 9-16)
-    inline constexpr auto drumsRoom = "drumsRoom";
-    inline constexpr auto drumsRoomDecay = "drumsRoomDecay";
-    inline constexpr auto drumsRoomTone = "drumsRoomTone";
-
-    // MIDI IN CHANNEL (0.18.0, hint 27): which channel the DAW's or a controller's MIDI plays the kit on ("Any", 1-16).
-    // Global, like the note map.
-    inline constexpr auto drumsMidiChannel = "drumsMidiChannel";
-    // NOTE NAMES (0.35.1, hint 37): how notes are named (notenames::choiceNames: middle C is C3 or C4). Not in presets.
-    inline constexpr auto noteNames = "noteNames";
+    // THE INSTRUMENT (PR7-O 0.1.0, version hint 42): the SFZ instrument loaded (its file is preset data, not a
+    // parameter) and how it plays. In presets.
+    inline constexpr auto instLevel     = "instLevel";       // dB (-60: silent)
+    inline constexpr auto instPan       = "instPan";         // -1 to 1, a balance after the instrument's own
+    inline constexpr auto instTranspose = "instTranspose";   // semitones
+    inline constexpr auto instTune      = "instTune";        // cents
+    inline constexpr auto instRelease   = "instRelease";     // x the instrument's release times
+    inline constexpr auto instVoices    = "instVoices";      // POLYPHONY
+    inline constexpr auto instSendDelay  = "instSendDelay";  // 0 to 1: into the DELAY
+    inline constexpr auto instSendReverb = "instSendReverb"; // 0 to 1: into the REVERB
+    inline constexpr auto instInsert    = "instInsert";      // insertBusNames' index: an insert bus it plays through (0 none)
+    // 0.2.0 (version hint 43): DYNAMICS (dynamicsNames: velocity as the file says, or the mod wheel crossfading a held
+    // note's layers) and AUTO SUSTAIN (held recordings without loops go round their steady part). In presets.
+    inline constexpr auto instDynamics    = "instDynamics";
+    inline constexpr auto instAutoSustain = "instAutoSustain";
+    inline const juce::StringArray dynamicsNames { "Velocity", "Mod Wheel" };   // saved by index: only append
+    // Global, like OUTPUT: they suit the player's controller, not a sound.
+    inline constexpr auto midiChannel = "midiChannel";       // midiChannelNames' index (0: any)
+    inline constexpr auto noteNames = "noteNames";           // notenames::choiceNames: middle C is C3 or C4 (PR7-D 0.35.1's)
     inline const juce::StringArray midiChannelNames { "Any", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" };
-    inline juce::String drum (int slot, const char* what) { return "drum" + juce::String (slot + 1) + what; }
-    // THE OUTPUTS (PR7-D 0.3.0, version hint 25): the plugin's stereo outputs, MAIN first. Each drum, insert bus and
-    // send return chooses one ("drum<n>Output", "ins<n>Output", delayOutput, reverbOutput), by index: only append.
-    // Global, like the note map: they suit the DAW project's mixer, not a sound, so presets and kits leave them alone.
-    inline constexpr int numOutputs = 16;
-    inline const juce::StringArray outputNames { "Main", "Out 2", "Out 3", "Out 4", "Out 5", "Out 6", "Out 7", "Out 8",
-                                                 "Out 9", "Out 10", "Out 11", "Out 12", "Out 13", "Out 14", "Out 15", "Out 16" };
-    inline constexpr const char* drumSettings[] = { "Model", "Level", "Pan", "Pitch", "Decay", "Tone", "Snap", "Mute", "Solo",
-                                                    "Choke", "Insert", "SendDelay", "SendReverb",
-                                                    "SampleStart", "SampleEnd",     // 0.21.1 (version hint 21): appended
-                                                    "Gain", "Mono", "Delay", "LowPass", "HighPass",     // 6c (hint 23)
-                                                    "Output",     // PR7-D 0.3.0 (hint 25): outputNames' index
-                                                    "On", "MuteTail",     // 0.17.0 (hint 26): the articulation's ON, MUTE TAIL
-                                                    "VelMin", "VelMax",   // 0.18.0 (hint 27): its VELOCITY GATE (0 to 127)
-                                                    // 0.19.0 (hint 28): THE SAMPLE ENGINE's hit variation and limits
-                                                    "Randomize", "Adjacent", "VelToVol", "LayerLimit", "Voices",
-                                                    // 0.24.0 (hint 32): THE ACOUSTIC MODELS' strike POSITION, SHELL, VARIATION
-                                                    "Position", "Shell", "Variation",
-                                                    "Mics",     // 0.26.0 (hint 33): heard through SIMULATED MICS
-                                                    "LayerLevel", "LayerOut",   // 0.29.0 (hint 34): a LAYER of your own
-                                                    // 0.50.0 (hint 40): LAYERS 2 and 3 (the rest of each layer's settings
-                                                    // are preset data: ModMatrix::drumLayers)
-                                                    "Layer2Level", "Layer2Out", "Layer3Level", "Layer3Out",
-                                                    // 0.70.0 (hint 41): MIXER CHANNEL, the mixer channel a drum's own
-                                                    // sound plays into when it has no mics of its own (0: its own way)
-                                                    "MixOut" };
-    consteval int drumSetting (std::string_view what)
-    {
-        for (int i = 0; i < (int) std::size (drumSettings); ++i)
-            if (std::string_view (drumSettings[i]) == what)
-                return i;
-        throw "not a drum setting";
-    }
-    // 0.50.0: layer n's (0-2) LEVEL and OUT: "LayerLevel" / "LayerOut", then "Layer2Level"...
-    inline const char* layerLevel (int n) noexcept { return n <= 0 ? "LayerLevel" : n == 1 ? "Layer2Level" : "Layer3Level"; }
-    inline const char* layerOut (int n) noexcept { return n <= 0 ? "LayerOut" : n == 1 ? "Layer2Out" : "Layer3Out"; }
-
-    // THE DRUM SEQUENCER (stage 6b, version hint 22): the kit's beat. Its notes are preset data (ModMatrix::drumPatterns).
-    inline constexpr auto dseqOn       = "dseqOn";
-    inline constexpr auto dseqTrigger  = "dseqTrigger";    // choice: Song, Key (drumseq::triggerNames)
-    inline constexpr auto dseqPattern  = "dseqPattern";    // choice: A-D (SONG plays it; KEY: the key held chooses)
-    inline constexpr auto dseqDivision = "dseqDivision";   // SPEED: seq::divisionNames
-    inline constexpr auto dseqTiming   = "dseqTiming";     // seq::timingNames
-    inline constexpr auto dseqLength   = "dseqLength";     // beats, 1 to 16
-    inline constexpr auto dseqVelocity = "dseqVelocity";   // VELOCITY AMOUNT: how much the key's velocity counts (KEY)
-    inline constexpr auto shuffle      = "shuffle";        // SHUFFLE (PR7-K's, shared there with its synth)
-    inline constexpr auto machineTempo = "machineTempo";   // THE DRUM MACHINE's TEMPO (0.38.0, hint 39): its PLAY without the DAW
 
     // THE RACK (stage 7a, 0.17.0): PR7-E 0.18.1's four effects, with PR7-E's IDs (so their presets load in either
     // plugin) and its comments below (its "stomps" are our rack units; "rigs" our presets).
@@ -242,7 +131,7 @@ namespace ParamIDs
 
 
     // THE SENDS (stage 7b, 0.18.0): PR7-G 0.52.0's DELAY and REVERB, with PR7-G's IDs, ranges and defaults; each
-    // drum's SendDelay / SendReverb (drumSettings) feeds them, and their MIX is the return's level.
+    // instrument's SEND DELAY / SEND REVERB feeds them, and their MIX is the return's level.
     inline constexpr auto delayOn        = "delayOn";
     inline constexpr auto delayTime      = "delayTime";       // ms (SYNC off)
     inline constexpr auto delaySync      = "delaySync";       // choice: effects::Delay::syncNames
@@ -260,8 +149,6 @@ namespace ParamIDs
     inline constexpr auto reverbPreDelay = "reverbPreDelay";  // ms
     inline constexpr auto reverbDuck     = "reverbDuck";      // 0 to 1
     inline constexpr auto delayToReverb  = "delayToReverb";   // PR7-K's own: how much of DELAY's echoes go on into REVERB
-    inline constexpr auto delayOutput    = "delayOutput";     // PR7-D 0.3.0: where the return goes (outputNames)
-    inline constexpr auto reverbOutput   = "reverbOutput";
 
     // MOD, MOD 2 and LO-FI (stage 7c, version hint 18): PR7-G 0.52.0's IDs, ranges and defaults, so the same names
     // mean the same knobs across the family. Not PR7-G's MOD POSITION: there's no amp to put them before.
@@ -309,7 +196,7 @@ namespace ParamIDs
     // DRIVE and GLITCH (their IDs after the prefix, capitalised), then MOD and LO-FI as above, then the bus's SENDS.
     inline constexpr int numInsertBuses = 4;
     inline juce::String ins (int bus, const char* what) { return "ins" + juce::String (bus + 1) + what; }
-    inline const juce::StringArray insertBusNames { "None", "A", "B", "C", "D" };   // drum{k}Insert, by index: only append
+    inline const juce::StringArray insertBusNames { "None", "A", "B", "C", "D" };   // instInsert, by index: only append
     inline constexpr const char* insDriveSettings[] = { "DriveOn", "DriveModel", "DriveGain", "DriveTone", "DriveLevel", "DriveAttack",
                                                         "DriveGate", "DriveHigh", "DriveLow", "DriveMiddle", "DriveMidFreq" };
     inline constexpr const char* insGlitchSettings[] = { "GlitchOn", "GlitchMode", "GlitchSync", "GlitchTime", "GlitchDivision",
@@ -344,24 +231,7 @@ namespace ParamIDs
 
     // Global settings: kept when switching presets. Everything else is part of a preset.
     // The LIMITER's UNITY and DELTA are for listening while you set it, not part of a sound.
-    // THE OUTPUTS too (0.3.0): switching presets mustn't move drums between the DAW's channels.
-    inline const juce::StringArray notInRigs = []
-    {
-        juce::StringArray ids { outputGain, bypass, limitUnity, limitDelta, drumsMap, delayOutput, reverbOutput };
-        ids.addArray (drumsPedalSteps);
-        ids.add (drumsMidiChannel);
-        ids.add (noteNames);
-        for (int c = 0; c < 29; ++c)   // the mic channels (0.23.0: USER 1-8 too; 0.34.0: USER 9-16)
-            ids.add (mix (c, "Output"));
-        for (int b = 0; b < 8; ++b)
-            ids.add (mixBus (b, "Output"));
-        for (int k = 0; k < numDrums; ++k)
-            ids.add (drum (k, "Output"));
-        for (int b = 0; b < numInsertBuses; ++b)
-            ids.add (ins (b, "Output"));
-        return ids;
-    }();
-    inline bool isOutputChoice (const juce::String& id) { return id.endsWith ("Output"); }   // drum<n>, ins<n>, delay, reverb
+    inline const juce::StringArray notInRigs { outputGain, bypass, limitUnity, limitDelta, midiChannel, noteNames };
 }
 
 namespace ParamRanges

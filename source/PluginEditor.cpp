@@ -17,7 +17,7 @@ ParagonX1AudioProcessorEditor::ParagonX1AudioProcessorEditor (ParagonX1AudioProc
     chosenWidth = size.x;
     setSize (size.x, size.x * view.getHeight() / MainView::width);
 
-    // SHOW / HIDE MIDI TRACK (0.61.0, as PR7-G's SHOW / HIDE RACK): the window gets taller or shorter with the view.
+    // SHOW / HIDE KEYBOARD (PR7-D 0.61.0's SHOW / HIDE MIDI TRACK): the window gets taller or shorter with the view.
     view.onHeightChanged = [this] { fitToView(); };
 }
 
@@ -73,7 +73,7 @@ ParagonX1AudioProcessorEditor::~ParagonX1AudioProcessorEditor()
 
 void ParagonX1AudioProcessorEditor::resized()
 {
-    // Remember the width the person chose, to go back to after a SHOW MIDI TRACK that had to be narrower to fit.
+    // Remember the width the person chose, to go back to after a SHOW KEYBOARD that had to be narrower to fit.
     if (! fittingToView)
         chosenWidth = getWidth();
 

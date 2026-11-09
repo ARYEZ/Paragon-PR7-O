@@ -44,8 +44,8 @@ private:
     float decay = 0.0f, preDelay = 0.0f, span = 4.0f;
 };
 
-// DELAY's or REVERB's page: ON, TYPE and BACK TO RACK along the top, its display, its controls, and the 12
-// drums' sends to it.
+// DELAY's or REVERB's page: ON, TYPE and BACK TO RACK along the top, its display, its controls, and the instrument's
+// send to it.
 class SendPage final : public juce::Component
 {
 public:
@@ -68,17 +68,16 @@ private:
     juce::Label sendsLabel;
 };
 
-// The SENDS view's matrix: how much each drum sends to DELAY and to REVERB, and DELAY > REVERB.
+// The SENDS view's strip: how much the instrument sends to DELAY and to REVERB, and DELAY > REVERB.
 class SendMatrix final : public juce::Component
 {
 public:
     explicit SendMatrix (ParagonX1AudioProcessor&);
     void paint (juce::Graphics&) override;
     void resized() override;
-    ParamControl& send (int drum, int which) { return *knobs[(size_t) (which * synth::drums::numSlots + drum)]; }
+    ParamControl& send (int which) { return *knobs[(size_t) which]; }
 
 private:
     std::vector<std::unique_ptr<ParamControl>> knobs;
     std::unique_ptr<ParamControl> delayToReverb;
-    std::array<std::unique_ptr<ParamControl>, synth::numSends> outputs;   // where each return plays (0.3.0)
 };

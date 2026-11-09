@@ -5,7 +5,7 @@
 #include "dsp/effects/Glitch.h"
 #include "ui/SynthControls.h"
 
-// THE INSERT BUSES' own pieces (stage 7d): the bus strip (which bus, which drums play into it, its sends), and
+// THE INSERT BUSES' own pieces (stage 7d): the bus strip (which bus, whether the instrument plays into it, its sends), and
 // DRIVE's and GLITCH's pages. (A bus's MOD and LO-FI use ModFxPage.)
 
 // What DRIVE does now, worked out by running a copy of it (the same model and settings) on a 120 Hz sine at half
@@ -89,8 +89,8 @@ private:
     juce::String layoutKey;
 };
 
-// The INSERTS view's strip: the bus (A to D), the drums playing into it (lit; click to route one here, or back to
-// none), and the bus's DELAY and REVERB sends.
+// The INSERTS view's strip: the bus (A to D), whether the instrument plays into it (lit; click to route it here, or back
+// to none), and the bus's DELAY and REVERB sends.
 class InsertBusStrip final : public juce::Component,
                              private juce::Timer
 {
@@ -101,9 +101,8 @@ public:
     void setBus (int);
     int getBus() const noexcept { return bus; }
     juce::TextButton& getBusButton (int b) noexcept { return busButtons[(size_t) b]; }
-    juce::TextButton& getDrumButton (int i) noexcept { return drumButtons[(size_t) i]; }
+    juce::TextButton& getRouteButton() noexcept { return routeButton; }
     ParamControl& getSend (int s) noexcept { return *sends[(size_t) s]; }
-    ParamControl& getOutput() noexcept { return *output; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -113,7 +112,6 @@ private:
     ParagonX1AudioProcessor& processor;
     int bus = 0;
     std::array<juce::TextButton, ParamIDs::numInsertBuses> busButtons;
-    std::array<juce::TextButton, ParamIDs::numDrums> drumButtons;
+    juce::TextButton routeButton;
     std::array<std::unique_ptr<ParamControl>, 2> sends;
-    std::unique_ptr<ParamControl> output;
 };

@@ -19,7 +19,7 @@ public:
         bool isFactory = false;
     };
 
-    // `folder` defaults to the user's Paragon PR7-D presets folder; tests pass a temporary one.
+    // `folder` defaults to the user's Paragon PR7-O presets folder; tests pass a temporary one.
     explicit RigLibrary (juce::File folder = defaultFolder());
 
     static juce::File defaultFolder();

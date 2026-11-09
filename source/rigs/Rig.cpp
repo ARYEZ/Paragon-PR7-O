@@ -7,19 +7,13 @@ namespace
     // Bump when the file layout changes in a way older code can't read.
     constexpr int fileVersion = 1;
 
-    // Which plugin version's parameters the preset was saved with, for the
-    // occasional parameter whose default changes (older plugins ignore it).
-    // PR7-D counts afresh from its siblings' numbering:
-    // 1: PR7-D 0.1.0 (PR7-K 0.24.0's drum and effect parameters).
-    // 2: PR7-D 0.17.0 (the articulations: older presets load with drums 21 to 23 off).
-    // 3: PR7-D 0.33.0 (drums 24 to 29: older presets load with them off; their layers' instrument numbers moved).
-    // 4: PR7-D 0.36.0 (drums 30 to 36, likewise).
-    // 5: PR7-D 0.39.0 (the drum buses: older presets keep their channels' routes, their buses unnamed).
-    constexpr int parameterVersion = 5;
+    // Which plugin version's parameters the preset was saved with, for the occasional parameter whose default
+    // changes. PR7-O counts afresh: 1: PR7-O 0.1.0.
+    constexpr int parameterVersion = 1;
 
     const juce::Identifier rigTag { "ParagonRig" };
     const juce::Identifier parameterTag { "Param" };
-    const juce::Identifier drumSampleTag { "DrumSample" };
+    const juce::Identifier instrumentTag { "Instrument" };
 }
 
 juce::String Rig::bankName (int bankIndex)
@@ -51,25 +45,8 @@ std::unique_ptr<juce::XmlElement> Rig::toXml() const
         parameter->setAttribute ("id", id);
         parameter->setAttribute ("value", value);
     }
-    for (const auto& [slot, sample] : drumSamples)
-    {
-        if (sample == nullptr || sample->length() < 2)
-            continue;
-        auto* element = xml->createNewChildElement (drumSampleTag);
-        element->setAttribute ("slot", slot + 1);
-        element->setAttribute ("name", sample->name);
-        if (sample->path.isNotEmpty())
-            element->setAttribute ("path", sample->path);
-        element->addTextElement (synth::drums::sampleFiles::encode (*sample));
-    }
-    if (! modulation.isEmpty())
-        xml->addChildElement (modulation.toXml().release());
-    for (const auto& [slot, ref] : drumInstruments)
-    {
-        auto* e = xml->createNewChildElement ("DrumInstrument");
-        e->setAttribute ("slot", slot + 1);
-        e->setAttribute ("ref", ref);
-    }
+    if (instrument.isNotEmpty())
+        xml->createNewChildElement (instrumentTag)->setAttribute ("file", instrument);
     return xml;
 }
 
@@ -96,40 +73,8 @@ std::optional<Rig> Rig::fromXml (const juce::XmlElement& xml)
         if (const auto id = parameter->getStringAttribute ("id"); id.isNotEmpty())
             rig.parameters[id] = (float) parameter->getDoubleAttribute ("value");
 
-    for (const auto* element : xml.getChildWithTagNameIterator (drumSampleTag))
-    {
-        const auto slot = element->getIntAttribute ("slot") - 1;
-        if (slot >= 0 && slot < synth::drums::numSlots)
-            if (auto sample = synth::drums::sampleFiles::decode (element->getStringAttribute ("name"), element->getAllSubText()))
-            {
-                std::const_pointer_cast<synth::drums::Sample> (sample)->path = element->getStringAttribute ("path");
-                rig.drumSamples[slot] = std::move (sample);
-            }
-    }
-    if (const auto* modulation = xml.getChildByName ("Modulation"))
-        rig.modulation = ModMatrix::fromXml (*modulation);
-    const auto version = xml.getIntAttribute ("parameterVersion", 1);
-    for (const auto* e : xml.getChildWithTagNameIterator ("DrumInstrument"))
-        if (const auto slot = ParamIDs::instrumentIndexFrom (e->getIntAttribute ("slot") - 1, version);
-            slot >= 0 && slot < ParamIDs::numInstruments)   // 0.29.0: then layers (three since 0.50.0)
-            rig.drumInstruments[slot] = e->getStringAttribute ("ref");
-
-    if (version < 2)
-        for (const auto& id : ParamIDs::articulationsAddedOff)
-            rig.parameters[id] = 0.0f;
-    if (version < 3)
-        for (const auto& id : ParamIDs::slotsAdded033Off)
-            rig.parameters[id] = 0.0f;
-    if (version < 4)
-        for (const auto& id : ParamIDs::slotsAdded036Off)
-            rig.parameters[id] = 0.0f;
-    if (version < 5)
-    {
-        for (const auto& id : ParamIDs::routesOnBuses039)
-            if (rig.parameters.find (id) == rig.parameters.end())
-                rig.parameters[id] = 0.0f;
-        std::fill (rig.modulation.busNames.begin(), rig.modulation.busNames.end(), juce::String());
-    }
+    if (const auto* e = xml.getChildByName (instrumentTag))
+        rig.instrument = e->getStringAttribute ("file");
 
     return rig;
 }

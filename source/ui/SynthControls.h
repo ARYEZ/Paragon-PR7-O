@@ -27,7 +27,7 @@ class ParamControl final : public juce::Component
 {
 public:
     ParamControl (juce::AudioProcessorValueTreeState&, const juce::String& parameterId, const juce::String& label,
-                  const juce::String& tooltip = {});
+                  const juce::String& tooltip = {}, bool knobForChoices = false);   // (a menu's parameter as a knob: PR7-I 0.5.0's rack)
     ~ParamControl() override;
 
     void attach (const juce::String& parameterId);
@@ -36,9 +36,14 @@ public:
     // shows its name beside its LED instead; a menu fills the space.
     void setCompact (bool);
     void setLabelText (const juce::String& text) { label.setText (text, juce::dontSendNotification); }   // its name above
+    // PR7-I 0.4.0: its name under the value instead (the GUITAR page's knobs, as the reference's are labelled).
+    void setLabelBelow (bool);
+    // PR7-I 0.5.0: as on PR7-G's rack: the name stamped above, the rack's big knob, the value on a small orange screen.
+    void setRack (bool);
     const juce::String& getParameterId() const noexcept { return parameterId; }
 
     void resized() override;
+    void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
 
@@ -51,7 +56,8 @@ private:
 
     juce::AudioProcessorValueTreeState& state;
     juce::String parameterId;
-    bool compact = false;
+    bool compact = false, labelBelow = false, rack = false;
+    juce::Rectangle<float> valueScreen() const;
     juce::Label label;
     std::unique_ptr<juce::Slider> slider;
     std::unique_ptr<juce::ComboBox> box;

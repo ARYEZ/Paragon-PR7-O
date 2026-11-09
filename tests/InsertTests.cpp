@@ -1,6 +1,6 @@
-// THE INSERT BUSES (PR7-K's stage 7d): drums routed to buses A to D, each bus's DRIVE, GLITCH, MOD and LO-FI working
-// on just those drums, before the sends (the bus's own sends feeding DELAY and REVERB), measured from what the plugin
-// plays (steady sines as drum samples: PluginTestUtils.h). (PR7-G's own DRIVE and GLITCH tests: DriveGlitchTests.cpp.)
+// THE INSERT BUSES (PR7-K's stage 7d): the instrument routed to a bus A to D, the bus's DRIVE, GLITCH, MOD and LO-FI
+// working on it, before the sends (the bus's own sends feeding DELAY and REVERB), measured from what the plugin plays
+// (steady sines as the instrument: PluginTestUtils.h). (PR7-G's own DRIVE and GLITCH tests: DriveGlitchTests.cpp.)
 #include "TestUtils.h"
 #include "PluginTestUtils.h"
 
@@ -30,28 +30,20 @@ namespace
             REQUIRE (parameter != nullptr);
             parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
         }
-        // Another drum playing with slot 0, `semitones` above it.
-        void addDrum (int slot, float semitones) { others.push_back ({ slot, semitones }); }
-        std::vector<std::pair<int, float>> others;
         void driveOn (int bus, Model model, float drive)
         {
             set (ParamIDs::ins (bus, "DriveOn"), 1.0f);
             set (ParamIDs::ins (bus, "DriveModel"), (float) (int) model);
             set (ParamIDs::ins (bus, "DriveGain"), drive);
         }
-        // A sine at `note`'s pitch, `held` seconds long, from slot 0 (and the drums added), hit at the start.
+        // A sine at `note`'s pitch, `held` seconds long, the instrument, played at the start.
         std::array<std::vector<float>, 2> play (int note, double held, double seconds)
         {
             juce::MidiBuffer starts;   // as MIDI from the DAW (the on-screen keyboard's presses land by the clock: not repeatable)
             std::array<std::vector<float>, 2> out;
             juce::AudioBuffer<float> buffer (2, blockSize);
-            testkit::useSample (processor, 0, testkit::sine (noteHz (note), held));
+            testkit::useSample (processor, testkit::sine (noteHz (note), held));
             starts.addEvent (juce::MidiMessage::noteOn (1, testkit::keyFor (0), 0.8f), 0);
-            for (const auto& [slot, semitones] : others)
-            {
-                testkit::useSample (processor, slot, testkit::sine (noteHz (note + semitones), held));
-                starts.addEvent (juce::MidiMessage::noteOn (1, testkit::keyFor (slot), 0.8f), 0);
-            }
             const auto blocks = (int) (seconds * sampleRate) / blockSize;
             for (int b = 0; b < blocks; ++b)
             {
@@ -99,11 +91,6 @@ namespace
             d[i] = a[i] - b[i];
         return d;
     }
-    // Drum 2's pitch in these tests: a tritone and 17 cents up from A3 (314.2 Hz), so no harmonic of either note,
-    // and no simple mixture of them, lands near the other's.
-    constexpr float otherSemitones = 6.17f;
-    const double otherHz = 220.0 * std::pow (2.0, (6.0 + 0.17) / 12.0);
-
     float maxDifference (const std::vector<float>& a, const std::vector<float>& b)
     {
         float result = 0.0f;
@@ -113,7 +100,7 @@ namespace
     }
 }
 
-TEST_CASE ("INSERTS: with no drum on a bus, its effects change nothing, sample for sample", "[inserts]")
+TEST_CASE ("INSERTS: with the instrument on no bus, its effects change nothing, sample for sample", "[inserts]")
 {
     const auto run = [] (bool busesSet)
     {
@@ -133,13 +120,13 @@ TEST_CASE ("INSERTS: with no drum on a bus, its effects change nothing, sample f
     CHECK (plain[1] == set[1]);
 }
 
-TEST_CASE ("INSERTS: on a bus with its effects off, a drum sounds as it did", "[inserts]")
+TEST_CASE ("INSERTS: on a bus with its effects off, the instrument sounds as it did", "[inserts]")
 {
     const auto run = [] (bool onBus)
     {
         Plugin p;
         if (onBus)
-            p.set (ParamIDs::drum (0, "Insert"), 2.0f);   // B
+            p.set (ParamIDs::instInsert, 2.0f);   // B
         return p.play (57, 0.3, 0.5);
     };
     const auto plain = run (false), bused = run (true);
@@ -148,34 +135,28 @@ TEST_CASE ("INSERTS: on a bus with its effects off, a drum sounds as it did", "[
     CHECK (maxDifference (plain[1], bused[1]) < 1.0e-6f);
 }
 
-TEST_CASE ("INSERTS: a bus's DRIVE works on its drums only", "[inserts]")
+TEST_CASE ("INSERTS: a bus's DRIVE works on the instrument on it", "[inserts]")
 {
-    // A3 (220 Hz) on drum 1, on bus A with BANSHEE driven hard; drum 2 (314.2 Hz) not on a bus. What the drive changes
-    // (driven minus clean) holds A3's odd harmonics (660 Hz), and nothing of drum 2: not its note, not its 3rd
-    // harmonic, not its mixtures with A3 that clipping them together would make.
+    // A3 (220 Hz) on bus A with BANSHEE driven hard: what the drive changes (driven minus clean) holds A3's odd
+    // harmonics (660 Hz); the clean sound has none.
     const auto run = [] (bool driven)
     {
         Plugin p;
-        p.addDrum (1, otherSemitones);
-        p.set (ParamIDs::drum (0, "Insert"), 1.0f);
+        p.set (ParamIDs::instInsert, 1.0f);
         if (driven)
             p.driveOn (0, Model::screamer, 9.0f);
         return p.play (57, 0.7, 0.7)[0];
     };
     const auto clean = run (false), driven = run (true);
     const auto change = minus (driven, clean);
-    REQUIRE (windowed (clean, otherHz, 0.3) > 0.1);
-    CHECK (windowed (change, 660.0, 0.3) > 0.01);                          // A3's 3rd harmonic, from the drive
+    REQUIRE (windowed (clean, 220.0, 0.3) > 0.1);
+    CHECK (windowed (change, 660.0, 0.3) > 0.01);   // A3's 3rd harmonic, from the drive
     CHECK (windowed (clean, 660.0, 0.3) < 1.0e-4);
-    CHECK (windowed (change, otherHz, 0.3) < 1.0e-4);                      // drum 2 isn't touched
-    CHECK (windowed (change, 3.0 * otherHz, 0.3) < 1.0e-4);
-    CHECK (windowed (change, 2.0 * otherHz - 220.0, 0.3) < 1.0e-4);        // nor mixed with A3 in the clipping
-    CHECK (windowed (change, otherHz + 220.0, 0.3) < 1.0e-4);
 }
 
-TEST_CASE ("INSERTS: a bus sends at its own amounts, after its effects; its drums' own sends aren't used", "[inserts][sends]")
+TEST_CASE ("INSERTS: a bus sends at its own amounts, after its effects; the instrument's own sends aren't used", "[inserts][sends]")
 {
-    // A delay of plain 200 ms echoes at full MIX. Drum 1 on bus A (driven), its own DELAY send at 100% (unused).
+    // A delay of plain 200 ms echoes at full MIX. The instrument on bus A (driven), its own DELAY send at 100% (unused).
     const auto echoes = [] (float busSend)
     {
         Plugin p;
@@ -184,8 +165,8 @@ TEST_CASE ("INSERTS: a bus sends at its own amounts, after its effects; its drum
         p.set (ParamIDs::delayTime, 200.0f);
         p.set (ParamIDs::delayFeedback, 0.0f);
         p.set (ParamIDs::delayMix, 1.0f);
-        p.set (ParamIDs::drum (0, "SendDelay"), 1.0f);
-        p.set (ParamIDs::drum (0, "Insert"), 1.0f);
+        p.set (ParamIDs::instSendDelay, 1.0f);
+        p.set (ParamIDs::instInsert, 1.0f);
         p.driveOn (0, Model::screamer, 9.0f);
         p.set (ParamIDs::ins (0, "SendDelay"), busSend);
         return p.play (57, 0.1, 0.5)[0];
@@ -201,8 +182,8 @@ TEST_CASE ("INSERTS: a bus sends at its own amounts, after its effects; its drum
 TEST_CASE ("INSERTS: a sound on the left stays on the left through every effect on a bus", "[inserts]")
 {
     Plugin p;
-    p.set (ParamIDs::drum (0, "Pan"), -1.0f);
-    p.set (ParamIDs::drum (0, "Insert"), 3.0f);   // C
+    p.set (ParamIDs::instPan, -1.0f);
+    p.set (ParamIDs::instInsert, 3.0f);   // C
     p.driveOn (2, Model::rabid, 7.0f);
     p.set (ParamIDs::ins (2, "GlitchOn"), 1.0f);
     p.set (ParamIDs::ins (2, "GlitchMode"), (float) (int) effects::Glitch::Mode::interfere);
@@ -215,22 +196,19 @@ TEST_CASE ("INSERTS: a sound on the left stays on the left through every effect 
     CHECK (peakOf (out[1]) == 0.0);
 }
 
-TEST_CASE ("INSERTS: each bus is its own: a drive on A leaves B's drum clean", "[inserts]")
+TEST_CASE ("INSERTS: each bus is its own: a drive on A leaves the instrument on B clean", "[inserts]")
 {
     Plugin p;
-    p.addDrum (1, otherSemitones);
-    p.set (ParamIDs::drum (0, "Insert"), 1.0f);   // A3 on A, driven
-    p.set (ParamIDs::drum (1, "Insert"), 2.0f);   // the other on B, nothing on
+    p.set (ParamIDs::instInsert, 2.0f);   // on B, nothing on
     p.driveOn (0, Model::screamer, 9.0f);
     const auto out = p.play (57, 0.7, 0.7)[0];
-    CHECK (windowed (out, 660.0, 0.3) > 0.01);
-    CHECK (windowed (out, 3.0 * otherHz, 0.3) < 1.0e-4);
-    CHECK (windowed (out, 2.0 * otherHz - 220.0, 0.3) < 1.0e-4);
-    CHECK (p.processor.getInsertPeakDb (0) > -40.0f);
-    CHECK (p.processor.getInsertPeakDb (2) < -99.0f);   // nothing on C
+    CHECK (windowed (out, 220.0, 0.3) > 0.1);
+    CHECK (windowed (out, 660.0, 0.3) < 1.0e-4);
+    CHECK (p.processor.getInsertPeakDb (1) > -40.0f);
+    CHECK (p.processor.getInsertPeakDb (0) < -99.0f);   // nothing on A
 }
 
-TEST_CASE ("INSERTS: CPU, the kit on a bus through RABID (one a side, 8x oversampled) and GLITCH", "[inserts][performance]")
+TEST_CASE ("INSERTS: CPU, the instrument on a bus through RABID (one a side, 8x oversampled) and GLITCH", "[inserts][performance]")
 {
     const auto cpu = [] (int how)   // 0: no bus; 1: on a bus with its effects on; 2: the effects on, nothing routed
     {
@@ -238,19 +216,19 @@ TEST_CASE ("INSERTS: CPU, the kit on a bus through RABID (one a side, 8x oversam
         for (int run = 0; run < 3; ++run)
         {
             Plugin p;
+            testkit::useSample (p.processor, testkit::saw (110.0, 2.0));
             if (how > 0)
             {
                 p.driveOn (0, Model::rabid, 7.0f);
                 p.set (ParamIDs::ins (0, "GlitchOn"), 1.0f);
             }
             if (how == 1)
-                for (int k = 0; k < 12; ++k)
-                    p.set (ParamIDs::drum (k, "Insert"), 1.0f);
+                p.set (ParamIDs::instInsert, 1.0f);
             juce::AudioBuffer<float> buffer (2, blockSize);
             const auto started = juce::Time::getMillisecondCounterHiRes();
             for (int b = 0; b < (int) (4.0 * sampleRate) / blockSize; ++b)
             {
-                juce::MidiBuffer midi;   // a drum every eighth of a second, round the kit
+                juce::MidiBuffer midi;   // a note every eighth of a second, round an octave
                 if (b % 23 == 0)
                     midi.addEvent (juce::MidiMessage::noteOn (1, testkit::keyFor ((b / 23) % 12), (juce::uint8) 100), 0);
                 p.processor.processBlock (buffer, midi);
@@ -260,7 +238,7 @@ TEST_CASE ("INSERTS: CPU, the kit on a bus through RABID (one a side, 8x oversam
         return best;
     };
     const auto plain = cpu (0), bused = cpu (1), unrouted = cpu (2);
-    WARN ("the kit, a hit every eighth of a second: no bus " << plain << "% of one core; on bus A with RABID and GLITCH " << bused
+    WARN ("a 2 s saw, a note every eighth of a second: no bus " << plain << "% of one core; on bus A with RABID and GLITCH " << bused
           << "%; those on with nothing routed " << unrouted << "%");
     CHECK (bused < plain + 45.0);       // RABID solves its circuit at 8x, once a side (generous for CI machines)
     CHECK (unrouted < plain + 1.0);     // a bus nothing plays into costs nothing
@@ -295,27 +273,22 @@ TEST_CASE ("The FX page's INSERTS view: the bus strip, each bus's units and page
     }
     CHECK_FALSE (page.getInsertUnit (1, 0).isVisible());
 
-    // Routing from the strip: the snare's button (drum 3) puts it on the bus shown, again takes it off.
-    for (int k = 0; k < 12; ++k)
-    {
-        INFO (k << " " << strip.getDrumButton (k).getBounds().toString());
-        CHECK (strip.getDrumButton (k).getButtonText() == synth::drums::slotDefaults[(size_t) k].key);
-        CHECK (strip.getLocalBounds().contains (strip.getDrumButton (k).getBounds()));
-        if (k > 0)
-            CHECK (strip.getDrumButton (k).getX() >= strip.getDrumButton (k - 1).getRight());
-    }
-    CHECK (strip.getDrumButton (11).getRight() < strip.getSend (0).getX());
-    auto& insert = *processor.getParameters().getParameter (ParamIDs::drum (2, "Insert"));
-    strip.getDrumButton (2).onClick();
+    // Routing from the strip: THE INSTRUMENT puts it on the bus shown; on another bus it isn't lit; again takes it off.
+    CHECK (strip.getLocalBounds().contains (strip.getRouteButton().getBounds()));
+    CHECK (strip.getRouteButton().getRight() < strip.getSend (0).getX());
+    auto& insert = *processor.getParameters().getParameter (ParamIDs::instInsert);
+    strip.getRouteButton().onClick();
     CHECK (juce::roundToInt (insert.convertFrom0to1 (insert.getValue())) == 1);
     strip.getBusButton (2).onClick();   // bus C: its units, its sends
     CHECK (strip.getBus() == 2);
     CHECK (page.getInsertUnit (2, 0).isVisible());
     CHECK_FALSE (page.getInsertUnit (0, 0).isVisible());
     CHECK (strip.getSend (0).getParameterId() == ParamIDs::ins (2, "SendDelay"));
-    CHECK_FALSE (strip.getDrumButton (2).getToggleState());   // it's on A, not C
-    strip.getDrumButton (2).onClick();
+    CHECK_FALSE (strip.getRouteButton().getToggleState());   // it's on A, not C
+    strip.getRouteButton().onClick();
     CHECK (juce::roundToInt (insert.convertFrom0to1 (insert.getValue())) == 3);
+    strip.getRouteButton().onClick();
+    CHECK (juce::roundToInt (insert.convertFrom0to1 (insert.getValue())) == 0);
 
     // POWER is each effect's ON on that bus; EDIT opens its page; BACK TO RACK returns.
     auto& driveOn = *processor.getParameters().getParameter (ParamIDs::ins (2, "DriveOn"));
@@ -386,46 +359,12 @@ TEST_CASE ("INSERTS: DRIVE's page draws what the drive does", "[inserts][ui]")
     CHECK (preview.getCycleOut().size() == 400);
 }
 
-TEST_CASE ("INSERTS: the factory preset Dirty Beat: kick, snare and clap through bus A's drive, the hats clean", "[inserts][rigs]")
-{
-    Plugin p;
-    const auto* entry = p.processor.getRigLibrary().findFactory ("Dirty Beat");
-    REQUIRE (entry != nullptr);
-    p.processor.loadRig (*entry);
-    const auto s = p.processor.getKitSettings();
-    for (const auto slot : { 0, 2, 3 })
-        CHECK (s.slots[(size_t) slot].insertBus == 1);
-    for (const auto slot : { 6, 8, 10 })
-        CHECK (s.slots[(size_t) slot].insertBus == 0);
-    CHECK (p.processor.getInsertDriveSettings (0).on);
-    CHECK (p.processor.getInsertLoFiSettings (0).on);
-    CHECK_THAT (p.processor.getInsertLoFiSettings (0).noise, WithinAbs (0.0, 1.0e-6));   // no hiss: a preset must go silent
-
-    // The kick lights bus A; a closed hat alone leaves it silent.
-    const auto busPeakAfter = [&p] (int slot)
-    {
-        juce::MidiBuffer hit;
-        hit.addEvent (juce::MidiMessage::noteOn (1, testkit::keyFor (slot), (juce::uint8) 120), 0);
-        juce::AudioBuffer<float> buffer (2, blockSize);
-        auto peak = -100.0f;
-        for (int b = 0; b < 20; ++b)
-        {
-            auto midi = b == 0 ? hit : juce::MidiBuffer();
-            p.processor.processBlock (buffer, midi);
-            peak = std::max (peak, p.processor.getInsertPeakDb (0));
-        }
-        return peak;
-    };
-    CHECK (busPeakAfter (6) < -99.0f);
-    CHECK (busPeakAfter (0) > -40.0f);
-}
-
 TEST_CASE ("INSERTS: the DRIVE leaves no offset behind (RABID's charged capacitor is blocked)", "[inserts]")
 {
     // A loud sound through RABID, ended: 3 seconds later the bus is silent (on PR7-G the amp blocks RABID's offset).
     Plugin p;
-    p.set (ParamIDs::drum (0, "Insert"), 1.0f);
-    p.set (ParamIDs::drum (0, "Gain"), 6.0f);
+    p.set (ParamIDs::instInsert, 1.0f);
+    p.set (ParamIDs::instLevel, 6.0f);
     p.driveOn (0, Model::rabid, 8.0f);
     const auto out = p.play (45, 0.5, 4.0);
     CHECK (peakOf (out[0], 3.5) < 1.0e-4);

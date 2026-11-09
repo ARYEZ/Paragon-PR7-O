@@ -11,9 +11,9 @@
 #include "ui/SendPages.h"
 
 // The FX page: four views, INSERTS, SENDS, MOD / LO-FI and MASTER (tabs at the top, in the sound's order).
-//   INSERTS (stage 7d): the insert buses A to D (one shown at a time: its strip with the drums routed to it and
+//   INSERTS (stage 7d): the insert buses A to D (one shown at a time: its strip with the instrument routed to it and
 //   its sends, then its DRIVE, GLITCH, MOD and LO-FI units).
-//   SENDS (stage 7b): PR7-G's DELAY and REVERB as two rack units, and the send matrix (each drum's sends,
+//   SENDS (stage 7b): PR7-G's DELAY and REVERB as two rack units, and the send strip (the instrument's sends,
 //   DELAY > REVERB). Their returns join the kit before the inserts.
 //   MOD / LO-FI (stage 7c): PR7-G's MOD block twice and its LO-FI, on the whole sound (the returns too), before MASTER.
 //   MASTER (stage 7a): THE RACK, PR7-E 0.18.1's four rack units in the signal chain's order (ECHELON, DOMINION,

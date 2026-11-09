@@ -2,7 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-// The PR7-D mark: heavy, wide, forward-slanted block letters with two "speed"
+// The PR7-O mark: heavy, wide, forward-slanted block letters with two "speed"
 // cuts through their lower half, in the spirit of late-'90s floor
 // processors. Drawn from vector outlines (not a font), so it's the same
 // shape everywhere: the header and the unit's badge.
@@ -10,7 +10,7 @@ namespace Logo
 {
     struct Style
     {
-        juce::Colour letters;                              // P, R and "-D"
+        juce::Colour letters;                              // P, R and "-O"
         juce::Colour seven;                                // the 7, usually the accent colour
         juce::Colour highlight = juce::Colours::transparentBlack;   // a light edge underneath, to look stamped into metal
         juce::Colour outline = juce::Colours::transparentBlack;     // an engraved outline
@@ -25,8 +25,8 @@ namespace Logo
     // Returns where it was drawn.
     juce::Rectangle<float> drawMark (juce::Graphics&, juce::Rectangle<float> area, juce::Justification justification, const Style&);
 
-    // The PR7-D icon (0.57.0, the KIT VIEW's holograms; in the style of PR7-S's "7S" icon): a big slanted "7D" (the 7
-    // `sevenTop` above its first speed cut, `sevenLow` below, the D `letters`), a line under it, the "PR7-D" mark
+    // The PR7-O icon (PR7-D 0.57.0's, in the style of PR7-S's "7S" icon): a big slanted "7O" (the 7
+    // `sevenTop` above its first speed cut, `sevenLow` below, the O `letters`), a line under it, the "PR7-O" mark
     // smaller under that (its 7 `accent`), all in a rounded frame (`accent`). Drawn in the square `area`.
     struct IconStyle
     {

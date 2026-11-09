@@ -108,7 +108,7 @@ std::array<RackUnit::Spec, 4> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
         s.number = 1;
         s.name = "ECHELON";
         s.kind = "PARAMETRIC EQUALIZER";
-        s.series = "PR7-D SERIES  24 BANDS";
+        s.series = "PR7-O SERIES  24 BANDS";
         s.onParameterIds = { eqOn };
         s.powerTooltip = "ECHELON on or off. Click POWER (the word) or EDIT for its page";
         s.keys[0] = { "AUTO GAIN", "Keeps the level the same as you EQ, so louder doesn't fool you",
@@ -198,7 +198,7 @@ std::array<RackUnit::Spec, 4> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
         s.number = 2;
         s.name = "DOMINION";
         s.kind = "RESONANCE SUPPRESSOR";
-        s.series = "PR7-D SERIES  SOFT / HARD";
+        s.series = "PR7-O SERIES  SOFT / HARD";
         s.onParameterIds = { domOn };
         s.powerTooltip = "DOMINION on or off. Click POWER (the word) or EDIT for its page";
         s.keys[0] = { "HARD", "HARD: turns down what's loud, at any frequency; off (SOFT): what sticks out of the sound around it",
@@ -256,7 +256,7 @@ std::array<RackUnit::Spec, 4> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
         s.number = 3;
         s.name = "CONSTRICTOR";
         s.kind = "COMPRESSOR  6 BANDS";
-        s.series = "PR7-D SERIES  VCA OPTO FET";
+        s.series = "PR7-O SERIES  VCA OPTO FET";
         s.onParameterIds = { compOn };
         s.powerTooltip = "CONSTRICTOR on or off. Click POWER (the word) or EDIT for its page";
         const auto character = [&p] (int which) { return [&p, which] { return juce::roundToInt (valueOf (p, compCharacter)) == which; }; };
@@ -309,7 +309,7 @@ std::array<RackUnit::Spec, 4> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
         s.number = 4;
         s.name = "LIMITER";
         s.kind = "TRUE PEAK LIMITER";
-        s.series = "PR7-D SERIES  LOUDNESS";
+        s.series = "PR7-O SERIES  LOUDNESS";
         s.onParameterIds = { limitOn };
         s.powerTooltip = "The LIMITER on or off. Click POWER (the word) or EDIT for its page";
         s.keys[0] = { "TRUE PEAK", "Keeps the peaks between the samples under the ceiling too",
@@ -369,9 +369,9 @@ std::array<RackUnit::Spec, 2> makeSendSpecs (ParagonX1AudioProcessor& p, std::fu
         s.number = 1;
         s.name = "DELAY";
         s.kind = "STEREO DELAY  8 TYPES";
-        s.series = "PR7-D SERIES  SEND 1";
+        s.series = "PR7-O SERIES  SEND 1";
         s.onParameterIds = { delayOn };
-        s.powerTooltip = "The DELAY on or off (each drum's DELAY send feeds it). Click POWER (the word) or EDIT for its page";
+        s.powerTooltip = "The DELAY on or off (the instrument's DELAY send feeds it). Click POWER (the word) or EDIT for its page";
         auto lastSync = std::make_shared<float> (3.0f);   // SYNC's note when it's switched back on (1/4 to start)
         s.keys[0] = { "PING-PONG", "The echoes bounce left, right, left...",
                       [&p] { return valueOf (p, delayPingPong) > 0.5f; }, [&p] { toggle (p, delayPingPong); } };
@@ -421,9 +421,9 @@ std::array<RackUnit::Spec, 2> makeSendSpecs (ParagonX1AudioProcessor& p, std::fu
         s.number = 2;
         s.name = "REVERB";
         s.kind = "STEREO REVERB  8 TYPES";
-        s.series = "PR7-D SERIES  SEND 2";
+        s.series = "PR7-O SERIES  SEND 2";
         s.onParameterIds = { reverbOn };
-        s.powerTooltip = "The REVERB on or off (each drum's REVERB send feeds it). Click POWER (the word) or EDIT for its page";
+        s.powerTooltip = "The REVERB on or off (the instrument's REVERB send feeds it). Click POWER (the word) or EDIT for its page";
         const auto typeKey = [&p] (effects::Reverb::Type type, const char* tip)
         {
             return RackUnit::Key { effects::Reverb::typeNames[(int) type].toUpperCase(), tip,
@@ -616,13 +616,13 @@ std::array<RackUnit::Spec, 3> makeModFxSpecs (ParagonX1AudioProcessor& p, std::f
     std::array<RackUnit::Spec, 3> specs;
     for (int which = 0; which < 2; ++which)
         specs[(size_t) which] = makeModSpec (p, which == 0 ? ParamIDs::modIds : ParamIDs::mod2Ids, which + 1, which == 0 ? "MOD" : "MOD 2",
-                                             "PR7-D SERIES  INSERT " + juce::String (which + 1),
+                                             "PR7-O SERIES  INSERT " + juce::String (which + 1),
                                              juce::String (which == 0 ? "MOD" : "MOD 2") + " on or off (on everything, after the sends come back"
                                                  + (which == 0 ? "" : " and after MOD") + "). Click POWER (the word) or EDIT for its page",
                                              [&p, which] { return p.getModSettings (which); },
                                              [&p, which] { return p.getModSweepPhase (which); },
                                              [openPage, which] { openPage (which); });
-    specs[2] = makeLoFiSpec (p, [] (const char* name) { return juce::String (name); }, 3, "PR7-D SERIES  INSERT 3",
+    specs[2] = makeLoFiSpec (p, [] (const char* name) { return juce::String (name); }, 3, "PR7-O SERIES  INSERT 3",
                              [&p] { return p.getLoFiSettings(); }, "OUT", [&p] { return p.getLoFiPeakDb(); }, [openPage] { openPage (2); });
     specs[2].powerTooltip = "LO-FI on or off: the whole sound, echoes and all, through a phone, a radio, a megaphone, a cassette or a bitcrusher. "
                             "Click POWER (the word) or EDIT for its page";
@@ -634,7 +634,7 @@ std::array<RackUnit::Spec, 4> makeInsertSpecs (ParagonX1AudioProcessor& p, int b
 {
     std::array<RackUnit::Spec, 4> specs;
     const auto busName = ParamIDs::insertBusNames[bus + 1];
-    const auto series = "PR7-D SERIES  BUS " + busName;
+    const auto series = "PR7-O SERIES  BUS " + busName;
     const auto id = [bus] (const char* name) { return busId (bus, name); };
 
     // DRIVE (PR7-G's seven pedals): DRIVE in big digits, the model's own settings beside it, the bus's level on the ladder.
