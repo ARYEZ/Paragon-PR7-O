@@ -141,20 +141,22 @@ TEST_CASE ("SFZ: what isn't read yet is listed; missing files, release samples a
     Folder f;
     f.wav ("a.wav", 220.0);
     const auto program = sampler::sfz::load (f.sfz ("i.sfz",
-        "<region> sample=a.wav loop_mode=loop_continuous loop_start=100 loop_end=2000 xfin_locc1=0 xfin_hicc1=64\n"
+        "<region> sample=a.wav loop_mode=loop_continuous loop_start=100 loop_end=2000 xfin_locc1=0 xfin_hicc1=64 lfo01_freq=5\n"
         "<region> sample=a.wav loop_mode=one_shot region_label=hit\n"
         "<region> sample=gone.wav\n"
         "<region> sample=a.wav trigger=release\n"
         "<region> sample=*sine\n"));
-    CHECK (program->regions.size() == 2);
+    CHECK (program->regions.size() == 3);   // 0.9.0: the release sample is read
     CHECK (program->regions[1].oneShot);
     CHECK (program->problems.joinIntoString ("|").contains ("missing: gone.wav"));
     const auto unread = program->unread.joinIntoString ("|");
     INFO (unread);
     CHECK (program->regions[0].loop == sampler::Region::Loop::continuous);   // 0.2.0: loops are read
     CHECK_FALSE (unread.contains ("loop_"));
-    CHECK (unread.contains ("xfin_locc1 (1)"));
-    CHECK (unread.contains ("release / legato samples (1)"));
+    CHECK_FALSE (unread.contains ("xfin_locc1"));     // 0.9.0: read
+    CHECK_FALSE (unread.contains ("release"));
+    CHECK (program->regions[2].trigger == sampler::Region::Trigger::release);
+    CHECK (unread.contains ("lfo01_freq (1)"));        // the newer numbered LFOs: still not
     CHECK (unread.contains ("*sine"));
     CHECK_FALSE (unread.contains ("region_label"));   // names change nothing
     CHECK_FALSE (unread.contains ("one_shot"));       // read
@@ -1252,4 +1254,272 @@ TEST_CASE ("SAMPLER 0.7.0: GLIDE slides a joined note's pitch from the old note'
     none.legato = true;
     const auto straight = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 1.0 } }), 1.6, none)[0];
     CHECK_THAT (frequencyOf (straight, (size_t) (1.16 * sampleRate), (size_t) (1.19 * sampleRate)), WithinAbs (330.0, 4.0));
+}
+
+// ================================================================ 0.9.0: the rest of SFZ's sound (Sonatina's files)
+namespace
+{
+    // Tones summed (each peak 0.25), `seconds` long, both sides (the right one's tones `rightScale` x).
+    std::shared_ptr<sampler::Sample> tones (std::initializer_list<double> hz, double seconds, float rightScale = 1.0f)
+    {
+        auto s = std::make_shared<sampler::Sample>();
+        s->name = "tones";
+        s->sampleRate = sampleRate;
+        const auto n = (size_t) (seconds * sampleRate);
+        s->channels.assign (2, std::vector<float> (n));
+        for (size_t i = 0; i < n; ++i)
+            for (const auto f : hz)
+            {
+                const auto x = 0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * f * (double) i / sampleRate);
+                s->channels[0][i] += x;
+                s->channels[1][i] += x * rightScale;
+            }
+        return s;
+    }
+
+    // A program of regions written as SFZ text over one generated sample (the reader's own parsing, the sample swapped in).
+    std::shared_ptr<sampler::Program> withSample (Folder& f, const juce::String& text, std::shared_ptr<const sampler::Sample> sample)
+    {
+        f.wav ("t.wav", 220.0, 0.1);
+        auto program = sampler::sfz::load (f.sfz ("i.sfz", text));
+        for (auto& r : program->regions)
+            r.sample = sample;
+        sampler::prepareRegions (*program);
+        program->index();
+        return program;
+    }
+
+    juce::MidiBuffer events (std::initializer_list<juce::MidiMessage> messages, std::initializer_list<double> seconds)
+    {
+        juce::MidiBuffer m;
+        auto at = seconds.begin();
+        for (const auto& message : messages)
+            m.addEvent (message, (int) std::lround (*at++ * sampleRate));
+        return m;
+    }
+}
+
+TEST_CASE ("SFZ 0.9.0: FILTERS: low-pass and high-pass with their slopes; the cutoff moved by key, velocity and a controller", "[sfz][sampler][filter]")
+{
+    Folder f;
+    const auto both = tones ({ 200.0, 5000.0 }, 1.0);
+    const auto measure = [&] (const juce::String& opcodes, juce::MidiBuffer midi = noteOn (60))
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 " + opcodes + "\n", both);
+        const auto out = render (*program, midi, 0.5)[0];
+        return std::pair { db (levelOver (out, 200.0, 0.3, 0.1) / 0.25), db (levelOver (out, 5000.0, 0.3, 0.1) / 0.25) };
+    };
+    // Read: the type, cutoff, tracking.
+    const auto read = withSample (f, "<region> sample=t.wav fil_type=hpf_1p cutoff=800 resonance=3 fil_keytrack=100 fil_keycenter=c4 fil_veltrack=1200 cutoff_cc1=2400\n", both);
+    REQUIRE (read->regions.size() == 1);
+    const auto& filter = read->regions[0].filters[0];
+    CHECK (filter.type == sampler::Region::Filter::Type::highpass1);
+    CHECK ((filter.cutoff == 800.0f && filter.resonance == 3.0f && filter.keytrack == 100.0f && filter.keycenter == 60 && filter.veltrack == 1200.0f));
+    REQUIRE (filter.cc.size() == 1);
+    CHECK ((filter.cc[0].first == 1 && filter.cc[0].second == 2400.0f));
+    // A 2-pole low-pass at 1 kHz: 200 Hz through, 5 kHz (2.3 octaves up) about 28 dB down; 1-pole: about 14 dB.
+    const auto [low2, high2] = measure ("fil_type=lpf_2p cutoff=1000");
+    CHECK_THAT (low2, WithinAbs (0.0, 0.5));
+    CHECK_THAT (high2, WithinAbs (-28.0, 3.0));
+    const auto [low1, high1] = measure ("fil_type=lpf_1p cutoff=1000");
+    CHECK_THAT (high1, WithinAbs (-14.0, 2.0));
+    CHECK (low1 > -0.5);
+    // A high-pass at 2 kHz: the reverse.
+    const auto [lowH, highH] = measure ("fil_type=hpf_2p cutoff=2000");
+    CHECK (lowH < -30.0);
+    CHECK (highH > -1.0);
+    // The mod wheel up 4 octaves (cutoff_cc1=4800 cents): 5 kHz through again.
+    juce::MidiBuffer wheelUp;
+    wheelUp.addEvent (juce::MidiMessage::controllerEvent (1, 1, 127), 0);
+    wheelUp.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+    CHECK (measure ("fil_type=lpf_2p cutoff=1000 cutoff_cc1=4800", wheelUp).second > -3.0);
+    // Key tracking: an octave up the cutoff follows (fil_keytrack=100): the note at 72 lets more of 5 kHz through.
+    const auto program = withSample (f, "<region> sample=t.wav lokey=48 hikey=84 pitch_keycenter=60 pitch_keytrack=0 amp_veltrack=0 fil_type=lpf_2p cutoff=1000 fil_keytrack=100\n", both);
+    const auto at60 = render (*program, noteOn (60), 0.5)[0], at72 = render (*program, noteOn (72), 0.5)[0];
+    CHECK_THAT (db (levelOver (at72, 5000.0, 0.3, 0.1) / levelOver (at60, 5000.0, 0.3, 0.1)), WithinAbs (12.0, 2.0));
+}
+
+TEST_CASE ("SFZ 0.9.0: controllers: gain_cc, crossfades between layers on the mod wheel (equal power), set_cc as the start", "[sfz][sampler][cc]")
+{
+    Folder f;
+    const auto a = tones ({ 220.0 }, 1.0), b = tones ({ 330.0 }, 1.0);
+    f.wav ("t.wav", 220.0, 0.1);
+    auto program = sampler::sfz::load (f.sfz ("i.sfz",
+        "<control> set_cc1=0 label_cc1=Dynamics\n"
+        "<group> key=60 amp_veltrack=0 xf_cccurve=power\n"
+        "<region> sample=t.wav xfout_locc1=32 xfout_hicc1=96\n"
+        "<region> sample=t.wav xfin_locc1=32 xfin_hicc1=96 gain_cc7=-12\n"));
+    REQUIRE (program->regions.size() == 2);
+    program->regions[0].sample = a;
+    program->regions[1].sample = b;
+    program->index();
+    CHECK (program->initialCC[1] == 0);
+    CHECK (program->ccLabels[1] == "Dynamics");
+    CHECK (program->ownWheel);
+    const auto at = [&] (int wheel, int seven = 0)
+    {
+        juce::MidiBuffer m;
+        m.addEvent (juce::MidiMessage::controllerEvent (1, 1, wheel), 0);
+        m.addEvent (juce::MidiMessage::controllerEvent (1, 7, seven), 0);
+        m.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+        const auto out = render (*program, m, 0.5)[0];
+        return std::pair { levelOver (out, 220.0, 0.3, 0.1) / 0.25, levelOver (out, 330.0, 0.3, 0.1) / 0.25 };
+    };
+    const auto [lowA, lowB] = at (0);
+    CHECK_THAT (lowA, WithinAbs (1.0, 0.02));
+    CHECK (lowB < 1.0e-3);
+    const auto [midA, midB] = at (64);   // half way: each at equal power (sqrt 0.5, -3 dB)
+    CHECK_THAT (db (midA), WithinAbs (-3.0, 0.3));
+    CHECK_THAT (db (midB), WithinAbs (-3.0, 0.3));
+    const auto [highA, highB] = at (127);
+    CHECK (highA < 1.0e-3);
+    CHECK_THAT (highB, WithinAbs (1.0, 0.02));
+    CHECK_THAT (db (at (127, 127).second), WithinAbs (-12.0, 0.3));   // gain_cc7=-12: CC 7 at the top, 12 dB down
+    // Moving the wheel while the note is held moves the crossfade (and PR7-O's own MOD WHEEL dynamics leaves the file's be).
+    sampler::Sampler::Settings wheelMode;
+    wheelMode.dynamics = sampler::Sampler::Dynamics::modWheel;
+    juce::MidiBuffer moving;
+    moving.addEvent (juce::MidiMessage::controllerEvent (1, 1, 0), 0);
+    moving.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+    moving.addEvent (juce::MidiMessage::controllerEvent (1, 1, 127), 24000);
+    const auto moved = render (*program, moving, 1.0, wheelMode)[0];
+    CHECK (levelOver (moved, 220.0, 0.3, 0.1) > 0.2);
+    CHECK (levelOver (moved, 330.0, 0.8, 0.1) > 0.2);
+    CHECK (levelOver (moved, 220.0, 0.8, 0.1) < 0.01);
+}
+
+TEST_CASE ("SFZ 0.9.0: velocity crossfades, amp_velcurve, pitch_veltrack, amp_keytrack, width, delay", "[sfz][sampler]")
+{
+    Folder f;
+    const auto a = tones ({ 440.0 }, 1.0);
+    const auto levelAtVelocity = [&] (const juce::String& opcodes, int velocity)
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 " + opcodes + "\n", a);
+        return levelOver (render (*program, noteOn (60, velocity), 0.4)[0], 440.0, 0.2, 0.1) / 0.25;
+    };
+    // xfin over velocity 32-96 (power): at 64 half in power (-3 dB), at 96 all, at 20 none (amp_veltrack 0).
+    CHECK_THAT (db (levelAtVelocity ("amp_veltrack=0 xfin_lovel=32 xfin_hivel=96", 64)), WithinAbs (-3.0, 0.3));
+    CHECK_THAT (levelAtVelocity ("amp_veltrack=0 xfin_lovel=32 xfin_hivel=96", 100), WithinAbs (1.0, 0.02));
+    CHECK (levelAtVelocity ("amp_veltrack=0 xfin_lovel=32 xfin_hivel=96", 20) < 1.0e-3);
+    CHECK_THAT (levelAtVelocity ("amp_veltrack=0 xfout_lovel=32 xfout_hivel=96 xf_velcurve=gain", 64), WithinAbs (0.5, 0.03));
+    // amp_velcurve: its points, straight between them (velocity 64 at 0.5 here, 32 a quarter).
+    CHECK_THAT (levelAtVelocity ("amp_velcurve_64=0.5 amp_velcurve_127=1", 32), WithinAbs (0.25, 0.02));
+    CHECK_THAT (levelAtVelocity ("amp_velcurve_64=0.5 amp_velcurve_127=1", 64), WithinAbs (0.5, 0.02));
+    // amp_keytrack: -1 dB a key from 60 (the note at 66: -6 dB).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav lokey=48 hikey=84 pitch_keycenter=60 pitch_keytrack=0 amp_veltrack=0 amp_keytrack=-1\n", a);
+        CHECK_THAT (db (levelOver (render (*program, noteOn (66), 0.4)[0], 440.0, 0.2, 0.1) / 0.25), WithinAbs (-6.0, 0.3));
+    }
+    // pitch_veltrack: 1200 cents at velocity 127 (an octave up).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 pitch_veltrack=1200\n", a);
+        CHECK_THAT (frequencyOf (render (*program, noteOn (60, 127), 0.4)[0], 4800, 14400), WithinAbs (880.0, 3.0));
+    }
+    // width 0: both sides the same (a sample whose right side is half its left).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 width=0\n", tones ({ 440.0 }, 1.0, 0.5f));
+        const auto out = render (*program, noteOn (60), 0.4);
+        CHECK_THAT (db (levelOver (out[0], 440.0, 0.2, 0.1) / levelOver (out[1], 440.0, 0.2, 0.1)), WithinAbs (0.0, 0.05));
+    }
+    // delay=0.1: nothing for 0.1 s, then the recording from its start (sample for sample).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 delay=0.1\n", a);
+        const auto out = render (*program, noteOn (60), 0.3)[0];
+        CHECK (peakOf (out, 0, 4799) == 0.0);
+        CHECK_THAT (out[4800 + 10], WithinAbs (a->channels[0][10], 1.0e-5));
+    }
+}
+
+TEST_CASE ("SFZ 0.9.0: RELEASE samples after the key (and the pedal), quieter the longer it was held; first and legato samples", "[sfz][sampler][release]")
+{
+    Folder f;
+    const auto body = tones ({ 220.0 }, 3.0), tail = tones ({ 660.0 }, 1.0);
+    f.wav ("t.wav", 220.0, 0.1);
+    auto program = sampler::sfz::load (f.sfz ("i.sfz",
+        "<group> key=60 amp_veltrack=0\n"
+        "<region> sample=t.wav ampeg_release=0.05\n"
+        "<region> sample=t.wav trigger=release rt_decay=6\n"));
+    REQUIRE (program->regions.size() == 2);
+    program->regions[0].sample = body;
+    program->regions[1].sample = tail;
+    program->index();
+    using M = juce::MidiMessage;
+    const auto out = render (*program, events ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOff (1, 60) }, { 0.0, 1.0 }), 1.5)[0];
+    CHECK (levelOver (out, 660.0, 0.5, 0.1) < 1.0e-3);   // not while held
+    CHECK (levelOver (out, 660.0, 1.1, 0.1) > 0.1);      // after
+    // rt_decay 6 dB a second: held 2 s, 6 dB quieter than held 1 s.
+    const auto later = render (*program, events ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOff (1, 60) }, { 0.0, 2.0 }), 2.5)[0];
+    CHECK_THAT (db (levelOver (later, 660.0, 2.1, 0.1) / levelOver (out, 660.0, 1.1, 0.1)), WithinAbs (-6.0, 0.3));
+    // Under the pedal: let go of the key, nothing yet; lift the pedal, the release sample.
+    const auto pedal = render (*program, events ({ M::controllerEvent (1, 64, 127), M::noteOn (1, 60, (juce::uint8) 100), M::noteOff (1, 60),
+                                                   M::controllerEvent (1, 64, 0) }, { 0.0, 0.01, 0.5, 1.0 }), 1.5)[0];
+    CHECK (levelOver (pedal, 660.0, 0.7, 0.1) < 1.0e-3);
+    CHECK (levelOver (pedal, 660.0, 1.1, 0.1) > 0.05);
+    // release_key: at the key, whatever the pedal.
+    program->regions[1].trigger = sampler::Region::Trigger::releaseKey;
+    const auto keyOnly = render (*program, events ({ M::controllerEvent (1, 64, 127), M::noteOn (1, 60, (juce::uint8) 100), M::noteOff (1, 60) },
+                                                   { 0.0, 0.01, 0.5 }), 1.0)[0];
+    CHECK (levelOver (keyOnly, 660.0, 0.6, 0.1) > 0.1);
+
+    // first / legato: the first note of a phrase plays one, a note while another's held the other.
+    auto phrase = sampler::sfz::load (f.sfz ("p.sfz",
+        "<group> lokey=60 hikey=62 pitch_keycenter=60 pitch_keytrack=0 amp_veltrack=0\n"
+        "<region> sample=t.wav trigger=first\n"
+        "<region> sample=t.wav trigger=legato\n"));
+    REQUIRE (phrase->regions.size() == 2);
+    phrase->regions[0].sample = body;
+    phrase->regions[1].sample = tail;
+    phrase->index();
+    const auto played = render (*phrase, events ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOn (1, 62, (juce::uint8) 100) }, { 0.0, 0.5 }), 1.0)[0];
+    CHECK (levelOver (played, 220.0, 0.2, 0.1) > 0.2);   // the first note: first's
+    CHECK (levelOver (played, 660.0, 0.2, 0.1) < 1.0e-3);
+    CHECK (levelOver (played, 660.0, 0.7, 0.1) > 0.2);   // the second, over it: legato's
+}
+
+TEST_CASE ("SFZ 0.9.0: GROUPS turn notes off (off_by, off_mode); locc / hicc; envelope by velocity; the level LFO", "[sfz][sampler]")
+{
+    Folder f;
+    const auto a = tones ({ 220.0 }, 2.0), b = tones ({ 330.0 }, 2.0);
+    f.wav ("t.wav", 220.0, 0.1);
+    using M = juce::MidiMessage;
+    // An open hi-hat cut by a closed one, as drum kits do: here A (group 1, off_by 2) stops when B (group 2) starts.
+    auto choke = sampler::sfz::load (f.sfz ("c.sfz",
+        "<region> sample=t.wav key=60 amp_veltrack=0 group=1 off_by=2\n"
+        "<region> sample=t.wav key=62 amp_veltrack=0 group=2\n"));
+    REQUIRE (choke->regions.size() == 2);
+    choke->regions[0].sample = a;
+    choke->regions[1].sample = b;
+    choke->index();
+    const auto cut = render (*choke, events ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOn (1, 62, (juce::uint8) 100) }, { 0.0, 0.5 }), 1.0)[0];
+    CHECK (levelOver (cut, 220.0, 0.3, 0.1) > 0.2);
+    CHECK (levelOver (cut, 220.0, 0.6, 0.1) < 1.0e-3);   // gone 6 ms after B starts
+    CHECK (levelOver (cut, 330.0, 0.6, 0.1) > 0.2);
+    // locc / hicc: a region only while CC 20 is 64 or more.
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 locc20=64 hicc20=127\n", a);
+        CHECK (peakOf (render (*program, noteOn (60), 0.2)[0]) == 0.0);
+        juce::MidiBuffer m;
+        m.addEvent (M::controllerEvent (1, 20, 100), 0);
+        m.addEvent (M::noteOn (1, 60, (juce::uint8) 100), 1);
+        CHECK (peakOf (render (*program, m, 0.2)[0]) > 0.1);
+    }
+    // ampeg_vel2attack: 0.2 s more attack at velocity 127: half way up at 0.1 s (a soft note: at once).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 ampeg_vel2attack=0.2\n", a);
+        CHECK_THAT (levelOver (render (*program, noteOn (60, 127), 0.4)[0], 220.0, 0.095, 0.01) / 0.25, WithinAbs (0.5, 0.06));
+        CHECK (levelOver (render (*program, noteOn (60, 1), 0.4)[0], 220.0, 0.095, 0.01) / 0.25 > 0.95);
+    }
+    // amplfo: +-3 dB at 2 Hz: the level swings 6 dB over half a second.
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 amplfo_depth=3 amplfo_freq=2\n", a);
+        const auto out = render (*program, noteOn (60), 1.6)[0];
+        auto lo = 1.0e9, hi = 0.0;
+        for (double t = 0.6; t < 1.5; t += 0.02)
+        {
+            const auto level = db (levelOver (out, 220.0, t, 0.02) / 0.25);
+            lo = std::min (lo, level);
+            hi = std::max (hi, level);
+        }
+        CHECK_THAT (hi - lo, WithinAbs (6.0, 0.8));
+    }
 }

@@ -24,8 +24,14 @@
 //   one_shot / loop_continuous / loop_sustain, loop_start / loop_end in frames, loop_crossfade in seconds: crossfaded
 //   with a curve that keeps the level for how alike its two sides are, measured as it loads); ampeg_dynamic
 //   (it re-reads the envelope when a controller moves it: PR7-O's envelope has no controllers, so it changes nothing).
-// Not read yet, and listed as such (`unread`): release samples, crossfades on controllers (xfin / xfout), filters, LFOs,
-// other envelopes, curves.
+//   0.9.0 (Sonatina Symphonic Orchestra's files, counted): trigger release / release_key / first / legato, rt_decay;
+//   locc / hicc; fil_type / cutoff / resonance / fil_keytrack / fil_keycenter / fil_veltrack / cutoff_ccN (and fil2_,
+//   cutoff2, resonance2, cutoff2_ccN); gain_ccN, amplitude_onccN; xfin_ / xfout_ loccN hiccN, lovel hivel, lokey hikey,
+//   xf_cccurve / xf_velcurve / xf_keycurve; amp_velcurve_N; ampeg_vel2*, ampeg_*ccN; amp_keytrack / amp_keycenter;
+//   pitch_veltrack; delay / delay_random / offset_random; group_ / master_ / global_ volume and tune; width; group /
+//   off_by / off_mode / off_time; amplfo_ depth / freq / delay / fade; set_ccN, label_ccN, sustain_cc.
+// Not read yet, and listed as such (`unread`): the newer numbered LFOs and envelopes (lfo01_..., eg01_...), equalisers,
+// other curves.
 namespace sampler
 {
     struct Region
@@ -68,6 +74,59 @@ namespace sampler
         // 0.8.0, THE STAGE: which part of a section it plays in (0 for a single instrument), so each part can sit apart.
         int part = 0;
 
+        // 0.9.0, the rest of SFZ's sound that open libraries use (Sonatina Symphonic Orchestra's files, counted):
+        // WHEN it plays: on the key going down (attack), only as the first note of a phrase or only joined to one held
+        // (first / legato), or when the key is let go (release: after the pedal too; release_key: the key alone), its
+        // level falling rt_decay dB for every second the key was held.
+        enum class Trigger { attack, release, releaseKey, first, legato };
+        Trigger trigger = Trigger::attack;
+        float rtDecay = 0.0f;
+        // Only while a controller is in a range (locc / hicc): (cc, lo, hi).
+        struct CcRange { int cc = 0, lo = 0, hi = 127; };
+        std::vector<CcRange> ccConditions;
+        // Its FILTERS (two: fil_type / cutoff / resonance and fil2_type / cutoff2 / resonance2): the cutoff moved by the
+        // key (fil_keytrack cents a key from fil_keycenter), the velocity (fil_veltrack cents at 127) and controllers
+        // (cutoff_ccN cents at 127, followed as they move).
+        struct Filter
+        {
+            enum class Type { none, lowpass1, lowpass2, highpass1, highpass2, bandpass2, notch2 };
+            Type type = Type::none;
+            float cutoff = 0.0f, resonance = 0.0f, keytrack = 0.0f, veltrack = 0.0f;   // Hz, dB, cents a key, cents
+            int keycenter = 60;
+            std::vector<std::pair<int, float>> cc;                                       // (cc, cents at 127)
+        };
+        std::array<Filter, 2> filters;
+        // LEVEL from controllers (gain_ccN: dB at 127; amplitude_onccN: % at 127), and CROSSFADES: on controllers
+        // (xfin_loccN / hiccN: fading in over that range; xfout_: out), on velocity and on keys, each "power" (equal
+        // power, SFZ's default) or "gain" (straight); amp_velcurve_N: its own velocity curve (points, 0-1).
+        std::vector<std::pair<int, float>> gainCC, amplitudeCC;
+        struct CcFade { int cc = 1, lo = 0, hi = 127; bool in = true; };
+        std::vector<CcFade> ccFades;
+        bool ccFadePower = true, velFadePower = true, keyFadePower = true;
+        int xfinLoVel = -1, xfinHiVel = -1, xfoutLoVel = -1, xfoutHiVel = -1;
+        int xfinLoKey = -1, xfinHiKey = -1, xfoutLoKey = -1, xfoutHiKey = -1;
+        std::vector<std::pair<int, float>> velCurve;
+        // The ENVELOPE moved by velocity (ampeg_vel2attack... seconds at 127; vel2sustain %) and by controllers at the
+        // note's start (ampeg_attackccN... seconds at 127; sustainccN %): [delay, attack, hold, decay, sustain, release].
+        std::array<float, 6> velToEnvelope {};
+        std::array<std::vector<std::pair<int, float>>, 6> ccToEnvelope;
+        // Level by key (amp_keytrack dB a key from amp_keycenter); pitch by velocity (pitch_veltrack cents at 127).
+        float ampKeytrack = 0.0f, pitchVeltrack = 0.0f;
+        int ampKeycenter = 60;
+        // A START held back (delay seconds, plus up to delay_random), a random later start (offset_random frames).
+        float startDelay = 0.0f, startDelayRandom = 0.0f;
+        juce::int64 offsetRandom = 0;
+        // Stereo WIDTH (-1 to 1: 1 as recorded, 0 mono, -1 sides swapped).
+        float width = 1.0f;
+        // GROUPS: a note in group `offBy` stops this one (off_mode fast: 6 ms; normal: its release; time: off_time).
+        int group = 0, offBy = 0;
+        enum class OffMode { fast, normal, time };
+        OffMode offMode = OffMode::fast;
+        float offTime = 0.006f;
+        // An LFO on its level (amplfo_depth dB, _freq Hz, starting after _delay, fading in over _fade seconds).
+        float lfoDepth = 0.0f, lfoFreq = 0.0f, lfoDelay = 0.0f, lfoFade = 0.0f;
+        bool usesController (int cc) const noexcept;   // its level, crossfades or filters follow controller `cc`
+
         bool playsUnder (int keyswitch) const noexcept { return swLoLast < 0 || (keyswitch >= swLoLast && keyswitch <= swHiLast); }
 
         bool covers (int key, int velocity, int channel) const noexcept
@@ -94,6 +153,14 @@ namespace sampler
         std::vector<Articulation> articulations;
         bool isKeyswitch (int key) const noexcept { return swLoKey >= 0 && key >= swLoKey && key <= swHiKey; }
         int articulationOf (int keyswitch) const noexcept;   // its index in `articulations` (-1: none)
+        // 0.9.0: the controllers' values at the start (set_ccN, -1: not set), the sustain pedal's controller (sustain_cc),
+        // their names (label_ccN), and whether its own regions follow the mod wheel (then MOD WHEEL dynamics, PR7-O's own,
+        // leaves them be).
+        std::array<int, 128> initialCC;
+        int sustainCC = 64;
+        std::map<int, juce::String> ccLabels;
+        bool ownWheel = false;
+        Program() { initialCC.fill (-1); }
         // The audio thread's round-robin counters, one per region (only the sampler playing this program writes them).
         mutable std::vector<int> sequence;
 

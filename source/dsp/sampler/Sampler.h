@@ -139,15 +139,38 @@ namespace sampler
             bool legatoIn = false, legatoOut = false;
             double glideRatio = 1.0, glideStep = 1.0, glideTarget = 1.0;
             int glideCount = 0;
+            // 0.9.0: the file's own controls. Level from controllers and controller crossfades (ramped across each
+            // piece), a start held back (`waiting` samples), its filters (state-variable, both sides), its level LFO.
+            float controlGain = 1.0f, controlTarget = 1.0f;
+            int waiting = 0;
+            int velocity = 100;
+            struct FilterState
+            {
+                bool on = false, onePole = false;
+                Region::Filter::Type type = Region::Filter::Type::none;
+                float baseHz = 1000.0f, k = 1.4142f, g = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f, G = 0.0f;
+                std::array<float, 2> ic1 {}, ic2 {};
+            };
+            std::array<FilterState, 2> filters {};
+            double lfoPhase = 0.0, lfoStep = 0.0;
+            int lfoAge = 0;
+            float lfoGain = 1.0f;
         };
         struct Join { int from = -1; double seconds = 0.0, glide = 0.0; };   // a legato join (from: the note joined)
 
         void noteOn (const Program&, int note, int velocity, int channel, const Settings&) noexcept;
         bool playNote (const Program&, int note, int velocity, int channel, const Settings&, int joinFrom) noexcept;
         void noteOff (const Program*, int note, int channel, const Settings&) noexcept;
+        // 0.9.0: release samples: at a key's going up (release_key; release too unless the pedal holds it), or at the
+        // pedal's lifting (`pedalLifted`: release only).
+        void playReleases (const Program&, int note, int channel, const Settings&, bool pedalLifted = false) noexcept;
+        bool conditionsMet (const Region&) const noexcept;   // 0.9.0: its locc / hicc ranges
+        float controlGainOf (const Voice&) const noexcept;   // 0.9.0: controllers' level and crossfades now
+        void updateFilters (Voice&) noexcept;                 // 0.9.0: its cutoffs for the controllers now
+        void controllersChanged() noexcept;
         int joinableFrom (int note) const noexcept;   // LEGATO: the sounding note a new one would join (-1: none)
         void startVoice (const Region&, int note, int velocity, int channel, const Settings&, std::uint64_t noteId,
-                         float lowerMiddle, float upperMiddle, const Join*) noexcept;
+                         float lowerMiddle, float upperMiddle, const Join*, float extraGain = 1.0f) noexcept;
         void makeRoom (const Settings&) noexcept;   // POLYPHONY: a note faded if one more would pass it
         void release (Voice&) noexcept;
         void fadeOut (Voice&, double seconds) noexcept;
@@ -168,6 +191,9 @@ namespace sampler
         float bend = 0.0f;              // the pitch wheel, -1 to 1
         float wheel = 0.0f;             // the mod wheel, 0 to 1
         float expression = 1.0f;        // CC 11, 0 to 1
+        std::array<float, 128> cc {};   // 0.9.0: every controller's value (0-127), the file's set_ccN at the start
+        std::array<bool, 128> releaseDue {};
+        bool phraseGoingOn = false;    // 0.9.0: another key was down as this note began   // 0.9.0: keys let go under the pedal (their release samples come with it)
         bool pedal = false;
         int keyswitch = -1;
         // 0.7.0: the keys as they're down (velocity, channel, when: the sample clock), and which key each was joined
