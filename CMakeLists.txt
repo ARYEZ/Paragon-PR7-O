@@ -61,6 +61,16 @@ juce_add_binary_data(ParagonX1Orchestra
         resources/orchestra/brass-section.jpg
         resources/orchestra/brass-section-lit.jpg
         resources/orchestra/stage.jpg
+        resources/orchestra/flute.jpg
+        resources/orchestra/piccolo.jpg
+        resources/orchestra/oboe.jpg
+        resources/orchestra/englishhorn.jpg
+        resources/orchestra/clarinet.jpg
+        resources/orchestra/bassclarinet.jpg
+        resources/orchestra/bassoon.jpg
+        resources/orchestra/contrabassoon.jpg
+        resources/orchestra/woodwind-section.jpg
+        resources/orchestra/woodwind-section-lit.jpg
         resources/orchestra/orchestra.json)
 
 target_sources(ParagonX1

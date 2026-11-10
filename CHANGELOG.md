@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.12.0
+
+**THE WOODWINDS: pictures, and each note's fingering lit** (you: "Build it, and add the three Sonatina ones too" after
+the mock-up). Load a woodwind and the INSTRUMENT page shows it, in the same neon look as the strings and brass: our own
+**flute, piccolo, oboe, English horn, clarinet, bass clarinet, bassoon and contrabassoon**, each lying across.
+- **The keys a player closes for the note glow** (the highest note held: they play one at a time): the six main
+  fingers, the left thumb's key, and the octave key (oboe, English horn), register key (clarinets), whisper key
+  (bassoons) or the little finger's E-flat key (flute, piccolo). The clarinets, piccolo, English horn and contrabassoon
+  read their written notes, as their players do.
+- **A woodwind section** shows flute and piccolo on top, oboe and clarinet under them and the bassoon across the
+  bottom, each part glowing while it plays. An English horn, bass clarinet or contrabassoon part lights its family's
+  instrument there (the oboe, clarinet, bassoon) unless that one has its own part.
+- On the stage, a contrabassoon now sits with the bassoons (it was put with the double basses: "contrabass" is in its
+  name).
+
+Worth knowing: the fingering chart is our own simplified one, from the usual published charts: only those eight keys,
+so notes that differ only by a side, trill or little-finger key look the same (B-flat and B, for example). Where we
+weren't sure, or the note needs keys we don't show, nothing lights: the flute from B-flat6 up, the oboe from C#6, the
+clarinet above its C6 (written), and the bassoon between E-flat3 and F#3 and from B-flat3 up (its tenor notes use
+half-holing and flicking). Real players also use other fingerings for some notes. The mock-up's clarinet showed the
+wrong keys for its note (written D: it's thumb and the first two fingers); the built one follows the chart.
+
 ## 0.11.0
 
 **THE LIBRARY, and instruments that stream from disk** (the plan's stage 3; you: "Build it" after the browser

@@ -366,10 +366,30 @@ tools, which need the owner's riffs)
   sample, 0 underruns**; audio-thread time 0.9-1.1 s vs 0.74 s whole. Sonatina's 1st violins, looped horn, organ
   (FLAC, release samples, pedal): identical. Not checked: a slow hard disk, Windows' disk.
 
+## 0.12.0: THE WOODWINDS (the owner: "Build it, and add the three Sonatina ones too" after the mock-up)
+
+- **Pictures** (`resources/orchestra/woodwinds3d.py`: brass3d.py's helpers, `Builder` and tail copied in; `Wind`: `lathe`
+  bodies along u, `cup` (neon rim; `ring_key` for clarinet / bassoon holes), `pad`, `rod`, `lever`, `heights` so the
+  geometry is at each key's top (the mock-up's dots sat 3 px low)). Eight singles (flute, piccolo, oboe, clarinet at
+  0.745 m across; English horn, bass clarinet, bassoon, contrabassoon whole) and `woodwind-section(-lit).jpg` (flute +
+  piccolo, oboe + clarinet, bassoon). `process_orchestra.py - <out> - - <winds>` keeps the rest (`kept`); JSON
+  `keys` = thumb, L1-L3, R1-R3, extra (Eb / octave / register / whisper), `woodwindSection.<kind>`.
+- **`OrchestraView`**: `Kind` flute / piccolo / oboe / englishHorn / clarinet / bassClarinet / bassoon / contrabassoon
+  (`kindOf` checks them first: a contrabassoon isn't a double bass); `isWoodwind`, `familyOf`, `sectionKindOf` (English
+  horn -> oboe, bass clarinet -> clarinet, contrabassoon -> bassoon in the section picture; an instrument's own part
+  first), `displayNameOf`; `windFingeringFor` (our simplified chart, bits thumb / L1-3 / R1-3 / extra; flute C4-A6,
+  oboe Bb3-C6, clarinet written E3-C6 (upper register = low + register key, the extension all down), bassoon Bb1-D3 and
+  G3-A3; transposers read it written: piccolo -12, English horn +7, clarinet +2, bass clarinet +14, contrabassoon +12;
+  `charted` false elsewhere: nothing lit); `paintKeys`; `Family` and `section (lit, Family)`, `sectionFamily` (most
+  pictured parts; ties strings, brass), `partKinds` (the part's real kind for its chart). Titles "THE FLUTE: EACH
+  NOTE'S FINGERING LIT". The mock-up's clarinet showed concert C as T + L1-3 + R1-2: wrong (that's written A3 / B3
+  territory); the chart's written D4 is T + L1 + L2.
+- `Seating`: contrabassoon with the bassoons (it went to the basses: "contrabass" in its name).
+
 ## The plan (`PR7-O PLAN.md`), next
 
-Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner: the
-woodwinds' pictures (0.12.0; a mock-up first), stage 4's CC / channel articulations, mixer strips (dsp/mixer), then the writing
+Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:
+stage 4's CC / channel articulations, mixer strips (dsp/mixer), then the writing
 tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE: the owner's riffs asked for).
 
 ## Rules (from the owner and the family's CLAUDE.md files)

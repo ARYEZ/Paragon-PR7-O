@@ -5,8 +5,8 @@
 # rim a neon ring. Our own drawings at real sizes (side views from above); no maker's instrument traced.
 #
 # blender -b -P woodwinds3d.py -- <out.png> [samples] [width] [height] [view] [lit] [geometry.json]
-#   view: "single:<flute|piccolo|oboe|clarinet|bassoon>" (one, lying across, mouthpiece left; the bassoon fitted
-#         whole, its boot left) or "section" (the bassoon across the bottom, flute and piccolo above it, oboe and clarinet
+#   view: "single:<flute|piccolo|oboe|clarinet|bassoon|englishhorn|bassclarinet|contrabassoon>" (one, lying across,
+#         mouthpiece left; the bassoon, contrabassoon, bass clarinet and English horn fitted whole) or "section" (the bassoon across the bottom, flute and piccolo above it, oboe and clarinet
 #         between); lit: instruments glowing brighter. WOOD_ACROSS: the common scale (metres across, 0.745).
 import bpy, sys, math, json, os
 from mathutils import Vector
@@ -297,6 +297,7 @@ class Wind(Builder):
         super().__init__(name, origin, rotation, half, lit)
         self.z0 = z0
         self.profile = []
+        self.heights = {}   # each named point's height (its key's top), for the geometry file
     def lathe(self, prof, mat, seg=28, edges=True, v=0.0):
         # a body turned round its axis: prof = [(u, r)...]
         verts, faces = [], []
@@ -337,6 +338,7 @@ class Wind(Builder):
         pts = [(u + kr * 1.03 * math.cos(t), v + kr * 1.03 * math.sin(t), top + 0.0034) for t in [2 * math.pi * i / 32 for i in range(32)]]
         tube(self.name("rim"), pts, 0.0008 + kr * 0.04, self.neon, self.root, closed=True)
         self.points[key] = (u, v)
+        self.heights[key] = top + 0.0034
     def pad(self, u, kr, v=0.0, side=1):
         # a closed key (no finger on it) sitting on the body's near side: a gunmetal cup, no neon
         top = self.z0 + self.radius(u, v)
@@ -352,6 +354,7 @@ class Wind(Builder):
         pts = [(b[0] + 0.0055 * math.cos(t), b[1] + 0.004 * math.sin(t), za + 0.004) for t in [2 * math.pi * i / 24 for i in range(24)]]
         tube(self.name("touch rim"), pts, 0.0007, self.neon, self.root, closed=True)
         self.points[key] = b
+        self.heights[key] = za + 0.004
 
 def flute(origin, rotation, lit):
     # C flute, 0.67 m, silver-looking (gunmetal): head joint with its lip plate (left), body with the open-hole keys,
@@ -463,14 +466,92 @@ def bassoon(origin, rotation, lit):
     b.lever("whisper", (0.0, wing - 0.012), (-0.01, wing - 0.032))
     return b
 
-WINDS = {"flute": flute, "piccolo": piccolo, "oboe": oboe, "clarinet": clarinet, "bassoon": bassoon}
+def english_horn(origin, rotation, lit):
+    # English horn (cor anglais), 0.81 m with its bocal: the oboe's alto, longer, a bent metal bocal and the reed at the
+    # left, its pear-shaped bell (the bulb) at the right. Its keys as the oboe's.
+    b = Wind("english horn", origin, rotation, 0.41, lit, z0=0.02)
+    b.pipe([(-0.345, 0.0), (-0.375, -0.006), (-0.395, -0.016)], 0.0028, b.z0)
+    tube(b.name("reed"), [(-0.395, -0.016, b.z0), (-0.41, -0.024, b.z0)], 0.003, EBONY, b.root)
+    b.points["mouthpiece"] = (-0.405, -0.022)
+    b.lathe([(-0.345, 0.010), (-0.33, 0.0105), (-0.06, 0.0125), (0.22, 0.0145), (0.25, 0.016), (0.30, 0.026), (0.335, 0.030),
+             (0.37, 0.026), (0.395, 0.020), (0.405, 0.021)], WOOD)
+    for u in (-0.33, -0.06, 0.25):
+        b.joint(u, scale=1.12)
+    b.rod(-0.29, 0.20)
+    for key, u in (("L1", -0.235), ("L2", -0.195), ("L3", -0.155), ("R1", -0.005), ("R2", 0.035), ("R3", 0.075)):
+        b.cup(key, u, 0.0072)
+    for u in (-0.275, -0.115, 0.12, 0.15, 0.18):
+        b.pad(u, 0.006)
+    b.lever("octave", (-0.275, 0.010), (-0.285, 0.026))
+    b.lever("thumb", (-0.25, 0.011), (-0.255, 0.027))
+    return b
+
+def bass_clarinet(origin, rotation, lit):
+    # Bass clarinet in B-flat, about 1.1 m as drawn lying: mouthpiece on its bent metal neck at the left, the straight
+    # body with the clarinet's keys, larger, the metal bell turned up at the right.
+    b = Wind("bass clarinet", origin, rotation, 0.55, lit, z0=0.03)
+    neck = [(-0.40, 0.0), (-0.45, 0.004), (-0.49, -0.012), (-0.505, -0.04)]
+    b.pipe(neck, 0.0075, b.z0)
+    tube(b.name("mouthpiece"), [(-0.505, -0.04, b.z0), (-0.51, -0.075, b.z0)], 0.011, EBONY, b.root)
+    tube(b.name("ligature"), [(-0.506, -0.05, b.z0), (-0.507, -0.06, b.z0)], 0.0125, CHROME, b.root)
+    b.points["mouthpiece"] = (-0.51, -0.074)
+    b.lathe([(-0.40, 0.020), (-0.39, 0.021), (0.32, 0.021)], WOOD)
+    for u in (-0.39, 0.0, 0.32):
+        b.joint(u, scale=1.1)
+    b.pipe([(0.32, 0.0), (0.38, 0.004), (0.42, 0.03)], 0.021, b.z0)
+    b.points["bell"] = b.bell((0.42, 0.03), math.radians(62), 0.17, 0.021, 0.062, b.z0, power=2.6)
+    b.rod(-0.33, 0.27)
+    for key, u in (("L1", -0.27), ("L2", -0.22), ("L3", -0.17), ("R1", 0.05), ("R2", 0.10), ("R3", 0.15)):
+        b.cup(key, u, 0.0105)
+    for u in (-0.31, -0.12, 0.20, 0.24, 0.28):
+        b.pad(u, 0.009)
+    b.lever("register", (-0.30, 0.018), (-0.31, 0.04))
+    b.lever("thumb", (-0.28, 0.019), (-0.27, 0.041))
+    return b
+
+def contrabassoon(origin, rotation, lit):
+    # Contrabassoon, an octave under the bassoon: its 5.5 m of tube folded four times; drawn lying, fitted whole, as our
+    # own simplified fold: the boot at the left, the wing joint and two long tubes side by side, the metal bell turned
+    # down at the right, the bocal coiled out of the wing joint.
+    b = Wind("contrabassoon", origin, rotation, 0.80, lit, z0=0.05)
+    wing, mid, top = -0.040, 0.012, 0.056
+    b.lathe([(-0.80, 0.044), (-0.50, 0.044)], WOOD, v=0.0)
+    b.lathe([(-0.50, 0.018), (0.02, 0.020)], WOOD, v=wing)
+    b.lathe([(-0.50, 0.021), (0.62, 0.023)], WOOD, v=mid)
+    b.lathe([(-0.50, 0.024), (0.70, 0.026)], WOOD, v=top)
+    for u in (-0.80, -0.50):
+        b.ring((u, 0.0), (1, 0), 0.045, b.z0, width=0.0018)
+    for u, v in ((0.02, wing), (0.62, mid), (0.70, top)):
+        b.joint(u, v=v, scale=1.08)
+    b.pipe([(0.62, mid), (0.66, mid + 0.004), (0.70, top - 0.004)], 0.012, b.z0 + 0.02)
+    b.pipe([(0.70, top), (0.75, top + 0.002), (0.78, top - 0.02)], 0.026, b.z0)
+    b.points["bell"] = b.bell((0.78, top - 0.02), math.radians(-80), 0.10, 0.026, 0.055, b.z0, power=2.4)
+    bocal = [(0.02, wing), (0.07, wing - 0.006), (0.12, wing - 0.04), (0.13, wing - 0.085), (0.10, wing - 0.11), (0.06, wing - 0.10)]
+    b.pipe(bocal, 0.0042, b.z0 + 0.016)
+    tube(b.name("reed"), [(0.06, wing - 0.10, b.z0 + 0.016), (0.035, wing - 0.092, b.z0 + 0.016)], 0.0048, EBONY, b.root)
+    b.points["mouthpiece"] = (0.037, wing - 0.093)
+    for key, u in (("L1", -0.13), ("L2", -0.185), ("L3", -0.24)):
+        b.cup(key, u, 0.0085, v=wing, ring_key=True)
+    for key, u in (("R1", -0.58), ("R2", -0.635), ("R3", -0.69)):
+        b.cup(key, u, 0.009, v=0.0, ring_key=True)
+    b.rod(-0.35, 0.40, v=top)
+    for u in (-0.08, -0.30, -0.38, 0.10, 0.30):
+        b.pad(u, 0.0075, v=top)
+    b.lever("thumb", (-0.15, wing - 0.016), (-0.16, wing - 0.04))
+    b.lever("whisper", (-0.02, wing - 0.016), (-0.03, wing - 0.04))
+    return b
+
+WINDS = {"flute": flute, "piccolo": piccolo, "oboe": oboe, "clarinet": clarinet, "bassoon": bassoon,
+         "englishhorn": english_horn, "bassclarinet": bass_clarinet, "contrabassoon": contrabassoon}
 # extents in its own plane (u0, v0, u1, v1), for framing
 EXTENT = {"flute": (-0.34, -0.03, 0.34, 0.03), "piccolo": (-0.165, -0.02, 0.165, 0.02), "oboe": (-0.34, -0.03, 0.32, 0.03),
-          "clarinet": (-0.34, -0.035, 0.34, 0.035), "bassoon": (-0.675, -0.15, 0.675, 0.06)}
+          "clarinet": (-0.34, -0.035, 0.34, 0.035), "bassoon": (-0.675, -0.15, 0.675, 0.06),
+          "englishhorn": (-0.415, -0.035, 0.41, 0.035), "bassclarinet": (-0.53, -0.085, 0.53, 0.20),
+          "contrabassoon": (-0.805, -0.16, 0.81, 0.09)}
 
 LIGHT = 0.2
 RIM = 0.25
-ROT = {"flute": 0.0, "piccolo": 0.0, "oboe": 0.0, "clarinet": 0.0, "bassoon": 0.0}
+ROT = {k: 0.0 for k in WINDS}
 def extent(k, rot):
     u0, v0, u1, v1 = EXTENT[k]
     if rot == 0.0: return u0, v0, u1, v1
@@ -478,7 +559,7 @@ def extent(k, rot):
 if VIEW.startswith("single:"):
     kind = VIEW.split(":")[1]
     x0, y0, x1, y1 = extent(kind, ROT[kind])
-    if kind == "bassoon":
+    if kind in ("bassoon", "contrabassoon", "bassclarinet", "englishhorn"):
         across = max(x1 - x0, (y1 - y0) * (WIDTH / HEIGHT)) * 1.06
     else:
         across = float(os.environ.get("WOOD_ACROSS", "0.745"))
@@ -599,7 +680,7 @@ if GEOMETRY:
                     x, y = px(o.matrix_world @ Vector(corner))
                     xs.append(x); ys.append(y)
         margin = 0.03 * PX_PER_M * 2
-        geo["instruments"][k] = {"points": {n: px(root.matrix_world @ Vector((q[0], q[1], 0.0))) for n, q in b.points.items() if n != "slideAxis"},
+        geo["instruments"][k] = {"points": {n: px(root.matrix_world @ Vector((q[0], q[1], getattr(b, "heights", {}).get(n, 0.0)))) for n, q in b.points.items() if n != "slideAxis"},
                                  "area": [round(min(xs) - margin), round(min(ys) - margin), round(max(xs) + margin), round(max(ys) + margin)]}
         if "slide" in b.points:
             geo["instruments"][k]["slideEnd"] = px(root.matrix_world @ Vector((b.points["slide"][0] + 0.55, b.points["slide"][1], 0.0)))

@@ -787,6 +787,7 @@ void InstrumentPage::paintOverChildren (juce::Graphics& g)
         title = picture.getMode() == OrchestraView::Mode::section ? "THE SECTION: EACH PART LIT AS IT PLAYS"
               : picture.getKind() == orchestra::Kind::trombone ? juce::String ("THE TROMBONE: EACH NOTE'S SLIDE POSITION LIT")
               : orchestra::isBrass (picture.getKind()) ? "THE " + orchestra::nameOf (picture.getKind()).toUpperCase() + ": EACH NOTE'S VALVES LIT"
+              : orchestra::isWoodwind (picture.getKind()) ? "THE " + orchestra::displayNameOf (picture.getKind()).toUpperCase() + ": EACH NOTE'S FINGERING LIT"
               : "THE " + orchestra::nameOf (picture.getKind()).toUpperCase() + ": EACH NOTE LIT WHERE IT'S PLAYED";
     DockStyle::drawTitle (g, mapArea.reduced (16, 0).withHeight (32), title);
 }
