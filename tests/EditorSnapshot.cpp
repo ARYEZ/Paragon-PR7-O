@@ -25,6 +25,9 @@
 //   PARAGON_SNAPSHOT_REGIONS=1       the region map instead of the instrument's picture (0.5.0)
 //   PARAGON_SNAPSHOT_STAGE=1         the STAGE view and the rack's STAGE page (0.8.0)
 //   PARAGON_SNAPSHOT_ENSEMBLE=1      the rack's ENSEMBLE page (0.10.0)
+//   PARAGON_SNAPSHOT_LIBRARY=<folder>,<folder>...   the library browser open on these folders (not remembered), its
+//                                    strings, the instrument's file chosen if it's in them (0.11.0)
+//   PARAGON_SNAPSHOT_LIBRARY_SECTION=<n>   that section shown (0 strings, 1 brass...); PARAGON_SNAPSHOT_SEARCH=<text>
 //   PARAGON_SNAPSHOT_NOTES=1         and a C major chord (C2 G2 E3 C4) held on the keyboard, sounding
 //   PARAGON_SNAPSHOT_LOADING=1       the instrument page while an instrument loads, its progress box 62% done
 //   PARAGON_SNAPSHOT_KEYBOARD=0      the keyboard hidden (the shorter window)
@@ -307,6 +310,22 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
         view->getInstrumentPage().getRack().setPage (InstrumentRack::Page::routing);
     if (env ("PARAGON_SNAPSHOT_REGIONS") == "1")
         view->getInstrumentPage().chooseRegions (true);
+    if (const auto folders = env ("PARAGON_SNAPSHOT_LIBRARY"); folders.isNotEmpty())
+    {
+        auto& page = view->getInstrumentPage();
+        page.showLibrary (true);
+        juce::Array<juce::File> list;
+        for (const auto& f : juce::StringArray::fromTokens (folders, ",", {}))
+            list.add (juce::File (f));
+        auto& browser = page.getLibraryBrowser();
+        browser.setFolders (list, false);
+        if (const auto s = env ("PARAGON_SNAPSHOT_LIBRARY_SECTION"); s.isNotEmpty())
+            browser.chooseSection ((library::Section) s.getIntValue());
+        if (const auto file = juce::File (processor.getInstrumentFile()); juce::File::isAbsolutePath (processor.getInstrumentFile()))
+            browser.chooseFile (file);
+        if (const auto q = env ("PARAGON_SNAPSHOT_SEARCH"); q.isNotEmpty())
+            browser.setSearch (q);
+    }
     if (env ("PARAGON_SNAPSHOT_ENSEMBLE") == "1")
         view->getInstrumentPage().getRack().setPage (InstrumentRack::Page::ensemble);
     if (env ("PARAGON_SNAPSHOT_STAGE") == "1")

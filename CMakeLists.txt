@@ -74,6 +74,7 @@ target_sources(ParagonX1
         source/dsp/sampler/Sfz.cpp
         source/dsp/sampler/Section.cpp
         source/dsp/stage/Seating.cpp
+        source/library/Library.cpp
         source/dsp/stage/Stage.cpp
         source/dsp/sampler/Sampler.cpp
         source/dsp/sampler/DiskStreamer.cpp    # PR7-D's disk streaming, kept for the libraries (plan stage 3)
@@ -119,6 +120,7 @@ target_sources(ParagonX1
         source/ui/InstrumentRack.cpp
         source/ui/OrchestraView.cpp
         source/ui/StageView.cpp
+        source/ui/LibraryBrowser.cpp
         source/ui/SynthDisplays.cpp
         source/ui/InstrumentPage.cpp
         source/ui/ProgressBox.cpp

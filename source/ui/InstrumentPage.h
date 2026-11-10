@@ -6,6 +6,7 @@
 #include "ui/InstrumentRack.h"
 #include "ui/OrchestraView.h"
 #include "ui/StageView.h"
+#include "ui/LibraryBrowser.h"
 #include "ui/SynthControls.h"
 
 // THE KEYBOARD (PR7-O 0.1.0): 88 keys under the pages, in the plugin's colours; the keys the instrument plays tinted,
@@ -110,6 +111,10 @@ public:
     void chooseRegions (bool regions);
     // 0.8.0: the panel's STAGE view (each part's seat on our stage), between INSTRUMENT and REGIONS.
     StageView& getStageView() noexcept { return stageView; }
+    // 0.11.0: THE LIBRARY BROWSER, opened by LOAD over the page below the rack.
+    LibraryBrowser& getLibraryBrowser() noexcept { return browser; }
+    void showLibrary (bool show);
+    bool isShowingLibrary() const noexcept { return browser.isVisible(); }
     bool isShowingStage() const noexcept { return stageView.isVisible(); }
     void chooseStage();
     // 0.4.0: a section's SPLITS: a row a part (its name and keys); moving the split under part `part` (1 on) by
@@ -132,6 +137,7 @@ private:
     RegionMap map;
     OrchestraView picture;
     StageView stageView;
+    LibraryBrowser browser;
     juce::TextButton showPicture { "INSTRUMENT" }, showStage { "STAGE" }, showRegions { "REGIONS" };
     bool regionsChosen = false, stageChosen = false;
     std::vector<std::unique_ptr<ParamControl>> playControls, sendControls, stageControls, ensembleControls;   // the rack's knobs

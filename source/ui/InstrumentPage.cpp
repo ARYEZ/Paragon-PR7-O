@@ -234,7 +234,7 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
 {
     auto& state = processor.getParameters();
     rack.loadKey.setTooltip ("LOAD: an SFZ instrument (or one audio file, played across the keyboard from C3/C4). You can also drop one on this page.");
-    rack.loadKey.onClick = [this] { chooseFile(); };
+    rack.loadKey.onClick = [this] { showLibrary (! browser.isVisible()); };   // (0.11.0: the library browser)
     rack.sectionKey.setTooltip ("SECTION: several SFZ instruments split over the keyboard as one (a string section: basses, cellos, violas, "
                                 "violins), with one set of keyswitches. Choose their files; PR7-O splits the keys where each next one's "
                                 "range begins (move the splits under SPLITS). You can also drop several .sfz files on this page.");
@@ -253,6 +253,16 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     for (auto* c : std::initializer_list<juce::Component*> { &rack, &info, &map, &picture })
         addAndMakeVisible (c);
     addChildComponent (stageView);
+    addChildComponent (browser);
+    browser.onLoad = [this] (const juce::File& file) { processor.loadInstrument (file); showLibrary (false); };
+    browser.onLoadSection = [this] (const juce::StringArray& files)
+    {
+        if (const auto section = sampler::section::fromFiles (files); ! section.parts.empty())
+            processor.loadSection (section);
+        showLibrary (false);
+    };
+    browser.onOpenFile = [this] { showLibrary (false); chooseFile(); };
+    browser.onClose = [this] { showLibrary (false); };
 
     // The INSTRUMENT / REGIONS switch over the picture panel.
     for (auto* b : { &showPicture, &showStage, &showRegions })
@@ -589,6 +599,19 @@ void InstrumentPage::applyPendingSplits()
     }
 }
 
+void InstrumentPage::showLibrary (bool show)
+{
+    if (show)
+    {
+        browser.setFolders (library::folders(), false);
+        if (const auto file = juce::File (processor.getInstrumentFile()); juce::File::isAbsolutePath (processor.getInstrumentFile()) && file.existsAsFile())
+            browser.chooseFile (file);
+        browser.toFront (false);
+    }
+    browser.setVisible (show);
+    rack.loadKey.setToggleState (show, juce::dontSendNotification);
+}
+
 void InstrumentPage::chooseFile()
 {
     const auto folder = sampler::section::folderOf (processor.getInstrumentFile());
@@ -748,6 +771,8 @@ void InstrumentPage::paint (juce::Graphics& g)
 
 void InstrumentPage::paintOverChildren (juce::Graphics& g)
 {
+    if (browser.isVisible())   // (0.11.0: the library browser covers the panels)
+        return;
     // The picture panel's title, over the picture.
     juce::String title = "ITS REGIONS: KEYS ACROSS, VELOCITY UP";
     if (stageView.isVisible())
@@ -765,6 +790,7 @@ void InstrumentPage::resized()
     auto area = getLocalBounds();
     rack.setBounds (area.removeFromTop (InstrumentRack::preferredHeight));
     area.removeFromTop (4);
+    browser.setBounds (area);   // (0.11.0: over the panels below the rack)
     infoArea = area.removeFromLeft (440);
     {
         auto inside = infoArea.reduced (14, 0).withTrimmedTop (36);
