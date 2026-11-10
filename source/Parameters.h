@@ -49,7 +49,7 @@ namespace ParamIDs
     inline constexpr auto stageSpread    = "stageSpread";
     inline const juce::StringArray stageRoomNames { "Studio", "Scoring Stage", "Concert Hall", "Cathedral" };   // by index: only append
     // 0.10.0 (version hint 46): THE ENSEMBLE. PLAYERS (1-4: each note played by that many copies, each a little out of
-    // tune by up to DETUNE cents, early or late by up to TIMING ms, across the width), DOUBLE (doubleNames: every note
+    // tune by up to DETUNE cents, later by up to TIMING ms (never earlier), across the width), DOUBLE (doubleNames: every note
     // also an octave up / down / both) at DOUBLE LEVEL (dB). In presets; 1 player and no doubling by default.
     inline constexpr auto ensPlayers     = "ensPlayers";
     inline constexpr auto ensDetune      = "ensDetune";

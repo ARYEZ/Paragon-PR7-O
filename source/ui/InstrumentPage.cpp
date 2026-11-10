@@ -292,9 +292,9 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     add (stageControls, ParamIDs::stageRoomLevel, "ROOM LEVEL", "The room's reflections and tail, louder or quieter than they'd be");
     add (stageControls, ParamIDs::stageDecay, "DECAY", "How long the room's tail rings, times its own");
     add (stageControls, ParamIDs::stageSpread, "SPREAD", "How wide the seats spread across the stage: 0, all in the middle; 100%, as placed; more, wider");
-    add (ensembleControls, ParamIDs::ensPlayers, "PLAYERS", "How many players each note has: x1 as recorded; more, copies of it a little out of tune, early or late and spread across, for a bigger section (as loud as before)");
+    add (ensembleControls, ParamIDs::ensPlayers, "PLAYERS", "How many players each note has: x1 as recorded; more, copies of it a little out of tune, a little late and spread across, for a bigger section (as loud as before)");
     add (ensembleControls, ParamIDs::ensDetune, "DETUNE", "How far out of tune the extra players are, at most (cents: 100 to a semitone)");
-    add (ensembleControls, ParamIDs::ensTiming, "TIMING", "How early or late the extra players come in, at most");
+    add (ensembleControls, ParamIDs::ensTiming, "TIMING", "How late the extra players come in, at most (never early: the note you play stays on time)");
     add (ensembleControls, ParamIDs::ensDoubleLevel, "DOUBLE LEVEL", "How loud the doubled octaves are, against the note played");
     add (sendControls, ParamIDs::instSendReverb, "SEND REVERB", "How much of the instrument goes to the REVERB (FX page: switch it on there)");
     const auto menu = [this, &state] (const char* id, const char* label, const char* tip)

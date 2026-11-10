@@ -1523,3 +1523,141 @@ TEST_CASE ("SFZ 0.9.0: GROUPS turn notes off (off_by, off_mode); locc / hicc; en
         CHECK_THAT (hi - lo, WithinAbs (6.0, 0.8));
     }
 }
+
+// ================================================================ 0.10.0: THE ENSEMBLE
+namespace
+{
+    std::shared_ptr<sampler::Sample> monoNoise (double seconds)
+    {
+        auto s = std::make_shared<sampler::Sample>();
+        s->name = "noise";
+        s->sampleRate = sampleRate;
+        s->channels.assign (1, std::vector<float> ((size_t) (seconds * sampleRate)));
+        juce::Random random (7);
+        for (auto& v : s->channels[0])
+            v = 0.5f * (random.nextFloat() - 0.5f);
+        return s;
+    }
+
+    std::shared_ptr<sampler::Program> keyboardOf (std::shared_ptr<const sampler::Sample> sample, int low = 24, int high = 108)
+    {
+        auto program = sampler::programFrom (std::move (sample), 60);
+        program->regions[0].loKey = low;
+        program->regions[0].hiKey = high;
+        program->regions[0].velTrack = 0.0f;
+        program->index();
+        return program;
+    }
+}
+
+TEST_CASE ("SAMPLER 0.10.0: PLAYERS: as loud as one, the first on time, the others later, out of tune and across", "[sampler][ensemble]")
+{
+    const auto noise = monoNoise (2.0);
+    const auto program = keyboardOf (noise);
+    sampler::Sampler::Settings one, three;
+    three.players = 3;
+    const auto a = render (*program, noteOn (60), 1.5, one), b = render (*program, noteOn (60), 1.5, three);
+    // The level holds (each player at 1 / sqrt 3; their sounds unalike), within 1.5 dB.
+    CHECK_THAT (db (rms (b[0], 24000, 72000) / rms (a[0], 24000, 72000)), WithinAbs (0.0, 1.5));
+    // Spread across: one player, both sides the same; three, they differ.
+    const auto correlation = [] (const std::vector<float>& x, const std::vector<float>& y)
+    {
+        double xy = 0, xx = 0, yy = 0;
+        for (size_t i = 24000; i < 72000; ++i) { xy += x[i] * y[i]; xx += x[i] * x[i]; yy += y[i] * y[i]; }
+        return xy / std::sqrt (xx * yy);
+    };
+    CHECK (correlation (a[0], a[1]) > 0.999);
+    CHECK (correlation (b[0], b[1]) < 0.95);
+    // The first player on time, the others later (at least a quarter of TIMING): the first 5 ms are the recording alone,
+    // at its share (three players, the others either side: each side 1 / sqrt (1 + 1 + 0.16)).
+    sampler::Sampler::Settings late = three;
+    late.timingMs = 20.0f;
+    const auto c = render (*program, noteOn (60), 0.1, late)[0];
+    for (size_t i = 0; i < 230; ++i)
+    {
+        INFO (i);
+        REQUIRE_THAT (c[i], WithinAbs (noise->channels[0][i] / std::sqrt (2.16f), 1.0e-5));
+    }
+    // Out of tune: two players of a steady tone, DETUNE 30 cents and no lateness, beat (the level swings); one doesn't.
+    const auto toneProgram = keyboardOf (tones ({ 440.0 }, 2.0));
+    sampler::Sampler::Settings two;
+    two.players = 2;
+    two.detuneCents = 30.0f;
+    two.timingMs = 0.0f;
+    const auto swing = [] (const std::vector<float>& x)
+    {
+        auto lo = 1.0e9, hi = -1.0e9;
+        for (double t = 0.3; t < 1.4; t += 0.02)
+        {
+            const auto level = db (rms (x, (size_t) (t * sampleRate), (size_t) ((t + 0.02) * sampleRate)));
+            lo = std::min (lo, level);
+            hi = std::max (hi, level);
+        }
+        return hi - lo;
+    };
+    CHECK (swing (render (*toneProgram, noteOn (60), 1.5, two)[0]) > 6.0);
+    CHECK (swing (render (*toneProgram, noteOn (60), 1.5, one)[0]) < 0.5);
+}
+
+TEST_CASE ("SAMPLER 0.10.0: DOUBLE: the octaves at DOUBLE LEVEL, ended by the key played, counted as one note; a join takes them along", "[sampler][ensemble]")
+{
+    const auto program = keyboardOf (tones ({ 220.0 }, 3.0));   // key 60 plays 220 Hz
+    const auto levels = [&] (int mode, juce::MidiBuffer midi = noteOn (60), double seconds = 0.6)
+    {
+        sampler::Sampler::Settings settings;
+        settings.doubleMode = mode;
+        settings.doubleGain = 0.5f;
+        return render (*program, midi, seconds, settings)[0];
+    };
+    const auto up = levels (1), down = levels (2), both = levels (3), none = levels (0);
+    CHECK (levelOver (none, 440.0, 0.3, 0.1) < 1.0e-3);
+    CHECK_THAT (db (levelOver (up, 440.0, 0.3, 0.1) / levelOver (up, 220.0, 0.3, 0.1)), WithinAbs (-6.0, 0.3));
+    CHECK (levelOver (up, 110.0, 0.3, 0.1) < 1.0e-3);
+    CHECK_THAT (db (levelOver (down, 110.0, 0.3, 0.1) / levelOver (down, 220.0, 0.3, 0.1)), WithinAbs (-6.0, 0.3));
+    CHECK ((levelOver (both, 110.0, 0.3, 0.1) > 0.05 && levelOver (both, 440.0, 0.3, 0.1) > 0.05));
+    // Ended by the key played; one note for POLYPHONY.
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    sampler::Sampler::Settings settings;
+    settings.doubleMode = 3;
+    std::vector<float> l (24000), r (24000);
+    s.render (program.get(), l.data(), r.data(), 24000, noteOn (60), 0, settings);
+    CHECK (s.getActiveNotes() == 1);
+    auto off = juce::MidiBuffer();
+    off.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+    std::vector<float> l2 (48000), r2 (48000);
+    s.render (program.get(), l2.data(), r2.data(), 48000, off, 0, settings);
+    CHECK (s.getActiveVoices() == 0);
+    // A key the instrument doesn't have isn't doubled (an instrument of keys 55-65: 60 up is 72, not there).
+    const auto narrow = keyboardOf (tones ({ 220.0 }, 1.0), 55, 65);
+    sampler::Sampler::Settings upOnly;
+    upOnly.doubleMode = 1;
+    CHECK (levelOver (render (*narrow, noteOn (60), 0.4, upOnly)[0], 440.0, 0.2, 0.1) < 1.0e-3);
+}
+
+TEST_CASE ("SAMPLER 0.10.0: LEGATO carries the doubled octave along", "[sampler][ensemble][legato]")
+{
+    // A held instrument (the legato tests' bowed shape) over the keyboard, 220 Hz at key 60: 60 then 62 joined, an
+    // octave up doubled: the old octave (72, 440 Hz) goes with its note, the new one (74, 493.9 Hz) comes.
+    auto program = sampler::programFrom (shaped (220.0, 4.0, curve ({ { 0.0, -30.0 }, { 0.4, 0.0 }, { 4.0, 0.0 } })), 60);
+    program->regions[0].velTrack = 0.0f;
+    program->regions[0].loKey = 36;
+    program->regions[0].hiKey = 96;
+    sampler::prepareRegions (*program);
+    program->index();
+    REQUIRE (program->regions[0].held);
+    sampler::Sampler::Settings settings;
+    settings.legato = true;
+    settings.doubleMode = 1;
+    juce::MidiBuffer m;
+    m.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    m.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100), 48000);
+    const auto out = render (*program, m, 1.6, settings)[0];
+    CHECK (levelOver (out, 440.0, 0.8, 0.1) > 0.05);
+    // (gone: the 440 Hz reading no more than the new note's own leak into it, 62 and its octave played alone)
+    juce::MidiBuffer alone;
+    alone.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100), 0);
+    const auto baseline = render (*program, alone, 1.0, settings)[0];
+    CHECK (db (levelOver (out, 440.0, 1.3, 0.1)) < db (levelOver (baseline, 440.0, 0.7, 0.1)) + 1.0);
+    CHECK (levelOver (out, 493.88, 1.3, 0.1) > 0.05);
+}

@@ -278,7 +278,26 @@ namespace sampler
         keyVelocity[(size_t) note] = velocity;
         keyChannel[(size_t) note] = channel;
         keyStart[(size_t) note] = now;
-        cameFrom[(size_t) note] = playNote (program, note, velocity, channel, settings, from) ? from : -1;
+        lastNoteId = 0;
+        const auto joined = playNote (program, note, velocity, channel, settings, from, NoteExtras {});
+        cameFrom[(size_t) note] = joined ? from : -1;
+        // 0.10.0, DOUBLE: the octaves too, as the same note (ended by this key), joined along with it.
+        const auto mainId = lastNoteId;
+        for (const auto offset : { 12, -12 })
+        {
+            const auto wanted = (offset > 0 && (settings.doubleMode == 1 || settings.doubleMode == 3))
+                             || (offset < 0 && (settings.doubleMode == 2 || settings.doubleMode == 3));
+            const auto key = note + offset;
+            if (! wanted || key < 0 || key > 127 || ! program.plays (key) || program.isKeyswitch (key))
+                continue;
+            NoteExtras extras;
+            extras.owner = note;
+            extras.gain = settings.doubleGain;
+            extras.isDouble = true;
+            extras.noteId = mainId;
+            extras.joinTimeKey = from;
+            playNote (program, key, velocity, channel, settings, joined && from + offset >= 0 && from + offset < 128 ? from + offset : -1, extras);
+        }
     }
 
     int Sampler::joinableFrom (int note) const noexcept
@@ -290,7 +309,7 @@ namespace sampler
         juce::int64 bestStart = 0;
         for (const auto& v : voices)
         {
-            if (! v.active || v.released || v.fading || v.region == nullptr || ! v.region->held || v.note == note)
+            if (! v.active || v.released || v.fading || v.region == nullptr || ! v.region->held || v.note == note || v.isDouble)
                 continue;
             const auto start = keyStart[(size_t) v.note];
             const auto distance = std::abs (v.note - note);
@@ -306,7 +325,8 @@ namespace sampler
         return best;
     }
 
-    bool Sampler::playNote (const Program& program, int note, int velocity, int channel, const Settings& settings, int joinFrom) noexcept
+    bool Sampler::playNote (const Program& program, int note, int velocity, int channel, const Settings& settings, int joinFrom,
+                            const NoteExtras& extras) noexcept
     {
         const auto chance = nextRandom();
         const auto onWheel = settings.dynamics == Dynamics::modWheel;
@@ -346,7 +366,8 @@ namespace sampler
                     join.from = joinFrom;
         if (join.from >= 0)
         {
-            join.seconds = joinSeconds ((double) (now - keyStart[(size_t) join.from]) / rate);
+            const auto timeKey = extras.joinTimeKey >= 0 ? extras.joinTimeKey : join.from;   // (a doubled octave: the played key's)
+            join.seconds = joinSeconds ((double) (now - keyStart[(size_t) timeKey]) / rate);
             join.glide = juce::jmax (0.0, (double) settings.glideSeconds);
             // The note joined fades out (equal power) as this one fades in, its pitch gliding with it.
             const auto count = (int) std::lround (join.glide * rate);
@@ -364,8 +385,11 @@ namespace sampler
                     }
                 }
         }
-        makeRoom (settings);
-        const auto noteId = ++notes;
+        // (a doubled octave is the same note as the key played: no room made for it, its number shared)
+        if (extras.noteId == 0)
+            makeRoom (settings);
+        const auto noteId = extras.noteId != 0 ? extras.noteId : ++notes;
+        lastNoteId = noteId;
         // On the wheel: each held layer's neighbours, by the middles of the velocity ranges started.
         std::array<int, maxRegionsANote> middles {};   // twice each middle (lovel + hivel), whole numbers
         auto numMiddles = 0;
@@ -393,7 +417,36 @@ namespace sampler
                         upper = 0.5f * (float) middles[(size_t) k];
                 }
             }
-            startVoice (r, note, velocity, channel, settings, noteId, lower, upper, join.from >= 0 ? &join : nullptr);
+            // 0.10.0, PLAYERS: the first as ever; the others a little out of tune, later, further in and elsewhere across.
+            static constexpr std::array<float, 4> detunes { 0.0f, 0.7f, -0.9f, 0.35f };
+            static constexpr std::array<std::array<float, 4>, 4> pansFor { { { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f },
+                                                                             { 0.0f, -0.6f, 0.6f, 0.0f }, { 0.0f, -0.6f, 0.6f, 0.0f } } };
+            const auto players = juce::jlimit (1, 4, settings.players);
+            const auto& pans = pansFor[(size_t) (players - 1)];
+            auto sumLeft = 0.0f, sumRight = 0.0f;   // each side's players' gains, squared (their sounds unalike: powers add)
+            for (int c = 0; c < players; ++c)
+            {
+                float pl, pr;
+                balance (pans[(size_t) c], pl, pr);
+                sumLeft += pl * pl;
+                sumRight += pr * pr;
+            }
+            for (int c = 0; c < players; ++c)
+            {
+                Copy copy;
+                copy.owner = extras.owner >= 0 ? extras.owner : note;
+                copy.isDouble = extras.isDouble;
+                copy.gainLeft = extras.gain / std::sqrt (sumLeft);
+                copy.gainRight = extras.gain / std::sqrt (sumRight);
+                if (c > 0)
+                {
+                    copy.cents = settings.detuneCents * (detunes[(size_t) c] + 0.5f * (nextRandom() - 0.5f));
+                    copy.delay = (int) std::lround ((0.25 + 0.75 * nextRandom()) * settings.timingMs * 0.001 * rate);
+                    copy.offsetSeconds = 0.008 * nextRandom();
+                    copy.pan = pans[(size_t) c];
+                }
+                startVoice (r, note, velocity, channel, settings, noteId, lower, upper, join.from >= 0 ? &join : nullptr, 1.0f, &copy);
+            }
         }
         return join.from >= 0;
     }
@@ -469,7 +522,7 @@ namespace sampler
     }
 
     void Sampler::startVoice (const Region& r, int note, int velocity, int channel, const Settings& settings, std::uint64_t noteId,
-                              float lowerMiddle, float upperMiddle, const Join* join, float extraGain) noexcept
+                              float lowerMiddle, float upperMiddle, const Join* join, float extraGain, const Copy* copy) noexcept
     {
         if (r.sample == nullptr || r.sample->length() < 2)
             return;
@@ -632,6 +685,20 @@ namespace sampler
                 v.glideCount = count;
             }
         }
+        // 0.10.0: this player's own pitch, place across, level, lateness and start; the key that ends it.
+        v.owner = copy != nullptr && copy->owner >= 0 ? copy->owner : note;
+        v.isDouble = copy != nullptr && copy->isDouble;
+        if (copy != nullptr)
+        {
+            v.baseIncrement *= std::pow (2.0, (double) copy->cents / 1200.0);
+            float panLeft, panRight;
+            balance (copy->pan, panLeft, panRight);
+            v.gainLeft *= panLeft * copy->gainLeft;
+            v.gainRight *= panRight * copy->gainRight;
+            v.waiting += copy->delay;
+            if (copy->offsetSeconds > 0.0)
+                v.position = juce::jmin ((double) (v.lastFrame - 2), v.position + copy->offsetSeconds * v.sample->sampleRate);
+        }
         updatePitch (settings);
     }
 
@@ -682,10 +749,10 @@ namespace sampler
             for (const auto& v : voices)
                 sounding = sounding || (v.active && v.note == note && ! v.released && ! v.fading && v.region != nullptr && v.region->held);
             if (sounding)   // (the join's length follows how long this note played)
-                playNote (*program, back, keyVelocity[(size_t) back], keyChannel[(size_t) back], settings, note);
+                playNote (*program, back, keyVelocity[(size_t) back], keyChannel[(size_t) back], settings, note, NoteExtras {});
         }
         for (auto& v : voices)
-            if (v.active && ! v.released && v.note == note && v.channel == channel)
+            if (v.active && ! v.released && v.owner == note && v.channel == channel)   // (0.10.0: its doubled octaves too)
             {
                 if (v.region->oneShot)
                     continue;

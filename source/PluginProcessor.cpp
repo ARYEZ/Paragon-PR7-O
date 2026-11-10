@@ -610,6 +610,11 @@ sampler::Sampler::Settings ParagonX1AudioProcessor::getSamplerSettings() const n
     s.autoSustain = isOn (ParamIDs::instAutoSustain);
     s.legato = isOn (ParamIDs::instLegato);
     s.glideSeconds = param (ParamIDs::instGlide);
+    s.players = juce::roundToInt (param (ParamIDs::ensPlayers));
+    s.detuneCents = param (ParamIDs::ensDetune);
+    s.timingMs = param (ParamIDs::ensTiming);
+    s.doubleMode = juce::roundToInt (param (ParamIDs::ensDouble));
+    s.doubleGain = juce::Decibels::decibelsToGain (param (ParamIDs::ensDoubleLevel));
     return s;
 }
 
