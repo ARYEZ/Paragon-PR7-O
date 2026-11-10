@@ -284,11 +284,35 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   0.7 dB of STAGE off, rooms ringing as set; demo WAVs sent. Not checked: listening. Ensemble stacking and octave
   doubling (the plan's stage 6 too) not done: ask.
 
+## 0.9.0: the rest of SFZ's sound (the owner: "Let's implement what's left on the plan"; step 1 of an order told to them:
+0.9.0 SFZ engine, 0.10.0 stacking / doubling, 0.11.0 browser + streaming, 0.12.0 woodwind pictures, then the writing
+tools, which need the owner's riffs)
+
+- **Sonatina Symphonic Orchestra** (`github.com/peastman/sso`, CC Sampling Plus 1.0: read from the user's disk only):
+  cloned into the scratchpad with `--filter=blob:none` and the 762 SFZ files checked out; opcodes counted
+  (`/tmp/claude-0/probes/sso/count.py`). **Never `git ls-tree -l` on that clone** (sizes fetch every blob: it started
+  downloading all 3062 samples). Sample paths are relative to the top-level file, not an #include's.
+- `Sfz`: `Region::Trigger` (attack / release / releaseKey / first / legato), `rtDecay`, `ccConditions` (locc / hicc),
+  `filters[2]` (type, cutoff, resonance dB, keytrack, keycenter, veltrack, cc cents), `gainCC`, `amplitudeCC`,
+  `ccFades` (xfin / xfout_loccN / hiccN), vel / key fades, `*FadePower` (xf_*curve, power default), `velCurve`
+  (amp_velcurve_N), `velToEnvelope` / `ccToEnvelope` ([delay, attack, hold, decay, sustain, release]), `ampKeytrack`,
+  `pitchVeltrack`, `startDelay` / `startDelayRandom`, `offsetRandom`, `width`, `group` / `offBy` / `offMode` /
+  `offTime`, `lfo*` (amplfo), `usesController`; `Program::initialCC` (set_ccN), `sustainCC`, `ccLabels`, `ownWheel`;
+  group_ / master_ / global_ volume, amplitude, tune added; `isNumbered` (opcodes with a controller number); `readMore`.
+- `Sampler`: `cc[128]` (set_cc on a program change; CC 1 / 11 into wheel / expression); the pedal on `sustainCC`;
+  `releaseDue` (keys let go under the pedal), `playReleases` (after the note's own voices are let go: before, they were
+  let go with them), release voices never loop; `phraseGoingOn` for first / legato; `conditionsMet`; per voice
+  `controlGain` (gain / amplitude / cc fades, ramped), `waiting` (delay), `FilterState` x2 (TPT state-variable, 1-pole
+  for lpf_1p / hpf_1p; cutoffs re-set by `updateFilters` on `controllersChanged`), width (mid / side), LFO (block-rate,
+  ramped); groups in `startVoice` (off_by voices: normal = release, else fade 6 ms / off_time); `onWheel` only when
+  the region doesn't follow CC 1 itself.
+- Checked on SSO (probes, not committed): 5 instruments, 0 problems, unread only lfo01_ / eq1_ (CC 21 vibrato, default
+  0); violins +17 dB and brighter on the wheel; organ release tails. Demo WAVs. Not checked: listening.
+
 ## The plan (`PR7-O PLAN.md`), next
 
-Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
-`xfout_*`, `amp_velcurve`), for libraries that use them (VSCO uses neither). Sections are split only (0.4.0; layered
-was offered too: not asked for). Then (ask the owner): stage 3's library browser by
+Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner: 0.10.0
+ensemble stacking / octave doubling (mock-up first), then stage 3's library browser by
 section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
 VPO, the woodwinds' pictures, stage 4's CC / channel articulations, stage 6's ensemble stacking / octave doubling and
 mixer strips (dsp/mixer), then the writing tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE).

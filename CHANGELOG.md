@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.9.0
+
+**More of the SFZ format: other open libraries now play as their makers wrote them** (you: "Let's implement what's
+left on the plan"; this is its first step). VSCO 2 CE used little of SFZ; **Sonatina Symphonic Orchestra**, the plan's
+second library (free, Creative Commons Sampling Plus), uses much more, and PR7-O skipped it. Counted over Sonatina's 762
+files, PR7-O now reads and plays:
+- **Release samples:** sounds that play when you let a key go (Sonatina's organ: the pipes stopping), after the sustain
+  pedal too, quieter the longer the key was held; and **first / legato samples**, Sonatina's own legato: a different
+  recording for the first note of a phrase and for notes played over a held one.
+- **Filters:** the files' own tone shaping (low-pass, high-pass, band-pass, notch), following the key, the velocity and
+  the mod wheel. Sonatina's mod wheel brightens as well as swells.
+- **The files' own mod wheel crossfades** between soft and loud recordings, and level from controllers. When a file
+  does this itself, PR7-O's own MOD WHEEL dynamics leaves it alone.
+- **Crossfades on velocity and keys**, velocity curves, level by key, pitch by velocity, the envelope moved by velocity
+  and controllers.
+- **Groups** (a new note cutting off an old one), a start held back, a random start point, stereo width, a slow level
+  wobble, controller starting values (Sonatina's violins start their mod wheel at 96).
+
+Checked on five Sonatina instruments (violins sustain and legato, solo horn legato, trumpets marcato, an organ stop):
+all load with no problems, and the files' own controls work (the violins swell 17 dB and brighten on the mod wheel; the
+organ's release samples sound as each chord is let go). VSCO 2 CE plays exactly as before.
+
+Not read yet: the newer numbered LFOs and envelopes some files use (Sonatina's strings add vibrato with them on CC 21,
+which the files themselves start at 0: at their defaults you hear no difference), equalisers, and custom curves. They're
+listed in the instrument's info as before.
+
+Not checked: listening.
+
 ## 0.8.0
 
 **THE STAGE** (you: "Let's do the stage", then "Build it" after the mock-up). Each part of what you load now has a
