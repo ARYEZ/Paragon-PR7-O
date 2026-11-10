@@ -74,6 +74,7 @@ target_sources(ParagonX1
         source/dsp/sampler/Sfz.cpp
         source/dsp/sampler/Section.cpp
         source/dsp/stage/Seating.cpp
+        source/dsp/stage/Stage.cpp
         source/dsp/sampler/Sampler.cpp
         source/dsp/sampler/DiskStreamer.cpp    # PR7-D's disk streaming, kept for the libraries (plan stage 3)
         source/dsp/mixer/MixerEffects.cpp      # PR7-D's mixer effects, kept for the stage (plan stage 6)

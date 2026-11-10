@@ -42,4 +42,5 @@ private:
     int dragging = -1, hovering = -1;
     juce::Point<float> grabOffset;
     juce::String shownSource;
+    int shownSeats = -1;
 };

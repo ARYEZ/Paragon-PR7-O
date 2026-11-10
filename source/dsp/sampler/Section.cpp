@@ -263,10 +263,13 @@ namespace sampler::section
 
         // The regions: each part's, under the section's switches.
         std::set<const Sample*> samples;
-        for (const auto& p : parts)
+        for (size_t partIndex = 0; partIndex < parts.size(); ++partIndex)
         {
+            const auto& p = parts[partIndex];
             if (p == nullptr)
                 continue;
+            for (auto& r : p->regions)   // 0.8.0: each region knows its part (THE STAGE seats parts apart)
+                r.part = (int) partIndex;
             // Which of the part's own switches plays under each of the section's (its own kind, else its nearest).
             std::vector<std::pair<int, int>> switchFor;   // (the part's switch key, the section's)
             for (const auto& [kind, key] : keyOfKind)

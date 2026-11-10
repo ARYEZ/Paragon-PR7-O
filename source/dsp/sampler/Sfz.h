@@ -65,6 +65,8 @@ namespace sampler
         // A HELD recording: one that sustains (no one_shot, longer than 2.5 s, and shaped like a bowed or blown note:
         // isSustained), as against a short (spiccato, pizzicato). MOD WHEEL dynamics and AUTO SUSTAIN work on these only.
         bool held = false;
+        // 0.8.0, THE STAGE: which part of a section it plays in (0 for a single instrument), so each part can sit apart.
+        int part = 0;
 
         bool playsUnder (int keyswitch) const noexcept { return swLoLast < 0 || (keyswitch >= swLoLast && keyswitch <= swHiLast); }
 

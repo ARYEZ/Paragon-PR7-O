@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dsp/stage/Seating.h"
+
 #include <juce_core/juce_core.h>
 
 
@@ -33,6 +35,9 @@ struct Rig
     // THE INSTRUMENT (PR7-O 0.1.0): the SFZ file it plays, by its full path (empty: none), loaded again from the
     // user's disk (a library can be gigabytes: the preset keeps where it is, not the audio).
     juce::String instrument;
+
+    // THE STAGE (PR7-O 0.8.0): the seats moved off their usual place, by part name (none: every part in its usual seat).
+    std::map<juce::String, stage::Seat> seats;
 
     // Free text shown with the rig: what it's for.
     juce::String notes;

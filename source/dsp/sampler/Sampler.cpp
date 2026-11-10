@@ -79,8 +79,9 @@ namespace sampler
     }
 
     void Sampler::render (const Program* program, float* left, float* right, int numSamples, const juce::MidiBuffer& midi, int midiStart,
-                          const Settings& settings) noexcept
+                          const Settings& settings, const PartOutputs* parts) noexcept
     {
+        const auto numParts = parts != nullptr ? juce::jlimit (1, maxParts, parts->count) : 1;
         if (program != current)
         {
             for (auto& v : voices)
@@ -104,10 +105,13 @@ namespace sampler
             to = juce::jlimit (done, numSamples, to);
             while (done < to)
             {
-                const auto n = juce::jmin (to - done, (int) scratchLeft.size());
-                std::fill (scratchLeft.begin(), scratchLeft.begin() + n, 0.0f);
-                std::fill (scratchRight.begin(), scratchRight.begin() + n, 0.0f);
-                renderVoices (scratchLeft.data(), scratchRight.data(), n);
+                const auto n = juce::jmin (to - done, scratchSize);
+                for (int p = 0; p < numParts; ++p)
+                {
+                    std::fill (scratchLeft[(size_t) p].begin(), scratchLeft[(size_t) p].begin() + n, 0.0f);
+                    std::fill (scratchRight[(size_t) p].begin(), scratchRight[(size_t) p].begin() + n, 0.0f);
+                }
+                renderVoices (n, numParts);
                 // LEVEL, PAN and EXPRESSION, ramped from where the last piece ended (no zipper noise when they move).
                 float targetLeft, targetRight;
                 balance (settings.pan, targetLeft, targetRight);
@@ -125,8 +129,20 @@ namespace sampler
                 {
                     shownLeft += stepLeft;
                     shownRight += stepRight;
-                    left[done + i] += scratchLeft[(size_t) i] * shownLeft;
-                    right[done + i] += scratchRight[(size_t) i] * shownRight;
+                    rampLeft[(size_t) i] = shownLeft;
+                    rampRight[(size_t) i] = shownRight;
+                }
+                for (int p = 0; p < numParts; ++p)
+                {
+                    auto* intoLeft = (parts != nullptr ? parts->left[(size_t) p] : left) + done;
+                    auto* intoRight = (parts != nullptr ? parts->right[(size_t) p] : right) + done;
+                    const auto& fromLeft = scratchLeft[(size_t) p];
+                    const auto& fromRight = scratchRight[(size_t) p];
+                    for (int i = 0; i < n; ++i)
+                    {
+                        intoLeft[i] += fromLeft[(size_t) i] * rampLeft[(size_t) i];
+                        intoRight[i] += fromRight[(size_t) i] * rampRight[(size_t) i];
+                    }
                 }
                 shownLeft = targetLeft;
                 shownRight = targetRight;
@@ -597,12 +613,15 @@ namespace sampler
         v.released = true;
     }
 
-    void Sampler::renderVoices (float* left, float* right, int numSamples) noexcept
+    void Sampler::renderVoices (int numSamples, int numParts) noexcept
     {
         for (auto& v : voices)
         {
             if (! v.active)
                 continue;
+            const auto part = v.region != nullptr ? juce::jlimit (0, numParts - 1, v.region->part) : 0;
+            auto* left = scratchLeft[(size_t) part].data();
+            auto* right = scratchRight[(size_t) part].data();
             const auto& s = *v.sample;
             const auto* l = s.channels[0].data();
             const auto* r = s.channels[s.channels.size() > 1 ? 1 : 0].data();

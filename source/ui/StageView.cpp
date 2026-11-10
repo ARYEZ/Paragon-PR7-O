@@ -62,6 +62,7 @@ void StageView::refresh()
 {
     parts = processor.getStageParts();
     shownSource = processor.getInstrumentFile();
+    shownSeats = processor.getSeatsVersion();
     partKeys.assign (parts.size(), { 0, 127 });
     if (const auto section = processor.getSection())
         for (size_t i = 0; i < parts.size(); ++i)
@@ -168,8 +169,8 @@ float StageView::lit (int part) const
 
 void StageView::timerCallback()
 {
-    if (processor.getInstrumentFile() != shownSource && dragging < 0)
-        refresh();
+    if ((processor.getInstrumentFile() != shownSource || processor.getSeatsVersion() != shownSeats) && dragging < 0)
+        refresh();   // another instrument, or the seats changed (undo, a preset, a project)
     // A part lit at once while any key in its range is held, fading over about a quarter second after.
     auto changed = false;
     for (size_t i = 0; i < parts.size(); ++i)
@@ -320,5 +321,7 @@ void StageView::mouseDrag (const juce::MouseEvent& e)
 
 void StageView::mouseUp (const juce::MouseEvent&)
 {
+    if (dragging >= 0)
+        processor.seatMoveFinished();   // the preset modified; one undo step
     dragging = -1;
 }

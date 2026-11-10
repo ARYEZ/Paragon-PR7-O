@@ -14,6 +14,7 @@
 #include "dsp/sampler/Sampler.h"
 #include "dsp/sampler/Section.h"
 #include "dsp/stage/Seating.h"
+#include "dsp/stage/Stage.h"
 #include "rigs/RigLibrary.h"
 #include "rigs/UndoHistory.h"
 #include "rigs/MidiLinks.h"
@@ -121,6 +122,10 @@ public:
     std::vector<StagePart> getStageParts() const;
     void setSeat (const juce::String& partName, stage::Seat);
     void resetSeats();
+    void seatMoveFinished();   // a drag let go: the preset modified, one undo step
+    int getSeatsVersion() const noexcept { return seatsVersion; }   // counts the seats' changes (the stage view follows)
+    stage::Settings getStageSettings() const noexcept;
+    const stage::Stage& getStage() const noexcept { return stage; }   // tests
     void clearInstrument();
     // Tests (and anything that made one in memory): this program now, under `file`'s name (not loaded again from it).
     void setProgram (std::shared_ptr<const sampler::Program>, const juce::String& file = {});
@@ -328,6 +333,14 @@ private:
     LevelMeterSource outputMeter;
 
     std::map<juce::String, stage::Seat> movedSeats;   // 0.8.0: seats moved off their default, by part name
+    // THE STAGE's sound (0.8.0): the parts played apart, the stage, its fade in and out (20 ms), the seats it has.
+    stage::Stage stage;
+    juce::AudioBuffer<float> partBuffers;   // 2 a part, then the stage's two
+    float stageMix = 0.0f;
+    std::atomic<int> stagePartCount { 1 };
+    std::array<stage::Seat, stage::maxParts> pushedSeats {};
+    int pushedSeatCount = -1, seatsVersion = 0;
+    void pushSeats();   // the parts' seats to the stage, by the sampler's part numbers (message thread)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ParagonX1AudioProcessor)
 };

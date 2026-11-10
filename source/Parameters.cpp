@@ -94,9 +94,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
              [] (float v, int) { return v < 0.0005f ? juce::String ("Off") : juce::String (juce::roundToInt (v * 1000.0f)) + " ms"; }, pr7o070);
         addSwitch (layout, stageOn, "Stage", false, pr7o080);
         addChoice (layout, stageRoom, "Room", stageRoomNames, 2, pr7o080);
-        add (layout, stageMic, "Mic Distance", logRange (1.0, 25.0), 6.0f,
+        add (layout, stageMic, "Mic Distance", logRange (1.0, 25.0), 2.5f,   // (just behind the conductor: direct and room about equal)
              [] (float v, int) { return juce::String (v, v < 10.0f ? 1 : 0) + " m"; }, pr7o080);
-        add (layout, stageRoomLevel, "Room Level", { -24.0f, 6.0f, 0.1f }, 0.0f, asDb, pr7o080);
+        add (layout, stageRoomLevel, "Room Level", { -24.0f, 6.0f, 0.1f }, -3.0f, asDb, pr7o080);   // (open samples carry some room)
         add (layout, stageDecay, "Decay", logRange (0.5, 2.0), 1.0f,
              [] (float v, int) { return "x" + juce::String (v, 2); }, pr7o080);
         add (layout, stageSpread, "Spread", { 0.0f, 1.5f, 0.01f }, 1.0f, asPercent, pr7o080);
