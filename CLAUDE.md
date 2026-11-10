@@ -247,14 +247,51 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
 - Checked on VSCO (probes, not committed): joins happen, the old note -20 dB within 0.1 s; forte violins only ~0.1 s
   sooner at level (their attack is short), slow swells much more. Demo WAVs sent. Not checked: listening.
 
+## 0.8.0: THE STAGE (the owner: "Let's do the stage"; after the mock-up: "Build it"; after the demos: "Release it at 0.8.0")
+
+- **Look** (`resources/orchestra/stage3d.py`: our neon stage, platform with a curved front, three risers round a point
+  6 m in front, podium, back wall; camera above and behind the conductor): `stage.jpg` (2048 x 842) and orchestra.json's
+  `stage` grid (metres every 0.5 m from x -9, y -2: 37 x 29 picture points, `podium`); `process_orchestra.py <strings>
+  <out> <brass | -> [<stage>]`.
+- **`dsp/stage/Seating.*`**: `Seat { x, y, width }` (metres: x across from the conductor's left, -8.6..8.6; y back,
+  0.3..11), `clamp`, `seatFor (name)` (our layout after the modern plan), `places()` (the guide).
+- **`dsp/stage/Stage.*`**: per part (up to `maxParts` 8, the sampler's `Region::part`) its seat 1.2 m up plus
+  `riserHeight`; its L / R at the seat's edges (width x SPREAD / 4 each side) by **level only**: every path's length
+  from the seat's middle (separate paths comb-filtered a mono part: up to 20 dB holes; a test sweeps 100 Hz-3 kHz).
+  Mics 2 m apart, 3.2 m up, MIC out, aimed at (+-5, 5), pattern 0.37 + 0.63 cos. Direct + 6 image sources (floor,
+  ceiling, side walls, back wall, front wall), 343 m/s, 1 / d, reflections x `Room::reflection` x ROOM LEVEL; air:
+  one-pole at 16 kHz x exp (-d / 40) per part per mic; walls: one-pole at `Room::damping`. `pointWeight` 0.5 and
+  `norm` (the centre seat 5 m back through the left mic) keep a centre part's level; the delay to the stage's front
+  (less 0.3 m) taken off. Tail: 8-line FDN (31-74 ms x `Room::scale`, Hadamard, damped), gains for `Room::seconds` x
+  DECAY, out level = reference / `criticalDistance` x ROOM LEVEL x sqrt (1 - g^2) x 2. Rooms: Studio (9.5 / 5 m, 0.5
+  s, rc 3), Scoring Stage (13 / 11, 1.4 s, rc 5), Concert Hall (14 / 16, 2.1 s, rc 7), Cathedral (17 / 28, 4.8 s, rc
+  9). Taps: still = nearest whole sample (linear reads dulled highs by seat); moving = at most `maxSlew` 0.04 samples a
+  sample; the first `aim` after a start snaps. Seats by a sequence lock; silent parts skipped once their rings empty.
+- **Sampler**: `render (..., const PartOutputs*)`: each part into its own pair (ramps per part); `scratchLeft/Right`
+  per part.
+- **Processor**: STAGE on (or fading): parts apart -> `stage.process`, 20 ms crossfade with the plain sum when switched
+  (`stageMix`; a stage turned on from off is reset). `pushSeats` (by part number: a section's parts, else the file;
+  on install, `setSeat`, the timer), `movedSeats` by part name in the state ("Stage" / "Seat") and `Rig::seats` (XML
+  `<Stage><Seat name x y width/>`), via captureRig / applyRig so undo covers them; `seatMoveFinished` (modified +
+  checkpoint); `getSeatsVersion` (the view follows).
+- **UI**: rack `Page::stage` (three PAGE keys; MIC, ROOM LEVEL, DECAY, SPREAD in `routingKnobCell`; ROOM menu;
+  STAGE / RESET SEATS keys), `StageView` (the panel's STAGE view: zones from the grid, labels backed for readability,
+  distances on hover / drag, `toStage` by Newton steps), `InstrumentPage::chooseStage`. Snapshot:
+  `PARAGON_SNAPSHOT_STAGE=1`.
+- Parameters (hint 45, `pr7o080`): `stageOn` (off), `stageRoom` (`stageRoomNames`, Concert Hall), `stageMic` (1-25 m,
+  log, 2.5), `stageRoomLevel` (-24..6 dB, -3), `stageDecay` (x0.5-2, log), `stageSpread` (0-150%).
+- Checked on VSCO (probes, not committed): string sections alone ~4 dB to their side at the defaults, peaks within
+  0.7 dB of STAGE off, rooms ringing as set; demo WAVs sent. Not checked: listening. Ensemble stacking and octave
+  doubling (the plan's stage 6 too) not done: ask.
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
 `xfout_*`, `amp_velcurve`), for libraries that use them (VSCO uses neither). Sections are split only (0.4.0; layered
 was offered too: not asked for). Then (ask the owner): stage 3's library browser by
 section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
-VPO, the woodwinds' pictures, stage 4's CC / channel articulations, stage 6 the stage and mixer strips (dsp/mixer), then
-the writing tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE).
+VPO, the woodwinds' pictures, stage 4's CC / channel articulations, stage 6's ensemble stacking / octave doubling and
+mixer strips (dsp/mixer), then the writing tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE).
 
 ## Rules (from the owner and the family's CLAUDE.md files)
 
