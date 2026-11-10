@@ -229,13 +229,32 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   sideways to keep its slide's run (1st-7th + 90 px) in view, a little smaller where even that won't fit (the panel
   crops the picture's sides at usual window shapes: positions 1-2 were off the left edge).
 
+## 0.7.0: LEGATO and GLIDE (the owner chose legato as the next step; after the demos and the rack screenshot: "Release it at 0.7.0")
+
+- `Sfz`: `settledFrame` (the first 50 ms window of the core within 3 dB of its body), cached in `Analysis::settled`;
+  `Region::legatoStart` (held only, else -1; at most half the recording, never past its loop start). VSCO medians:
+  violins 0.75 s (pp layer up to 1.45 s+), cellos 0.15, horn / trombone / flute 0.1.
+- `Sampler`: `Settings::legato`, `glideSeconds`; key state (`keyDown`, `keyVelocity`, `keyChannel`, `keyStart` on the
+  sample `clock` / `now`, `cameFrom`); `noteOn` -> `joinableFrom` (sounding, held, pressed >= `chordWindow` 40 ms ago,
+  nearest within 12 semitones, the most recent on a tie) -> `playNote` (joined only if a chosen region is held: the
+  old note's voices `fadeOut` + `legatoOut`, gliding to the new pitch; new voices at `legatoStart`, attack over the
+  join, `legatoIn`); `joinSeconds` = 0.25 x time since the old note began, 30-150 ms; equal power (sin of the linear
+  ramps); `release` converts a legatoIn attack's level; noteOff joins back to the nearest still-down key along
+  `cameFrom` (not with the pedal down); glide per sample (`glideRatio` x `glideStep`, `glideCount`, `glideTarget`).
+- Parameters (hint 44, `pr7o070`): `instLegato` (off), `instGlide` (0-0.5 s, skewed, "Off" at 0). Rack: `numKnobs` 7
+  (GLIDE), `pageKeyCell (0 | 1)` (AUTO SUSTAIN, LEGATO). Known limit: a melody over a held chord joins the nearest
+  chord note (the owner was told; a smarter rule offered).
+- Checked on VSCO (probes, not committed): joins happen, the old note -20 dB within 0.1 s; forte violins only ~0.1 s
+  sooner at level (their attack is short), slow swells much more. Demo WAVs sent. Not checked: listening.
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
 `xfout_*`, `amp_velcurve`), for libraries that use them (VSCO uses neither). Sections are split only (0.4.0; layered
 was offered too: not asked for). Then (ask the owner): stage 3's library browser by
 section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
-VPO, the woodwinds' pictures, stage 4's CC / channel articulations, stage 5 legato, stage 6 the stage and mixer strips (dsp/mixer).
+VPO, the woodwinds' pictures, stage 4's CC / channel articulations, stage 6 the stage and mixer strips (dsp/mixer), then
+the writing tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE).
 
 ## Rules (from the owner and the family's CLAUDE.md files)
 

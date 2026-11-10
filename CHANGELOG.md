@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.7.0
+
+**LEGATO** (you chose it as the next step; our own design, since the open libraries have no recorded transitions
+between notes). A new key on the rack, beside AUTO SUSTAIN. With it on, a note you play while still holding a sustained
+one takes over from it instead of starting again:
+- the old note fades out as the new one fades in, with no dip in loudness;
+- the new note starts **past its attack** (no fresh bow stroke or tongued start), so the line flows. Where the attack is
+  over is measured on each recording as it loads: VSCO's violins swell in slowly and skip about 0.75 s, cellos about
+  0.15 s, horn and trombone about 0.1 s;
+- the join follows how you play: quick notes join in about 30 ms, slow ones in up to 150 ms;
+- let go of the new note while still holding the old key and it flows back (trills);
+- notes pressed together as a chord (within 40 ms), short articulations (staccato, pizzicato) and notes more than an
+  octave apart are never joined.
+
+**GLIDE**, a seventh knob after POLYPHONY: with LEGATO, a joined note slides in pitch from the note before over this
+time (0-500 ms), as a string player shifts.
+
+LEGATO is off and GLIDE at 0 by default: your presets and projects play as before.
+
+Worth knowing: holding a chord with one hand while playing a melody with the other, a melody note can take over the
+chord note nearest it (within an octave): for pads under a melody, leave LEGATO off. On loud violins the difference is
+subtle (they reach full level in about 0.2 s anyway); on soft and slowly swelling notes it's large. The join times and
+the chord window are our guesses: tell us how they feel.
+
 ## 0.6.0
 
 **The brass in the neon look** (you: "Build it but make the metal a bit more visible", after the mock-up). Load a
