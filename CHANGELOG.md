@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.10.0
+
+**THE ENSEMBLE: a bigger section, and lines doubled in octaves** (the plan's next step; you: "Build it" after the
+mock-up, then "Release it as 0.10.0" after the demos). A fourth page on the rack, **ENSEMBLE**:
+- **PLAYERS** (x1 to x4): each note played by more players. Each extra one is a little out of tune (**DETUNE**, up to 8
+  cents to start), comes in a little later (**TIMING**, up to 12 ms: never earlier, so what you play stays on time),
+  starts a moment further into its recording and sits either side of the first. The level holds: a solo violin with
+  four players is as loud as with one, just bigger.
+- **DOUBLE** (off, octave up, octave down, both) at **DOUBLE LEVEL** (-6 dB to start): every note doubled as
+  orchestrators do. In a section, the doubled note is played by whichever part has that key (a violin line doubled an
+  octave down comes out of the violas and cellos). The doubled notes end with the key you played, count as the same note
+  for POLYPHONY, and follow a LEGATO join.
+
+Both start off (x1, no doubling): your projects and presets sound as before.
+
+Worth knowing: extra players are copies of the same recording made to differ, not new players: pushed hard (big DETUNE
+and TIMING) they can sound like a chorus effect; the starting values are small for that reason.
+
+Not checked: listening beyond the demos you heard.
+
 ## 0.9.0
 
 **More of the SFZ format: other open libraries now play as their makers wrote them** (you: "Let's implement what's

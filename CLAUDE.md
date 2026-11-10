@@ -309,13 +309,30 @@ tools, which need the owner's riffs)
 - Checked on SSO (probes, not committed): 5 instruments, 0 problems, unread only lfo01_ / eq1_ (CC 21 vibrato, default
   0); violins +17 dB and brighter on the wheel; organ release tails. Demo WAVs. Not checked: listening.
 
+## 0.10.0: THE ENSEMBLE (the owner: "Build it" after the mock-up; "Release it as 0.10.0" after the demos)
+
+- Parameters (hint 46, `pr7o0100`): `ensPlayers` (x1-4), `ensDetune` (0-30 ct, 8), `ensTiming` (0-40 ms, 12),
+  `ensDouble` (`doubleNames`: Off, Octave Up, Octave Down, Octaves Up + Down), `ensDoubleLevel` (-24..0 dB, -6).
+- Rack: `Page::ensemble`, four PAGE keys (40 px wide, names 6.5 pt); its knobs in `routingKnobCell`, DOUBLE in
+  `menuCell`. Snapshot: `PARAGON_SNAPSHOT_ENSEMBLE=1`.
+- `Sampler`: `Settings::players / detuneCents / timingMs / doubleMode / doubleGain`. In `playNote` each region starts
+  `players` voices (`Copy`: copy 0 untouched; others detune `detunes[c]` x DETUNE plus +-25% random, delay 25-100% of
+  TIMING via `waiting` (never earlier: no look-ahead; the mock-up said "early or late", corrected), up to 8 ms
+  `offsetSeconds`, pans `pansFor` (x2: both centred; x3 / x4: +-0.6), each side scaled 1 / sqrt (sum of its balance
+  gains squared): a plain 1 / sqrt N left three players 1.85 dB down). DOUBLE in `noteOn`: `playNote` for key +-12 with
+  `NoteExtras` (owner = the played key, the main note's `noteId` shared: no `makeRoom`, one note for POLYPHONY; legato
+  `joinFrom` = from +-12, join time from the played key's start); `Voice::owner` (noteOff releases by it),
+  `Voice::isDouble` (never joined from). GCC refuses `const NoteExtras& = {}` as a default inside the class: pass it.
+- Checked on VSCO (probes, not committed): RMS held within 0.2 dB (solo violin x4, violins x3); the strings section's
+  line doubled down +0.6 dB. Demo WAVs. Not checked: listening.
+
 ## The plan (`PR7-O PLAN.md`), next
 
-Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner: 0.10.0
-ensemble stacking / octave doubling (mock-up first), then stage 3's library browser by
+Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner: 0.11.0
+stage 3's library browser by
 section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
-VPO, the woodwinds' pictures, stage 4's CC / channel articulations, stage 6's ensemble stacking / octave doubling and
-mixer strips (dsp/mixer), then the writing tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE).
+VPO, the woodwinds' pictures (0.12.0), stage 4's CC / channel articulations, mixer strips (dsp/mixer), then the writing
+tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE: the owner's riffs asked for).
 
 ## Rules (from the owner and the family's CLAUDE.md files)
 
