@@ -451,3 +451,58 @@ TEST_CASE ("SECTION 0.4.0: a section is kept with the project and comes back; mo
     CHECK (restored->getProgram()->numFiles == 2);
     CHECK (restored->getProgram()->name == "Cellos + Violins");
 }
+
+TEST_CASE ("0.11.0: a long recording streams from disk; a bounce of it is what the whole one in memory gives", "[processor][streaming]")
+{
+    // 6 s gliding tones, a loop in the middle (an invented file).
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    {
+        juce::AudioBuffer<float> audio (2, (int) (6.0 * sampleRate));
+        for (int c = 0; c < 2; ++c)
+        {
+            double phase = 0.0;
+            for (int i = 0; i < audio.getNumSamples(); ++i)
+            {
+                phase += juce::MathConstants<double>::twoPi * (200.0 + 60.0 * i / sampleRate + 30.0 * c) / sampleRate;
+                audio.setSample (c, i, 0.3f * (float) std::sin (phase));
+            }
+        }
+        testkit::writeWav (dir.getChildFile ("long.wav"), audio, sampleRate);
+        dir.getChildFile ("long.sfz").replaceWithText ("<region> sample=long.wav pitch_keycenter=60 amp_veltrack=0\n"
+                                                       "loop_mode=loop_sustain loop_start=96000 loop_end=180000 loop_crossfade=0.25\n");
+    }
+    std::array<std::vector<float>, 2> results[2];
+    for (int streaming = 0; streaming < 2; ++streaming)
+    {
+        auto processor = makeProcessor();
+        processor->setStreamFromDisk (streaming == 1);
+        processor->setNonRealtime (true);
+        processor->loadInstrument (dir.getChildFile ("long.sfz"));
+        REQUIRE (processor->waitForInstrument());
+        REQUIRE (processor->getProgram() != nullptr);
+        const auto& p = *processor->getProgram();
+        if (streaming == 1)
+        {
+            CHECK (p.regions[0].sample->streamed());
+            CHECK ((double) p.bytes < 0.2 * (double) p.wholeBytes);
+            CHECK (processor->getStreamer() != nullptr);
+        }
+        else
+            CHECK (! p.regions[0].sample->streamed());
+        results[streaming] = play (*processor, 9.0, note (60, 0, (int) (6.5 * sampleRate)));
+        if (streaming == 1)
+            CHECK (processor->getStreamer()->getUnderruns() == 0);
+    }
+    auto most = 0.0f, peak = 0.0f;
+    for (size_t c = 0; c < 2; ++c)
+        for (size_t i = 0; i < results[0][c].size(); ++i)
+        {
+            most = std::max (most, std::abs (results[0][c][i] - results[1][c][i]));
+            peak = std::max (peak, std::abs (results[0][c][i]));
+        }
+    CHECK (peak > 0.05f);
+    CHECK (most < 1.0e-6f);
+    dir.deleteRecursively();
+}

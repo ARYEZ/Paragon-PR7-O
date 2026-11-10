@@ -3,6 +3,7 @@
 #include <array>
 #include <mutex>
 #include <set>
+#include <tuple>
 
 namespace sampler
 {
@@ -332,7 +333,11 @@ namespace sampler
         // 0.4.0: each recording's shape and AUTO SUSTAIN points, kept while the recording is in memory, so a program
         // made again from the same samples (a section's split moved) doesn't work them out again. Keyed by the sample
         // (its weak pointer tells a live one from a new one at the same address).
-        struct Analysis { bool sustained = false; bool pointsKnown = false; SustainPoints points; juce::int64 settled = 0; };
+        struct Analysis
+        {
+            bool sustained = false; bool pointsKnown = false; SustainPoints points; juce::int64 settled = 0;
+            std::map<std::tuple<juce::int64, juce::int64, int>, float> likeness;   // 0.11.0: each file loop's
+        };
         std::mutex analysesLock;
         std::map<const Sample*, std::pair<std::weak_ptr<const Sample>, Analysis>> analyses;
 
@@ -345,8 +350,11 @@ namespace sampler
                 for (auto old = analyses.begin(); old != analyses.end();)   // forget samples gone from memory
                     old = old->second.first.expired() ? analyses.erase (old) : std::next (old);
                 Analysis a;
-                a.sustained = isSustained (*sample);
+                // 0.11.0: a streamed recording (its analysis gone with the program that streamed it) can't be looked
+                // at whole again: taken as a short.
+                a.sustained = ! sample->streamed() && isSustained (*sample);
                 a.settled = a.sustained ? settledFrame (*sample) : 0;
+                a.pointsKnown = sample->streamed();
                 it = analyses.insert_or_assign (sample.get(), std::make_pair (std::weak_ptr<const Sample> (sample), a)).first;
             }
             return it->second.second;
@@ -368,7 +376,12 @@ namespace sampler
             if (r.loop != Region::Loop::none)
             {
                 // The file's own loop: its crossfade's curve from how alike its two sides are.
-                r.loopLikeness = loopLikeness (*r.sample, r.loopStart, r.loopEnd, r.loopCrossfade);
+                const auto key = std::make_tuple (r.loopStart, r.loopEnd, r.loopCrossfade);
+                if (const auto known = analysis.likeness.find (key); known != analysis.likeness.end())
+                    r.loopLikeness = known->second;
+                else
+                    r.loopLikeness = analysis.likeness[key] = r.sample->streamed() ? 0.0f
+                                   : loopLikeness (*r.sample, r.loopStart, r.loopEnd, r.loopCrossfade);
                 if (r.legatoStart >= 0)
                     r.legatoStart = juce::jmin (r.legatoStart, juce::jmax (r.offset, r.loopStart));   // (before its loop)
                 continue;
@@ -393,6 +406,74 @@ namespace sampler
             if (r.legatoStart >= 0 && (r.loop != Region::Loop::none || r.autoLoop))
                 r.legatoStart = juce::jmin (r.legatoStart, juce::jmax (r.offset, r.loopStart));   // (before its loop)
         }
+    }
+
+    std::vector<std::pair<juce::int64, juce::int64>> keptInMemory (const Region& r, double headSeconds)
+    {
+        // Where a voice can start or jump to without warning, a head each: the note's start (its random offset and
+        // an ensemble player's 8 ms included), a legato join's start, the tail past its loop (let go: it plays on from
+        // the loop's end); and a few frames round the loop points (the interpolation reads either side of them).
+        const auto rate = r.sample != nullptr ? r.sample->sampleRate : 48000.0;
+        const auto head = (juce::int64) (headSeconds * rate);
+        std::vector<std::pair<juce::int64, juce::int64>> keep;
+        keep.emplace_back (r.offset - 4, r.offset + r.offsetRandom + (juce::int64) (0.008 * rate) + head);
+        if (r.legatoStart >= 0)
+            keep.emplace_back (r.legatoStart - 4, r.legatoStart + (juce::int64) (0.008 * rate) + head);
+        if ((r.loop != Region::Loop::none || r.autoLoop) && r.loopEnd > r.loopStart)
+        {
+            keep.emplace_back (r.loopStart - 4, r.loopStart + 4);
+            keep.emplace_back (r.loopEnd - 4, r.loopEnd + head);
+        }
+        return keep;
+    }
+
+    void streamSamples (Program& program, double headSeconds)
+    {
+        // Each recording once: what all its regions need kept, then made streamed if that's under 70% of it (a short
+        // one stays whole). Its analysis goes with it (a section's split moved uses it again).
+        std::map<const Sample*, std::vector<std::pair<juce::int64, juce::int64>>> needs;
+        for (const auto& r : program.regions)
+            if (r.sample != nullptr && ! r.sample->streamed())
+            {
+                auto& keep = needs[r.sample.get()];
+                const auto more = keptInMemory (r, headSeconds);
+                keep.insert (keep.end(), more.begin(), more.end());
+            }
+        std::map<const Sample*, std::shared_ptr<const Sample>> made;
+        {
+            const std::scoped_lock lock (analysesLock);
+            for (auto& r : program.regions)
+            {
+                if (r.sample == nullptr || r.sample->streamed())
+                    continue;
+                auto it = made.find (r.sample.get());
+                if (it == made.end())
+                {
+                    std::shared_ptr<const Sample> streamed;
+                    if (auto trimmed = sampleFiles::streamedFrom (*r.sample, needs[r.sample.get()]);
+                        trimmed != nullptr && (double) trimmed->bytes() < 0.7 * (double) r.sample->wholeBytes())
+                    {
+                        streamed = trimmed;
+                        const auto known = analyses.find (r.sample.get());
+                        if (known != analyses.end() && known->second.first.lock() == r.sample)
+                            analyses.insert_or_assign (streamed.get(), std::make_pair (std::weak_ptr<const Sample> (streamed), known->second.second));
+                    }
+                    it = made.emplace (r.sample.get(), streamed).first;
+                }
+                if (it->second != nullptr)
+                    r.sample = it->second;
+            }
+        }
+        // What it holds in memory now, and would whole.
+        std::set<const Sample*> counted;
+        program.bytes = 0;
+        program.wholeBytes = 0;
+        for (const auto& r : program.regions)
+            if (r.sample != nullptr && counted.insert (r.sample.get()).second)
+            {
+                program.bytes += r.sample->bytes();
+                program.wholeBytes += r.sample->wholeBytes();
+            }
     }
 
     std::shared_ptr<Program> programFrom (std::shared_ptr<const Sample> sample, int keyCenter)

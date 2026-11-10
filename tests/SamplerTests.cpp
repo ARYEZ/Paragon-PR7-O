@@ -414,30 +414,6 @@ TEST_CASE ("Kept for later stages: the mixer's effects still run (every type, fi
     }
 }
 
-TEST_CASE ("Kept for later stages: disk streaming reads a file as it is", "[streaming]")
-{
-    Folder f;
-    const auto file = f.wav ("long.wav", 220.0, 1.0);
-    sampler::StreamSource source;
-    source.file = file;
-    source.sampleRate = sampleRate;
-    source.length = 48000;
-    source.headFrames = 0;
-    source.parts = { { 0, 0, 0, 1.0f, 0 }, { 0, 0, 1, 1.0f, 0 } };
-    source.numOutputs = 1;
-    sampler::Streamer streamer;
-    const auto stream = streamer.claim (source);
-    REQUIRE (stream >= 0);
-    streamer.attach (stream, 0);
-    for (juce::int64 frame = 0; frame < 30000; frame += 997)
-    {
-        const auto expected = 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * (double) frame / sampleRate);
-        CHECK_THAT (streamer.sample (stream, 0, 0, frame, true), WithinAbs (expected, 1.0e-6));
-        streamer.consumed (stream, 0, frame);
-    }
-    CHECK (streamer.getUnderruns() == 0);
-}
-
 //==============================================================================
 // 0.2.0: what VSCO 2 CE's strings ask for. Every file here is invented, laid out as theirs are (measured on the real
 // files in the scratchpad, never committed).
@@ -1660,4 +1636,231 @@ TEST_CASE ("SAMPLER 0.10.0: LEGATO carries the doubled octave along", "[sampler]
     const auto baseline = render (*program, alone, 1.0, settings)[0];
     CHECK (db (levelOver (out, 440.0, 1.3, 0.1)) < db (levelOver (baseline, 440.0, 0.7, 0.1)) + 1.0);
     CHECK (levelOver (out, 493.88, 1.3, 0.1) > 0.05);
+}
+
+//==============================================================================
+// 0.11.0: DISK STREAMING. A long recording keeps a few stretches in memory and the rest is read from its file as it
+// plays: what comes out must be what the whole recording in memory gives, sample for sample.
+namespace
+{
+    // 6 s of a sound no two stretches of which are alike (gliding tones, a different one each side), 32-bit float.
+    juce::File unlikeTones (Folder& f, const juce::String& name, double seconds = 6.0, int channels = 2)
+    {
+        const auto file = f.dir.getChildFile (name);
+        juce::AudioBuffer<float> buffer (channels, (int) (seconds * sampleRate));
+        for (int c = 0; c < channels; ++c)
+        {
+            double phase = 0.0, phase2 = 0.0;
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            {
+                const auto t = (double) i / sampleRate;
+                phase += juce::MathConstants<double>::twoPi * (180.0 + 70.0 * t + 40.0 * c) / sampleRate;
+                phase2 += juce::MathConstants<double>::twoPi * (1300.0 - 90.0 * t) / sampleRate;
+                buffer.setSample (c, i, (float) (0.3 * std::sin (phase) + 0.1 * std::sin (phase2) * (c == 0 ? 1.0 : -1.0)));
+            }
+        }
+        testkit::writeWav (file, buffer, sampleRate);
+        return file;
+    }
+
+    // Plays through `s` (prepared by the caller) for `seconds`; `beforeEachBlock` runs first each block.
+    std::array<std::vector<float>, 2> renderWith (sampler::Sampler& s, const sampler::Program& program, const juce::MidiBuffer& midi,
+                                                  double seconds, const sampler::Sampler::Settings& settings,
+                                                  const std::function<void()>& beforeEachBlock = {})
+    {
+        std::array<std::vector<float>, 2> out;
+        const auto total = (int) (seconds * sampleRate);
+        out[0].assign ((size_t) total, 0.0f);
+        out[1].assign ((size_t) total, 0.0f);
+        for (int start = 0; start < total; start += blockSize)
+        {
+            if (beforeEachBlock)
+                beforeEachBlock();
+            const auto n = juce::jmin (blockSize, total - start);
+            s.render (&program, out[0].data() + start, out[1].data() + start, n, midi, start, settings);
+        }
+        return out;
+    }
+
+    float largestDifference (const std::array<std::vector<float>, 2>& a, const std::array<std::vector<float>, 2>& b)
+    {
+        auto most = 0.0f;
+        for (size_t c = 0; c < 2; ++c)
+            for (size_t i = 0; i < a[c].size(); ++i)
+                most = std::max (most, std::abs (a[c][i] - b[c][i]));
+        return most;
+    }
+}
+
+TEST_CASE ("Disk streaming: the stream follows the voice's timeline round its loop and out of it", "[streaming]")
+{
+    Folder f;
+    const auto file = unlikeTones (f, "long.wav");
+    const auto whole = sampler::sampleFiles::load (file);
+    REQUIRE (whole != nullptr);
+    sampler::StreamSource source;
+    source.file = file;
+    source.length = whole->length();
+    source.numChannels = 2;
+    source.resident = { { 0, 1000 }, { 49996, 50004 } };
+    sampler::StreamPlan plan;
+    plan.start = 0;
+    plan.looping = true;
+    plan.loopStart = 50000;
+    plan.loopEnd = 90000;
+    plan.crossfade = 5000;
+    sampler::Streamer streamer;
+    const auto stream = streamer.claim (source, plan);
+    REQUIRE (stream >= 0);
+    // Each timeline frame: the file's frame the plan says (back: a loop's length earlier, in the crossfade).
+    const auto check = [&] (juce::int64 t, juce::int64 exitAt)
+    {
+        for (int k = 0; k < 2; ++k)
+        {
+            const float* l = nullptr;
+            const float* r = nullptr;
+            int n = 0;
+            for (auto last = false; (n = streamer.span (stream, t, k == 1, l, r)) == 0 && ! last;)
+                last = ! streamer.fillNow (stream);
+            REQUIRE (n > 0);
+            const auto frame = sampler::Streamer::fileFrame (plan, t, exitAt) - (k == 1 ? plan.loopEnd - plan.loopStart : 0);
+            CHECK (l[0] == whole->channels[0][(size_t) frame]);
+            CHECK (r[0] == whole->channels[1][(size_t) frame]);
+            if (k == 0 && ! (t < exitAt && frame >= plan.loopEnd - plan.crossfade && frame < plan.loopEnd))
+                break;   // (back reads only in the crossfade)
+        }
+    };
+    // Up to the loop's end, then round twice (into its crossfade each time), then out past its end.
+    for (juce::int64 t = 1000; t < 90000 + 2 * 40000; t += 777)
+    {
+        if (sampler::Streamer::fileFrame (plan, t, sampler::Streamer::never) >= plan.loopStart - 4
+            && sampler::Streamer::fileFrame (plan, t, sampler::Streamer::never) < plan.loopStart + 4)
+            continue;
+        check (t, sampler::Streamer::never);
+        streamer.consumed (stream, t - 2);
+    }
+    // Let go in the third time round: from that time's end, the file past the loop's end.
+    const auto exitAt = (juce::int64) 90000 + 3 * 40000;
+    streamer.stopLooping (stream, exitAt);
+    for (juce::int64 t = 90000 + 2 * 40000 + 100; t < exitAt + 100000; t += 613)
+    {
+        check (t, exitAt);
+        streamer.consumed (stream, t - 2);
+    }
+    CHECK (sampler::Streamer::fileFrame (plan, exitAt + 10, exitAt) == 90010);
+    streamer.release (stream);
+}
+
+TEST_CASE ("Disk streaming: a streamed recording plays as the whole one does, sample for sample", "[streaming]")
+{
+    Folder f;
+    unlikeTones (f, "long.wav");
+    const auto sfzFile = f.sfz ("long.sfz", "<region> sample=long.wav pitch_keycenter=60 amp_veltrack=0 ampeg_release=0.4\n"
+                                            "loop_mode=loop_sustain loop_start=96000 loop_end=180000 loop_crossfade=0.3\n");
+    const auto whole = sampler::sfz::load (sfzFile);
+    auto streamed = sampler::sfz::load (sfzFile);
+    sampler::streamSamples (*streamed);
+    REQUIRE (whole->regions.size() == 1);
+    REQUIRE (streamed->regions[0].sample->streamed());
+    // In memory: the start, the tail after the loop (0.5 s each), a few frames round the loop's start.
+    INFO ("in memory " << streamed->bytes << " of " << streamed->wholeBytes);
+    CHECK (streamed->wholeBytes == whole->bytes);
+    CHECK ((double) streamed->bytes < 0.2 * (double) streamed->wholeBytes);
+
+    // Two notes: one at its root, one a tone up (between frames), held through several times round the loop; let go
+    // inside the loop (the stream told to go on past it) and inside its crossfade (once more round first).
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    midi.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 90), 3000);
+    midi.addEvent (juce::MidiMessage::noteOff (1, 60), (int) (5.3 * sampleRate));
+    midi.addEvent (juce::MidiMessage::noteOff (1, 62), (int) (6.95 * sampleRate));
+    sampler::Sampler::Settings settings;
+    sampler::Sampler plain;
+    plain.prepare (sampleRate);
+    const auto expected = renderWith (plain, *whole, midi, 9.0, settings);
+    CHECK (peakOf (expected[0], (size_t) (7.0 * sampleRate), (size_t) (7.3 * sampleRate)) > 0.01);   // (sounding past the loop's end)
+
+    SECTION ("bouncing: what the disk hasn't read yet is read there and then")
+    {
+        sampler::Streamer streamer;
+        sampler::Sampler s;
+        s.prepare (sampleRate);
+        s.setStreamer (&streamer);
+        settings.waitForDisk = true;
+        const auto got = renderWith (s, *streamed, midi, 9.0, settings);
+        CHECK (largestDifference (expected, got) < 1.0e-6f);
+        CHECK (streamer.getUnderruns() == 0);
+    }
+    SECTION ("live, with the disk keeping up")
+    {
+        sampler::Streamer streamer;
+        sampler::Sampler s;
+        s.prepare (sampleRate);
+        s.setStreamer (&streamer);
+        const auto got = renderWith (s, *streamed, midi, 9.0, settings, [&] { CHECK (streamer.waitUntilFilled (2000)); });
+        CHECK (largestDifference (expected, got) < 1.0e-6f);
+        CHECK (streamer.getUnderruns() == 0);
+    }
+    SECTION ("with no streamer, only what's in memory plays (and nothing breaks)")
+    {
+        sampler::Sampler s;
+        s.prepare (sampleRate);
+        const auto got = renderWith (s, *streamed, midi, 9.0, settings);
+        for (int i = 0; i < 20000; ++i)   // (the start is in memory)
+            CHECK (got[0][(size_t) i] == expected[0][(size_t) i]);
+        // Past the start, nothing but the few frames kept round the loop's start (each note goes by them once).
+        auto sounding = 0;
+        for (size_t i = (size_t) (0.6 * sampleRate); i < (size_t) (3.5 * sampleRate); ++i)
+            sounding += std::abs (got[0][i]) > 1.0e-6f ? 1 : 0;
+        CHECK (sounding > 0);
+        CHECK (sounding < 30);
+    }
+}
+
+TEST_CASE ("Disk streaming: legato joins, AUTO SUSTAIN and the ensemble stream as they play from memory", "[streaming]")
+{
+    // A held recording (steady after its attack, a bow-off at its end): AUTO SUSTAIN loops it, a join starts it past
+    // its attack, players start a little into it: all places the stream must start from.
+    Folder f;
+    {
+        auto bowedNote = bowed (220.0, 9.0, 0.4, 0.8);
+        bowedNote->channels.push_back (bowedNote->channels[0]);
+        for (size_t i = 0; i < bowedNote->channels[1].size(); ++i)   // (the sides differ: noise on the right)
+            bowedNote->channels[1][i] += 0.02f * (float) std::sin ((double) i * 0.731 + std::sin ((double) i * 0.0017) * 9.0);
+        testkit::writeWav (f.dir.getChildFile ("held.wav"), *bowedNote);
+    }
+    const auto sfzFile = f.sfz ("held.sfz", "<region> sample=held.wav lokey=50 hikey=70 pitch_keycenter=57 amp_veltrack=0 ampeg_release=0.3\n");
+    const auto whole = sampler::sfz::load (sfzFile);
+    auto streamed = sampler::sfz::load (sfzFile);
+    sampler::streamSamples (*streamed);
+    REQUIRE (whole->regions.size() == 1);
+    REQUIRE (whole->regions[0].autoLoop);
+    REQUIRE (whole->regions[0].legatoStart > 0);
+    REQUIRE (streamed->regions[0].sample->streamed());
+    CHECK (streamed->regions[0].loopStart == whole->regions[0].loopStart);
+    CHECK ((double) streamed->bytes < 0.35 * (double) streamed->wholeBytes);
+
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 100), 0);
+    midi.addEvent (juce::MidiMessage::noteOn (1, 59, (juce::uint8) 100), (int) (1.0 * sampleRate));   // joins 57
+    midi.addEvent (juce::MidiMessage::noteOff (1, 57), (int) (1.1 * sampleRate));
+    midi.addEvent (juce::MidiMessage::noteOff (1, 59), (int) (11.0 * sampleRate));
+    sampler::Sampler::Settings settings;
+    settings.legato = true;
+    settings.players = 3;
+    settings.doubleMode = 1;
+    sampler::Sampler plain;
+    plain.prepare (sampleRate);
+    plain.seedRandom (7);
+    const auto expected = renderWith (plain, *whole, midi, 12.5, settings);
+    sampler::Streamer streamer;
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    s.seedRandom (7);
+    s.setStreamer (&streamer);
+    settings.waitForDisk = true;
+    const auto got = renderWith (s, *streamed, midi, 12.5, settings);
+    CHECK (largestDifference (expected, got) < 1.0e-6f);
+    CHECK (streamer.getUnderruns() == 0);
+    CHECK (peakOf (expected[0], (size_t) (11.0 * sampleRate) - 2000, (size_t) (11.0 * sampleRate)) > 0.05);   // (looped)
 }

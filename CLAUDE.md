@@ -22,7 +22,7 @@ the owner, a release per stage. Siblings: PR7-G (guitar), PR7-B (bass), PR7-V (v
   MIDI learn, the default preset, look-and-feel, progress box, PaintCache, the test set-up. **Kept but unused yet**
   (compiled and tested, for later stages): `dsp/mixer/Mixer.h` (trimmed to the generic strip / bus / send / effect-slot
   pieces: the drum-mic channels, bleed and mic routing are gone; 16 channels + 8 buses) and `dsp/mixer/MixerEffects.*`
-  (stage 6's per-section strips); `dsp/sampler/DiskStreamer.*` (namespace `sampler`; stage 3's streaming).
+  (stage 6's per-section strips); `dsp/sampler/DiskStreamer.*` (namespace `sampler`; reworked and used in 0.11.0).
   0.1.0 fixed a race in `Streamer::sample`'s wait-for-disk path (a stale `written` after `fill` returned false because
   the disk thread had filled the ring: silence, about 1 run in 3 of its test).
 
@@ -326,12 +326,50 @@ tools, which need the owner's riffs)
 - Checked on VSCO (probes, not committed): RMS held within 0.2 dB (solo violin x4, violins x3); the strings section's
   line doubled down +0.6 dB. Demo WAVs. Not checked: listening.
 
+## 0.11.0: THE LIBRARY and DISK STREAMING (the owner: "Build it" after the browser mock-up)
+
+- **`library/Library.*`**: `Section` (strings, brass, woodwinds, percussion, keys, choir, other), `Entry`,
+  `instrumentOf` / `sectionOf` (our word table from VSCO's / Sonatina's names; VSCO's "S" prefix = solo; a name that
+  says nothing takes its folder's), `scan` (sorted; `include*` / `inc` folders skipped), `folders` / `setFolders` (key
+  "libraryFolders" in the "Paragon PR7-O" settings file). **`ui/LibraryBrowser.*`**: over the INSTRUMENT page below the
+  rack (LOAD toggles it): libraries, sections, instruments (grouped; folder labels), the chosen file's details (read
+  with `audio = false`), LOAD, ADD TO SECTION / LOAD SECTION / CLEAR, search (every section), OPEN FILE...
+  Snapshot: `PARAGON_SNAPSHOT_LIBRARY=<folders>` (+ `_LIBRARY_SECTION`, `_SEARCH`). Tests: `tests/LibraryTests.cpp`.
+- **Streaming** (`DiskStreamer.*` reworked; PR7-D's multi-mic API gone): `Sample` is whole (`channels`) or streamed
+  (`pieces` in memory, `frames`, `streamedChannels`, `stream` = its `StreamSource` with `resident` ranges);
+  `sampleFiles::streamedFrom`. `sfz::keptInMemory (region)`: 0.5 s (`streamHeadSeconds`) from the offset (+ offset
+  random + 8 ms), from `legatoStart`, from the loop end (the tail when let go), and +-4 frames round the loop start;
+  `sfz::streamSamples (program)` makes each recording streamed if that keeps < 70% of it, carries its `Analysis` to
+  the new pointer (loop likeness cached by loop in `Analysis::likeness`; a streamed sample never analysed again),
+  sets `Program::bytes` / `wholeBytes`. The processor's loader calls it on every load (`setStreamFromDisk`, on); the
+  streamer (`getStreamer`) is made with the first streamed instrument (rings 64 MB), declared last.
+- `Streamer`: 256 streams, ring 1 << 14 frames x (main L/R + back L/R). A stream follows its voice's TIMELINE
+  (`StreamPlan` start / loop / crossfade; `fileFrame (plan, t, exitAt)`: linear, then round the loop, then past its
+  end from `exitAt`); `back` holds the crossfade's back reads (file frame - loop length) for frames in the zone
+  `inBackZone` (loopEnd - crossfade - 4 to loopEnd). `pastResident` skips frames in memory (never through the back
+  zone); **room = pastResident (min (need, written)) + ring - written** (two wrong rules first: from `need` alone the
+  ring had no room after the 0.5 s head; a skip-raised floor lost the frames just before a piece). `span` stops at the
+  next resident piece and at the timeline's next going-back (so a window never covers memory's frames), checks
+  t >= need and t < written, and refuses t >= exitAt until the disk thread has applied `stopLooping` (written rewound
+  to exitAt). `fillNow` for bouncing; `waitUntilFilled` for tests.
+- `Sampler`: `setStreamer` (atomic, taken per render), `Settings::waitForDisk` (the processor: `isNonRealtime()`).
+  Voice: `stream`, `lap` (timeline - position: + loop length at each wrap), `Window inMemory / ahead / behind`;
+  `startStream` at the end of `startVoice` (plan start = position - 2), `endStream` (done, slot reused, `reset`),
+  `leaveLoop` (release outside the crossfade, or the wrap after `stopAtWrap`: `stopLooping (loopEnd + lap)`, windows
+  cleared), `consumed (position + lap - 2)` at each block's end. Reads: memory window by file frame, ring window by
+  timeline (inline), else `streamedFrame` (another piece, `span`; bouncing: `fillNow` until there, one more look after
+  an idle read: the disk thread may have read it in between; live: silent and counted in `getUnderruns`).
+- Info: "MEMORY x MB in memory, y MB streamed from disk as it plays". Snapshot: `PARAGON_SNAPSHOT_STREAM=0`.
+- Checked (probe `/tmp/claude-0/probes/ScratchStream.cpp`, not committed): all 75 VSCO files 5615 MB -> 811 MB in
+  memory; the strings section 450 -> 73 MB (trim 14 ms); a 14 s passage (10-note chord x4 players on the wheel, a
+  legato line: 92 streams) bounced and played live at real-time pace from a cold file cache: **identical sample for
+  sample, 0 underruns**; audio-thread time 0.9-1.1 s vs 0.74 s whole. Sonatina's 1st violins, looped horn, organ
+  (FLAC, release samples, pedal): identical. Not checked: a slow hard disk, Windows' disk.
+
 ## The plan (`PR7-O PLAN.md`), next
 
-Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner: 0.11.0
-stage 3's library browser by
-section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
-VPO, the woodwinds' pictures (0.12.0), stage 4's CC / channel articulations, mixer strips (dsp/mixer), then the writing
+Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner: the
+woodwinds' pictures (0.12.0; a mock-up first), stage 4's CC / channel articulations, mixer strips (dsp/mixer), then the writing
 tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE: the owner's riffs asked for).
 
 ## Rules (from the owner and the family's CLAUDE.md files)

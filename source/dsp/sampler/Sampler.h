@@ -84,6 +84,9 @@ namespace sampler
             float detuneCents = 8.0f, timingMs = 12.0f;
             int doubleMode = 0;
             float doubleGain = 0.5f;
+            // 0.11.0: bouncing (non-realtime): a streamed recording's frames not read from disk yet are read there and
+            // then, instead of being silent.
+            bool waitForDisk = false;
         };
         static constexpr double chordWindow = 0.04;                                  // seconds (0.7.0)
         static constexpr double shortestJoin = 0.03, longestJoin = 0.15;             // the legato crossfade's range
@@ -101,6 +104,10 @@ namespace sampler
         struct PartOutputs { std::array<float*, maxParts> left {}, right {}; int count = 0; };
         void render (const Program*, float* left, float* right, int numSamples, const juce::MidiBuffer& midi, int midiStart,
                      const Settings&, const PartOutputs* parts = nullptr) noexcept;
+
+        // 0.11.0, DISK STREAMING: the streamer streamed recordings are read through (null: they play what's in memory
+        // only). Any thread (taken at the next render); it must outlive the sampler.
+        void setStreamer (Streamer* s) noexcept { streamerToUse.store (s, std::memory_order_release); }
 
         int getActiveVoices() const noexcept { return activeVoices.load(); }
         int getActiveNotes() const noexcept { return activeNotes.load(); }
@@ -171,7 +178,18 @@ namespace sampler
             // 0.10.0: the key whose note-off ends it (a doubled octave: the key played), and whether it's a doubling.
             int owner = 0;
             bool isDouble = false;
+            // 0.11.0, DISK STREAMING: its stream (-1: none), how far its timeline is ahead of its position (the loop's
+            // length each time round), and where it read last: in memory (file frames) and in the stream's ring
+            // (timeline frames; `behind`: the crossfade's back reads).
+            int stream = -1;
+            juce::int64 lap = 0;
+            struct Window { const float* left = nullptr; const float* right = nullptr; juce::int64 from = 0, to = 0; };
+            Window inMemory, ahead, behind;
         };
+        float streamedFrame (Voice&, int channel, juce::int64 frame, bool back, bool wait) noexcept;
+        void startStream (Voice&) noexcept;
+        void endStream (Voice&) noexcept;
+        void leaveLoop (Voice&) noexcept;   // its loop stopped going round: the stream told
         // 0.10.0: how one player of a note differs (startVoice), and what a doubled octave carries (playNote).
         struct Copy { float cents = 0.0f, pan = 0.0f, gainLeft = 1.0f, gainRight = 1.0f; int delay = 0; double offsetSeconds = 0.0; int owner = -1; bool isDouble = false; };
         struct NoteExtras { int owner = -1; float gain = 1.0f; bool isDouble = false; std::uint64_t noteId = 0; int joinTimeKey = -1; };
@@ -207,13 +225,16 @@ namespace sampler
         std::vector<NoteInfo> noteScratch;
         std::vector<std::uint64_t> idScratch;
         const Program* current = nullptr;
+        Streamer* streamer = nullptr;
+        std::atomic<Streamer*> streamerToUse { nullptr };
+        bool waitForDisk = false;       // 0.11.0: Settings::waitForDisk, for the piece being played
         double rate = 48000.0;
         float bend = 0.0f;              // the pitch wheel, -1 to 1
         float wheel = 0.0f;             // the mod wheel, 0 to 1
         float expression = 1.0f;        // CC 11, 0 to 1
         std::array<float, 128> cc {};   // 0.9.0: every controller's value (0-127), the file's set_ccN at the start
-        std::array<bool, 128> releaseDue {};
-        bool phraseGoingOn = false;    // 0.9.0: another key was down as this note began   // 0.9.0: keys let go under the pedal (their release samples come with it)
+        std::array<bool, 128> releaseDue {};   // 0.9.0: keys let go under the pedal (their release samples come with it)
+        bool phraseGoingOn = false;    // 0.9.0: another key was down as this note began
         bool pedal = false;
         int keyswitch = -1;
         // 0.7.0: the keys as they're down (velocity, channel, when: the sample clock), and which key each was joined

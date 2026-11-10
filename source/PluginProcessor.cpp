@@ -615,6 +615,7 @@ sampler::Sampler::Settings ParagonX1AudioProcessor::getSamplerSettings() const n
     s.timingMs = param (ParamIDs::ensTiming);
     s.doubleMode = juce::roundToInt (param (ParamIDs::ensDouble));
     s.doubleGain = juce::Decibels::decibelsToGain (param (ParamIDs::ensDoubleLevel));
+    s.waitForDisk = isNonRealtime();   // 0.11.0: a bounce reads what the disk hasn't yet
     return s;
 }
 
@@ -869,6 +870,12 @@ void ParagonX1AudioProcessor::installProgram (std::shared_ptr<const sampler::Pro
     if (program != nullptr && program != newProgram)
         retiredPrograms.emplace_back (program, juce::Time::getMillisecondCounterHiRes());
     program = std::move (newProgram);
+    // 0.11.0: the disk streamer starts with the first instrument that streams (its rings: 64 MB).
+    if (streamer == nullptr && program != nullptr && program->wholeBytes > program->bytes)
+    {
+        streamer = std::make_unique<sampler::Streamer>();
+        sampler.setStreamer (streamer.get());
+    }
     programForAudio = program.get();
     instrumentFile = file;
     // The project's articulation, once its instrument is in (the sampler takes it after it sees the new program).
@@ -934,7 +941,11 @@ void ParagonX1AudioProcessor::startLoading (const juce::String& file, bool undoS
             else if (made == nullptr && problem.isEmpty())
                 problem = "couldn't read " + what;
             if (made != nullptr && ! made->regions.empty())
+            {
+                if (streamFromDisk)
+                    sampler::streamSamples (*made);   // 0.11.0: long recordings read from disk as they play
                 result.program = std::move (made);
+            }
         }
         {
             const std::scoped_lock lock (loadedLock);

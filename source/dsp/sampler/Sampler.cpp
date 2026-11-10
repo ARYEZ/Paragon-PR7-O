@@ -59,7 +59,10 @@ namespace sampler
     void Sampler::reset() noexcept
     {
         for (auto& v : voices)
+        {
+            endStream (v);
             v = Voice {};
+        }
         for (auto& h : held)
             h = false;
         pedal = false;
@@ -108,6 +111,8 @@ namespace sampler
             keyswitch = chosen;
         updatePitch (settings);
         updateWheel();
+        waitForDisk = settings.waitForDisk;
+        streamer = streamerToUse.load (std::memory_order_acquire);
 
         auto done = 0;
         const auto playTo = [&] (int to)
@@ -551,6 +556,7 @@ namespace sampler
                     slot = &v;
 
         auto& v = *slot;
+        endStream (v);
         v = Voice {};
         v.active = true;
         v.region = &r;
@@ -700,6 +706,83 @@ namespace sampler
                 v.position = juce::jmin ((double) (v.lastFrame - 2), v.position + copy->offsetSeconds * v.sample->sampleRate);
         }
         updatePitch (settings);
+        startStream (v);
+    }
+
+    void Sampler::startStream (Voice& v) noexcept
+    {
+        // 0.11.0: a whole recording reads straight from memory; a streamed one claims a stream from where it starts.
+        const auto& s = *v.sample;
+        v.ahead = v.behind = {};
+        v.lap = 0;
+        if (! s.streamed())
+        {
+            v.inMemory = { s.channels[0].data(), s.channels[s.channels.size() > 1 ? 1 : 0].data(), 0, (juce::int64) s.length() };
+            return;
+        }
+        v.inMemory = {};
+        if (streamer == nullptr)
+            return;
+        StreamPlan plan;
+        plan.start = (juce::int64) v.position - 2;
+        plan.looping = v.looping;
+        plan.loopStart = v.loopStart;
+        plan.loopEnd = v.loopEnd;
+        plan.crossfade = v.crossfade;
+        v.stream = streamer->claim (s.stream, plan);
+    }
+
+    void Sampler::endStream (Voice& v) noexcept
+    {
+        if (v.stream >= 0 && streamer != nullptr)
+            streamer->release (v.stream);
+        v.stream = -1;
+    }
+
+    void Sampler::leaveLoop (Voice& v) noexcept
+    {
+        // Its timeline went back to the loop's start at each loop end; from the next one it goes on past it.
+        if (v.stream >= 0 && streamer != nullptr)
+            streamer->stopLooping (v.stream, v.loopEnd + v.lap);
+        v.ahead = v.behind = {};
+    }
+
+    float Sampler::streamedFrame (Voice& v, int channel, juce::int64 frame, bool back, bool wait) noexcept
+    {
+        // A frame not where the voice read last: in another piece in memory, else the stream's ring (by its timeline
+        // frame), else not there yet (live: silent and counted; bouncing: read now).
+        const auto& s = *v.sample;
+        if (frame < 0 || frame >= (juce::int64) s.length() || ! s.streamed())
+            return 0.0f;
+        if (const auto* p = s.pieceAt (frame))
+        {
+            v.inMemory = { p->channels[0].data(), p->channels[p->channels.size() > 1 ? 1 : 0].data(), p->start, p->end() };
+            return (channel == 0 ? v.inMemory.left : v.inMemory.right)[frame - p->start];
+        }
+        if (streamer == nullptr)
+            return 0.0f;
+        const auto t = (back ? frame + (v.loopEnd - v.loopStart) : frame) + v.lap;
+        auto& w = back ? v.behind : v.ahead;
+        if (t >= w.from && t < w.to)
+            return (channel == 0 ? w.left : w.right)[t - w.from];
+        // (bouncing: read until it's there; once more after a read with nothing to do, as the disk thread may have
+        // read it in between)
+        if (v.stream >= 0)
+            for (auto last = false;;)
+            {
+                const float* l = nullptr;
+                const float* r = nullptr;
+                if (const auto n = streamer->span (v.stream, t, back, l, r); n > 0)
+                {
+                    w = { l, r, t, t + n };
+                    return (channel == 0 ? l : r)[0];
+                }
+                if (! wait || last)
+                    break;
+                last = ! streamer->fillNow (v.stream);
+            }
+        streamer->countUnderrun();
+        return 0.0f;
     }
 
     float Sampler::wheelGainOf (const Voice& v) const noexcept
@@ -787,7 +870,10 @@ namespace sampler
             if (v.crossfade > 0 && v.position >= (double) (v.loopEnd - v.crossfade))
                 v.stopAtWrap = true;
             else
+            {
                 v.looping = false;
+                leaveLoop (v);
+            }
         }
     }
 
@@ -908,17 +994,30 @@ namespace sampler
             auto* left = scratchLeft[(size_t) part].data();
             auto* right = scratchRight[(size_t) part].data();
             const auto& s = *v.sample;
-            const auto* l = s.channels[0].data();
-            const auto* r = s.channels[s.channels.size() > 1 ? 1 : 0].data();
-            const auto length = (juce::int64) s.length();
-            const auto stereo = s.channels.size() > 1;
-            const auto at = [length] (const float* c, juce::int64 i) noexcept { return i >= 0 && i < length ? c[i] : 0.0f; };
-            const auto read = [&] (const float* c, double position) noexcept
+            const auto stereo = s.numChannels() > 1;
+            // 0.11.0: frames from where the voice read last (memory), else found (another piece, the stream's ring).
+            const auto wait = waitForDisk;
+            // (the stream's windows never cover frames in memory, so the two are looked in either way round)
+            const auto loopLength = v.loopEnd - v.loopStart;
+            const auto at = [&] (int c, juce::int64 i, bool back) noexcept
+            {
+                const auto& w = v.inMemory;
+                if (i >= w.from && i < w.to)
+                    return (c == 0 ? w.left : w.right)[i - w.from];
+                const auto t = (back ? i + loopLength : i) + v.lap;
+                const auto& ring = back ? v.behind : v.ahead;
+                if (t >= ring.from && t < ring.to)
+                    return (c == 0 ? ring.left : ring.right)[t - ring.from];
+                return streamedFrame (v, c, i, back, wait);
+            };
+            const auto readAt = [&] (int c, double position, bool back) noexcept
             {
                 const auto index = (juce::int64) position;
                 const auto t = (float) (position - (double) index);
-                return hermite (at (c, index - 1), at (c, index), at (c, index + 1), at (c, index + 2), t);
+                return hermite (at (c, index - 1, back), at (c, index, back), at (c, index + 1, back), at (c, index + 2, back), t);
             };
+            constexpr int l = 0, r = 1;
+            const auto read = [&] (int c, double position) noexcept { return readAt (c, position, false); };
             const auto wheelStep = (v.wheelTarget - v.wheelGain) / (float) numSamples;
             const auto tilted = v.tilted;
             const auto tiltAt = [&v] (double position) noexcept
@@ -1004,6 +1103,7 @@ namespace sampler
                 if (done)
                 {
                     v.active = false;
+                    endStream (v);
                     break;
                 }
                 auto x = read (l, v.position) * v.tiltGain;
@@ -1016,8 +1116,8 @@ namespace sampler
                     const auto norm = 1.0f / std::sqrt (juce::jmax (1.0e-6f, w1 * w1 + w2 * w2 + 2.0f * v.likeness * w1 * w2));
                     const auto from = w1 * norm, to = w2 * norm;
                     const auto back = v.position - (double) (v.loopEnd - v.loopStart);
-                    x = x * from + read (l, back) * to;
-                    y = stereo ? y * from + read (r, back) * to : x;
+                    x = x * from + readAt (l, back, true) * to;
+                    y = stereo ? y * from + readAt (r, back, true) * to : x;
                 }
                 // 0.9.0: its stereo width, then its filters.
                 if (stereo && width != 1.0f)
@@ -1077,8 +1177,12 @@ namespace sampler
                 if (v.looping && v.position >= (double) v.loopEnd)
                 {
                     v.position -= (double) (v.loopEnd - v.loopStart);
+                    v.lap += v.loopEnd - v.loopStart;
                     if (v.stopAtWrap)
+                    {
                         v.looping = v.stopAtWrap = false;
+                        leaveLoop (v);
+                    }
                     if (tilted)
                         v.tiltGain = tiltAt (v.position);
                 }
@@ -1096,6 +1200,8 @@ namespace sampler
             {
                 v.wheelGain = v.wheelTarget;
                 v.controlGain = v.controlTarget;
+                if (v.stream >= 0 && streamer != nullptr)   // 0.11.0: the ring may reuse what's behind it
+                    streamer->consumed (v.stream, (juce::int64) v.position + v.lap - 2);
             }
         }
     }

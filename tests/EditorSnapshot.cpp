@@ -20,6 +20,7 @@
 //                                    robins over C1 to C6, as "Demo Strings.sfz"), loaded
 //   PARAGON_SNAPSHOT_SFZ=<file>      instead, an SFZ from your computer (none ship with the tests), loaded
 //   PARAGON_SNAPSHOT_SECTION=<file>,<file>...   instead, a section of these SFZ files, split over the keys
+//   PARAGON_SNAPSHOT_STREAM=0                   load them whole into memory (0.11.0: long recordings stream)
 //   PARAGON_SNAPSHOT_SWITCH=<key>    with its keyswitch `key` (a MIDI note number) chosen
 //   PARAGON_SNAPSHOT_ROUTING=1       the INSTRUMENT page's rack on its ROUTING page (0.5.0)
 //   PARAGON_SNAPSHOT_REGIONS=1       the region map instead of the instrument's picture (0.5.0)
@@ -104,6 +105,8 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
     const auto demo = env ("PARAGON_SNAPSHOT_INSTRUMENT") == "1" || env ("PARAGON_SNAPSHOT_RACK") == "1" || page == "presets";
     if (demo)
         processor.setProgram (demoInstrument(), "C:/Libraries/Demo Orchestra/Strings/Demo Strings.sfz");
+    if (env ("PARAGON_SNAPSHOT_STREAM") == "0")
+        processor.setStreamFromDisk (false);   // 0.11.0: whole recordings in memory, as before
     if (const auto sfz = env ("PARAGON_SNAPSHOT_SFZ"); sfz.isNotEmpty())
     {
         processor.loadInstrument (juce::File (sfz));

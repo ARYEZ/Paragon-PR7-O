@@ -725,7 +725,13 @@ void InstrumentPage::updateInfo()
                          ? " (" + articulationName (shown->articulations[(size_t) shown->articulationOf (keyswitch)]).toLowerCase() + ")"
                          : juce::String())
                  << "\n";
-        text << "MEMORY    " << juce::String ((double) shown->bytes / (1024.0 * 1024.0), 1) << " MB (whole samples, in memory)\n";
+        // 0.11.0: what's in memory, and the rest read from disk as it plays.
+        const auto mb = [] (size_t bytes) { return juce::String ((double) bytes / (1024.0 * 1024.0), 1) + " MB"; };
+        if (shown->wholeBytes > shown->bytes)
+            text << "MEMORY    " << mb (shown->bytes) << " in memory, " << mb (shown->wholeBytes - shown->bytes)
+                 << " streamed from disk as it plays\n";
+        else
+            text << "MEMORY    " << mb (shown->bytes) << " (whole samples, in memory)\n";
         auto heldRegions = 0, autoLoops = 0, fileLoops = 0;
         for (const auto& r : shown->regions)
         {

@@ -145,6 +145,7 @@ namespace sampler
         juce::StringArray problems;   // files missing or unreadable, regions skipped
         juce::StringArray unread;     // opcodes read nowhere yet, with how many regions use each ("loop_mode=loop_continuous (12)")
         size_t bytes = 0;             // audio held in memory
+        size_t wholeBytes = 0;        // 0.11.0: what it would be whole (set by streamSamples; 0: as bytes)
         int numFiles = 0;
         // 0.2.0, KEYSWITCHES: the keys that switch (-1: none), the one it starts on, and each switch's name (in the order
         // the file gives them; one entry per sw_last range).
@@ -193,6 +194,13 @@ namespace sampler
         // A note's number from SFZ's text: a number or a name (c4 = 60, c#4, db4).
         int noteNumber (const juce::String& text);
     }
+
+    // 0.11.0, DISK STREAMING: each long recording made streamed (DiskStreamer.h), keeping in memory only what its
+    // regions need kept (keptInMemory: `headSeconds` from each place a voice can start without warning). Call after
+    // the program's regions are prepared; recordings already streamed are left as they are.
+    inline constexpr double streamHeadSeconds = 0.5;
+    std::vector<std::pair<juce::int64, juce::int64>> keptInMemory (const Region&, double headSeconds = streamHeadSeconds);
+    void streamSamples (Program&, double headSeconds = streamHeadSeconds);
 
     // An instrument of one sample over the whole keyboard (its root key `keyCenter`). Tests, and a single WAV loaded.
     std::shared_ptr<Program> programFrom (std::shared_ptr<const Sample> sample, int keyCenter = 60);

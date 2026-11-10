@@ -1,9 +1,70 @@
 #include "dsp/sampler/DiskStreamer.h"
 
-#include <limits>
+#include <algorithm>
 
 namespace sampler
 {
+    juce::int64 StreamSource::residentEnd (juce::int64 frame) const noexcept
+    {
+        for (const auto& [a, b] : resident)
+            if (frame < b)
+                return frame >= a ? b : frame;
+        return frame;
+    }
+
+    juce::int64 StreamSource::nextResident (juce::int64 frame) const noexcept
+    {
+        for (const auto& [a, b] : resident)
+            if (frame < b)
+                return std::max (a, frame);
+        return length;
+    }
+
+    namespace
+    {
+        bool loops (const StreamPlan& plan) noexcept
+        {
+            return plan.looping && plan.loopEnd > plan.loopStart && plan.start < plan.loopEnd;
+        }
+
+        // How many timeline frames from `t` map to the file's frames in a row (to the next going-back).
+        juce::int64 untilBreak (const StreamPlan& plan, juce::int64 t, juce::int64 exitAt) noexcept
+        {
+            if (! loops (plan) || t >= exitAt)
+                return Streamer::never;
+            if (t < plan.loopEnd)
+                return plan.loopEnd - t;
+            const auto length = plan.loopEnd - plan.loopStart;
+            return length - (t - plan.loopEnd) % length;
+        }
+
+        // Where the timeline ends (the file's end reached; never while it goes round).
+        juce::int64 timelineEnd (const StreamPlan& plan, juce::int64 length, juce::int64 exitAt) noexcept
+        {
+            if (! loops (plan))
+                return length;
+            if (exitAt == Streamer::never)
+                return Streamer::never;
+            return exitAt + (length - plan.loopEnd);
+        }
+
+        // The crossfade's zone (file frames whose back reads the voice may ask for), while it still goes round.
+        bool inBackZone (const StreamPlan& plan, juce::int64 fileFrame, juce::int64 t, juce::int64 exitAt) noexcept
+        {
+            return loops (plan) && plan.crossfade > 0 && t < exitAt
+                && fileFrame >= plan.loopEnd - plan.crossfade - 4 && fileFrame < plan.loopEnd;
+        }
+    }
+
+    juce::int64 Streamer::fileFrame (const StreamPlan& plan, juce::int64 t, juce::int64 exitAt) noexcept
+    {
+        if (! loops (plan) || t < plan.loopEnd)
+            return t;
+        if (t >= exitAt)
+            return plan.loopEnd + (t - exitAt);
+        return plan.loopStart + (t - plan.loopEnd) % (plan.loopEnd - plan.loopStart);
+    }
+
     class Streamer::Thread final : public juce::Thread
     {
     public:
@@ -18,16 +79,15 @@ namespace sampler
                     const auto state = stream->state.load (std::memory_order_acquire);
                     if (state == 3)
                     {
-                        // Freed by the audio thread: ready for the next hit.
+                        // Let go by the audio thread: ready for the next voice.
                         const std::scoped_lock lock (stream->fillLock);
                         stream->source = nullptr;
-                        stream->attached.store (0);
                         stream->state.store (0, std::memory_order_release);
                     }
                     else if (state == 2)
-                        busy = owner.fill (*stream, false) || busy;
+                        busy = owner.fill (*stream) || busy;
                 }
-                // Nothing to read: rest a little (a new hit plays its head, 0.2 s, while the first read comes).
+                // Nothing to read: rest a little (a new note plays from memory, 0.5 s, while its first read comes).
                 if (! busy)
                     wait (2);
             }
@@ -43,9 +103,10 @@ namespace sampler
         for (int k = 0; k < maxStreams; ++k)
         {
             auto s = std::make_unique<Stream>();
-            s->ring.assign ((size_t) maxOutputs * 2 * ringFrames, 0.0f);
+            s->ring.assign ((size_t) 4 * ringFrames, 0.0f);
             streams.push_back (std::move (s));
         }
+        chunk.setSize (2, chunkFrames);
         thread = std::make_unique<Thread> (*this);
         thread->startThread (juce::Thread::Priority::high);
     }
@@ -55,7 +116,36 @@ namespace sampler
         thread->stopThread (2000);
     }
 
-    int Streamer::claim (const StreamSource& source) noexcept
+    juce::int64 Streamer::pastResident (const Stream& s, juce::int64 from, juce::int64 exitAt) const noexcept
+    {
+        // The first timeline frame from `from` on not held in memory (never through the crossfade's zone: its back
+        // reads come from the ring).
+        auto w = from;
+        const auto end = timelineEnd (s.plan, s.source->length, exitAt);
+        for (int guard = 0; guard < 64 && w < end; ++guard)
+        {
+            const auto a = fileFrame (s.plan, w, exitAt);
+            if (inBackZone (s.plan, a, w, exitAt))
+                break;
+            const auto e = s.source->residentEnd (a);
+            if (e <= a)
+                break;
+            auto step = std::min ({ e - a, untilBreak (s.plan, w, exitAt), end - w });
+            if (loops (s.plan) && w < exitAt && s.plan.crossfade > 0 && a < s.plan.loopEnd - s.plan.crossfade - 4)
+                step = std::min (step, s.plan.loopEnd - s.plan.crossfade - 4 - a);
+            if (step <= 0)
+                break;
+            w += step;
+        }
+        return w;
+    }
+
+    void Streamer::skipResident (Stream& s, juce::int64 exitAt)
+    {
+        s.written.store (pastResident (s, s.written.load (std::memory_order_relaxed), exitAt), std::memory_order_release);
+    }
+
+    int Streamer::claim (const StreamSource& source, const StreamPlan& plan) noexcept
     {
         for (int k = 0; k < maxStreams; ++k)
         {
@@ -64,85 +154,76 @@ namespace sampler
             if (! s.state.compare_exchange_strong (expected, 1, std::memory_order_acq_rel))
                 continue;
             s.source = &source;
-            s.written.store (source.headFrames, std::memory_order_relaxed);
-            for (auto& r : s.read)
-                r.store (source.headFrames, std::memory_order_relaxed);
-            s.attached.store (0, std::memory_order_relaxed);
+            s.plan = plan;
+            s.plan.start = std::max<juce::int64> (0, plan.start);
+            s.written.store (s.plan.start, std::memory_order_relaxed);
+            s.need.store (s.plan.start, std::memory_order_relaxed);
+            s.exitAt.store (never, std::memory_order_relaxed);
+            s.exitApplied.store (never, std::memory_order_relaxed);
+            skipResident (s, never);
             s.state.store (2, std::memory_order_release);
             return k;
         }
         return -1;
     }
 
-    void Streamer::attach (int stream, int output) noexcept
+    void Streamer::consumed (int stream, juce::int64 timeline) noexcept
     {
-        if (stream >= 0 && stream < maxStreams && output >= 0 && output < maxOutputs)
-            streams[(size_t) stream]->attached.fetch_or (1u << output);
-    }
-
-    void Streamer::consumed (int stream, int output, juce::int64 frame) noexcept
-    {
-        if (stream >= 0 && stream < maxStreams && output >= 0 && output < maxOutputs)
-            streams[(size_t) stream]->read[(size_t) output].store (frame, std::memory_order_release);
-    }
-
-    float Streamer::sample (int stream, int output, int channel, juce::int64 frame, bool waitForDisk) noexcept
-    {
-        if (stream < 0 || stream >= maxStreams || output < 0 || output >= maxOutputs)
-            return 0.0f;
-        auto& s = *streams[(size_t) stream];
-        const auto* source = s.source;
-        if (source == nullptr || frame < source->headFrames || frame >= source->length)
-            return 0.0f;
-        auto written = s.written.load (std::memory_order_acquire);
-        if (frame >= written)
+        if (stream >= 0 && stream < maxStreams)
         {
-            if (! waitForDisk)
-            {
-                underruns.fetch_add (1, std::memory_order_relaxed);
-                return 0.0f;
-            }
-            // Bouncing: read it now (the disk thread may be at it too: the stream's lock keeps them apart). PR7-O 0.1.0
-            // fix: `fill` also says false when the disk thread has just filled the ring itself (nothing left to do), so
-            // where the ring is filled to is read again after the loop, not taken from before it (that stale value made
-            // about one run in three of the streaming test return silence for audio that was there).
-            while (frame >= (written = s.written.load (std::memory_order_acquire)) && written < source->length)
-                if (! fill (s, false))
-                    break;
-            written = s.written.load (std::memory_order_acquire);
-            if (frame >= written)
-                return 0.0f;
+            auto& need = streams[(size_t) stream]->need;
+            if (timeline > need.load (std::memory_order_relaxed))
+                need.store (timeline, std::memory_order_release);
         }
-        const auto index = (size_t) ((frame - source->headFrames) & (ringFrames - 1));
-        return s.ring[((size_t) output * 2 + (size_t) juce::jlimit (0, 1, channel)) * ringFrames + index];
     }
 
-    int Streamer::span (int stream, int output, juce::int64 frame, const float*& left, const float*& right) noexcept
+    void Streamer::stopLooping (int stream, juce::int64 at) noexcept
     {
-        if (stream < 0 || stream >= maxStreams || output < 0 || output >= maxOutputs)
+        if (stream >= 0 && stream < maxStreams)
+            streams[(size_t) stream]->exitAt.store (at, std::memory_order_release);
+    }
+
+    int Streamer::span (int stream, juce::int64 t, bool back, const float*& left, const float*& right) noexcept
+    {
+        if (stream < 0 || stream >= maxStreams)
             return 0;
         auto& s = *streams[(size_t) stream];
-        const auto* source = s.source;
-        if (source == nullptr || frame < source->headFrames || frame >= source->length)
+        if (s.state.load (std::memory_order_acquire) != 2 || s.source == nullptr)
             return 0;
-        const auto written = juce::jmin (s.written.load (std::memory_order_acquire), source->length);
-        if (frame >= written)
+        const auto exitAt = s.exitAt.load (std::memory_order_acquire);
+        if (t >= exitAt && s.exitApplied.load (std::memory_order_acquire) != exitAt)
+            return 0;   // the stream hasn't caught up with the loop's stopping yet
+        const auto written = s.written.load (std::memory_order_acquire);
+        // (a frame from where the voice reads on that isn't in memory is never further back than the ring's room)
+        if (t >= written || t < s.need.load (std::memory_order_acquire))
             return 0;
-        const auto index = (juce::int64) ((frame - source->headFrames) & (ringFrames - 1));
-        const auto n = juce::jmin (written - frame, (juce::int64) ringFrames - index);
-        left = s.ring.data() + ((size_t) output * 2) * ringFrames + (size_t) index;
-        right = s.ring.data() + ((size_t) output * 2 + 1) * ringFrames + (size_t) index;
-        return (int) juce::jmin (n, (juce::int64) std::numeric_limits<int>::max());
+        const auto index = (size_t) (t & (ringFrames - 1));
+        auto n = std::min<juce::int64> (written - t, (juce::int64) ringFrames - (juce::int64) index);
+        n = std::min (n, untilBreak (s.plan, t, exitAt));
+        const auto frame = fileFrame (s.plan, t, exitAt) - (back ? s.plan.loopEnd - s.plan.loopStart : 0);
+        n = std::min (n, s.source->nextResident (frame) - frame);
+        if (n <= 0)
+            return 0;
+        const auto* ring = s.ring.data() + (back ? 2 * (size_t) ringFrames : 0);
+        left = ring + index;
+        right = ring + (size_t) ringFrames + index;
+        return (int) n;
     }
 
-    void Streamer::release (const std::array<bool, maxStreams>& inUse) noexcept
+    bool Streamer::fillNow (int stream) noexcept
     {
-        for (int k = 0; k < maxStreams; ++k)
-            if (! inUse[(size_t) k])
-            {
-                auto expected = 2;
-                streams[(size_t) k]->state.compare_exchange_strong (expected, 3, std::memory_order_acq_rel);
-            }
+        if (stream < 0 || stream >= maxStreams)
+            return false;
+        return fill (*streams[(size_t) stream]);
+    }
+
+    void Streamer::release (int stream) noexcept
+    {
+        if (stream >= 0 && stream < maxStreams)
+        {
+            auto expected = 2;
+            streams[(size_t) stream]->state.compare_exchange_strong (expected, 3, std::memory_order_acq_rel);
+        }
     }
 
     int Streamer::getActiveStreams() const noexcept
@@ -159,23 +240,20 @@ namespace sampler
         while (juce::Time::getMillisecondCounter() < until)
         {
             auto filled = true;
-            for (const auto& s : streams)
+            for (auto& s : streams)
             {
+                const std::scoped_lock lock (s->fillLock);
                 if (s->state.load (std::memory_order_acquire) != 2 || s->source == nullptr)
                     continue;
-                // Full: all of it read, or no room for another chunk past its slowest voice.
-                const auto written = s->written.load (std::memory_order_acquire);
-                auto slowest = (juce::int64) s->source->headFrames;
-                const auto attached = s->attached.load (std::memory_order_acquire);
-                auto any = false;
-                for (int o = 0; o < maxOutputs; ++o)
-                    if ((attached & (1u << o)) != 0)
-                    {
-                        const auto r = s->read[(size_t) o].load (std::memory_order_acquire);
-                        slowest = any ? juce::jmin (slowest, r) : r;
-                        any = true;
-                    }
-                if (written < s->source->length && slowest + ringFrames - written >= chunkFrames)
+                const auto exitAt = s->exitAt.load();
+                if (exitAt != s->exitApplied.load())
+                {
+                    filled = false;
+                    continue;
+                }
+                const auto written = s->written.load();
+                if (written < timelineEnd (s->plan, s->source->length, exitAt)
+                    && pastResident (*s, std::min (s->need.load(), written), exitAt) + ringFrames - written >= chunkFrames)
                     filled = false;
             }
             if (filled)
@@ -193,8 +271,7 @@ namespace sampler
         std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
         if (reader == nullptr)
             return nullptr;
-        // At most 192 files open (0.33.0: a pack's hit can be 7 files, one a mic; macOS allows 256 a program by
-        // default): the one used longest ago closes.
+        // At most 192 files open (macOS allows 256 a program by default): the one opened longest ago closes.
         if (readerOrder.size() >= 192)
         {
             readers.erase (readerOrder.front());
@@ -204,79 +281,77 @@ namespace sampler
         return (readers[key] = std::move (reader)).get();
     }
 
-    bool Streamer::fill (Stream& s, bool)
+    bool Streamer::readInto (const StreamSource& source, juce::int64 fileStart, int frames, float* left, float* right, size_t ringStart)
+    {
+        // (with readersLock held) The file's frames into the ring from ringStart (wrapping); silence where the file
+        // can't be read or ends.
+        auto* reader = readerFor (source.file);
+        chunk.clear();
+        if (reader != nullptr && fileStart >= 0 && fileStart < reader->lengthInSamples)
+        {
+            const auto n = (int) std::min<juce::int64> (frames, reader->lengthInSamples - fileStart);
+            reader->read (&chunk, 0, n, fileStart, true, reader->numChannels > 1);
+        }
+        const auto* l = chunk.getReadPointer (0);
+        const auto* r = chunk.getReadPointer (source.numChannels > 1 && reader != nullptr && reader->numChannels > 1 ? 1 : 0);
+        for (int i = 0; i < frames; ++i)
+        {
+            const auto at = (ringStart + (size_t) i) & (size_t) (ringFrames - 1);
+            left[at] = l[i];
+            right[at] = r[i];
+        }
+        return reader != nullptr;
+    }
+
+    bool Streamer::fill (Stream& s)
     {
         const std::scoped_lock lock (s.fillLock);
         if (s.state.load (std::memory_order_acquire) != 2 || s.source == nullptr)
             return false;
         const auto& source = *s.source;
+        // The loop stopped going round: the frames read past where it leaves are the wrong ones (going back round);
+        // read from there again, past the loop's end.
+        const auto exitAt = s.exitAt.load (std::memory_order_acquire);
+        auto progressed = false;
+        if (exitAt != s.exitApplied.load (std::memory_order_relaxed))
+        {
+            if (s.written.load (std::memory_order_relaxed) > exitAt)
+                s.written.store (exitAt, std::memory_order_release);
+            skipResident (s, exitAt);
+            s.exitApplied.store (exitAt, std::memory_order_release);
+            progressed = true;
+        }
         const auto written = s.written.load (std::memory_order_acquire);
-        if (written >= source.length)
-            return false;
-        // Room: the ring holds ringFrames past the slowest of the voices playing it (none yet: from the head).
-        auto slowest = written;
-        const auto attached = s.attached.load (std::memory_order_acquire);
-        auto any = false;
-        for (int o = 0; o < maxOutputs; ++o)
-            if ((attached & (1u << o)) != 0)
-            {
-                const auto r = s.read[(size_t) o].load (std::memory_order_acquire);
-                slowest = any ? juce::jmin (slowest, r) : r;
-                any = true;
-            }
-        if (! any)
-            slowest = source.headFrames;
-        const auto room = slowest + ringFrames - written;
-        const auto frames = (int) juce::jmin<juce::int64> (chunkFrames, source.length - written, room);
+        const auto end = timelineEnd (s.plan, source.length, exitAt);
+        // Room: the ring holds ringFrames from the first frame the voice will want from it (frames held in memory
+        // take no room: their places in the ring are never read).
+        const auto room = pastResident (s, std::min (s.need.load (std::memory_order_acquire), written), exitAt) + ringFrames - written;
+        const auto frames = (int) std::min ({ (juce::int64) chunkFrames, room, untilBreak (s.plan, written, exitAt), end - written });
         if (frames <= 0)
-            return false;
-
+            return progressed;
+        const auto a = fileFrame (s.plan, written, exitAt);
         {
             const std::scoped_lock readerLock (readersLock);
-            // Into each mic's ring, as the recipe says: cleared, then each file read once (one, or one a mic) and its
-            // parts added.
-            const auto start = (size_t) ((written - source.headFrames) & (ringFrames - 1));
-            for (int o = 0; o < source.numOutputs && o < maxOutputs; ++o)
-                for (int c = 0; c < 2; ++c)
-                {
-                    auto* ring = s.ring.data() + ((size_t) o * 2 + (size_t) c) * ringFrames;
-                    for (int i = 0; i < frames; ++i)
-                        ring[(start + (size_t) i) & (ringFrames - 1)] = 0.0f;
-                }
-            const auto numFiles = juce::jmax (1, (int) source.files.size());
-            auto anyRead = false;
-            for (int f = 0; f < numFiles; ++f)
+            auto* ring = s.ring.data();
+            const auto start = (size_t) (written & (ringFrames - 1));
+            if (! readInto (source, a, frames, ring, ring + ringFrames, start))
             {
-                if (std::none_of (source.parts.begin(), source.parts.end(), [f] (const StreamSource::Part& p) { return p.fileIndex == f; }))
-                    continue;
-                auto* reader = readerFor (source.fileAt (f));
-                if (reader == nullptr)
-                    continue;   // gone: that mic silent from here
-                anyRead = true;
-                const auto channels = (int) reader->numChannels;
-                if (chunk.getNumChannels() < channels || chunk.getNumSamples() < chunkFrames)
-                    chunk.setSize (juce::jmax (channels, chunk.getNumChannels()), chunkFrames, false, false, true);
-                chunk.clear();
-                if (written < reader->lengthInSamples)
-                    reader->read (&chunk, 0, (int) juce::jmin<juce::int64> (frames, reader->lengthInSamples - written), written, true, true);
-                for (const auto& part : source.parts)
-                {
-                    if (part.fileIndex != f || part.fileChannel < 0 || part.fileChannel >= channels || part.output < 0 || part.output >= maxOutputs)
-                        continue;
-                    const auto* from = chunk.getReadPointer (part.fileChannel);
-                    auto* ring = s.ring.data() + ((size_t) part.output * 2 + (size_t) juce::jlimit (0, 1, part.channel)) * ringFrames;
-                    for (int i = 0; i < frames; ++i)
-                        ring[(start + (size_t) i) & (ringFrames - 1)] += from[i] * part.gain;
-                }
-            }
-            if (! anyRead)
-            {
-                // Every file's gone: silence from here (the hit ends at its head's end, in effect).
-                s.written.store (source.length, std::memory_order_release);
+                // The file's gone: silence from here (the note ends where memory does, in effect).
+                s.written.store (end == never ? written + frames : end, std::memory_order_release);
                 return false;
+            }
+            // The crossfade's back reads: the same timeline frames, a loop's length earlier in the file.
+            if (loops (s.plan) && s.plan.crossfade > 0 && written < exitAt)
+            {
+                const auto lo = std::max (a, s.plan.loopEnd - s.plan.crossfade - 4);
+                const auto hi = std::min (a + frames, s.plan.loopEnd);
+                if (hi > lo)
+                    readInto (source, lo - (s.plan.loopEnd - s.plan.loopStart), (int) (hi - lo), ring + 2 * (size_t) ringFrames,
+                              ring + 3 * (size_t) ringFrames, (start + (size_t) (lo - a)) & (size_t) (ringFrames - 1));
             }
         }
         s.written.store (written + frames, std::memory_order_release);
+        skipResident (s, exitAt);
         return true;
     }
 }
