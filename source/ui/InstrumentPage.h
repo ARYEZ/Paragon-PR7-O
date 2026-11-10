@@ -134,8 +134,8 @@ private:
     StageView stageView;
     juce::TextButton showPicture { "INSTRUMENT" }, showStage { "STAGE" }, showRegions { "REGIONS" };
     bool regionsChosen = false, stageChosen = false;
-    std::vector<std::unique_ptr<ParamControl>> playControls, sendControls, stageControls;   // the rack's knobs
-    std::unique_ptr<ParamControl> dynamicsMenu, insertMenu, roomMenu;                       // the rack's menus
+    std::vector<std::unique_ptr<ParamControl>> playControls, sendControls, stageControls, ensembleControls;   // the rack's knobs
+    std::unique_ptr<ParamControl> dynamicsMenu, insertMenu, roomMenu, doubleMenu;                             // the rack's menus
     juce::TextButton stageOnKey, resetSeatsKey;   // 0.8.0: the STAGE page's keys
     std::unique_ptr<juce::ParameterAttachment> stageOnAttachment;
     juce::TextButton autoSustainKey;

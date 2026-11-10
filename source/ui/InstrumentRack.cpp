@@ -45,7 +45,7 @@ namespace
 InstrumentRack::InstrumentRack()
 {
     setOpaque (false);
-    for (auto* key : { &playingKey, &routingKey, &stageKey, &loadKey, &sectionKey, &clearKey })
+    for (auto* key : { &playingKey, &routingKey, &stageKey, &ensembleKey, &loadKey, &sectionKey, &clearKey })
     {
         key->getProperties().set (ParagonLookAndFeel::pedalButtonProperty, true);   // a small key, its stripe lit when on
         addAndMakeVisible (*key);
@@ -59,6 +59,9 @@ InstrumentRack::InstrumentRack()
     stageKey.setComponentID ("rackStage");
     stageKey.setTooltip ("STAGE: where it sits (MIC, ROOM LEVEL, DECAY, SPREAD, the ROOM, STAGE on); drag the parts on the STAGE picture");
     stageKey.onClick = [this] { setPage (Page::stage); };
+    ensembleKey.setComponentID ("rackEnsemble");
+    ensembleKey.setTooltip ("ENSEMBLE: a bigger section and doubled lines (PLAYERS, DETUNE, TIMING, DOUBLE, DOUBLE LEVEL)");
+    ensembleKey.onClick = [this] { setPage (Page::ensemble); };
     setPage (Page::playing);
 }
 
@@ -68,6 +71,7 @@ void InstrumentRack::resized()
     playingKey.setBounds (pageSwitchCell (0));
     routingKey.setBounds (pageSwitchCell (1));
     stageKey.setBounds (pageSwitchCell (2));
+    ensembleKey.setBounds (pageSwitchCell (3));
     loadKey.setBounds (instrumentKeyCell (0));
     sectionKey.setBounds (instrumentKeyCell (1));
     clearKey.setBounds (instrumentKeyCell (2));
@@ -86,6 +90,7 @@ void InstrumentRack::setPage (Page newPage)
     playingKey.setToggleState (newPage == Page::playing, juce::dontSendNotification);
     routingKey.setToggleState (newPage == Page::routing, juce::dontSendNotification);
     stageKey.setToggleState (newPage == Page::stage, juce::dontSendNotification);
+    ensembleKey.setToggleState (newPage == Page::ensemble, juce::dontSendNotification);
     if (newPage == page)
         return;
     page = newPage;
@@ -118,8 +123,8 @@ juce::Rectangle<int> InstrumentRack::pageSwitchCell (int index) const
 {
     auto area = badgeColumn();
     area = area.removeFromBottom (58.0f).withTrimmedBottom (14.0f);   // names stamped under them
-    const auto width = area.getWidth() / 3.0f;   // (0.8.0: three)
-    return area.withX (area.getX() + width * (float) index).withWidth (width).withSizeKeepingCentre (48.0f, 26.0f).toNearestInt();
+    const auto width = area.getWidth() / 4.0f;   // (0.8.0: three; 0.10.0: four)
+    return area.withX (area.getX() + width * (float) index).withWidth (width).withSizeKeepingCentre (40.0f, 26.0f).toNearestInt();
 }
 
 juce::Rectangle<int> InstrumentRack::screenArea() const { return displayColumn().withHeight (screenHeight).toNearestInt(); }
@@ -179,11 +184,14 @@ void InstrumentRack::paint (juce::Graphics& g)
     // The badge: PARAGON over the PR7-O mark, what it is printed in red; the PAGE keys under it.
     PedalBody::paintBadge (g, badgeColumn().withHeight (82.0f).translated (2.0f, 2.0f), "ORCHESTRA INSTRUMENT");
     {
-        const auto a = pageSwitchCell (0).toFloat(), b = pageSwitchCell (1).toFloat(), c = pageSwitchCell (2).toFloat();
-        bracket (g, a, c, "PAGE");
-        stamped (g, "PLAYING", a.translated (0.0f, a.getHeight() + 2.0f).withHeight (12.0f).expanded (8.0f, 0.0f), 7.5f);
-        stamped (g, "ROUTING", b.translated (0.0f, b.getHeight() + 2.0f).withHeight (12.0f).expanded (8.0f, 0.0f), 7.5f);
-        stamped (g, "STAGE", c.translated (0.0f, c.getHeight() + 2.0f).withHeight (12.0f).expanded (8.0f, 0.0f), 7.5f);
+        const auto a = pageSwitchCell (0).toFloat(), d = pageSwitchCell (3).toFloat();
+        bracket (g, a, d, "PAGE");
+        const char* names[] = { "PLAYING", "ROUTING", "STAGE", "ENSEMBLE" };
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto key = pageSwitchCell (i).toFloat();
+            stamped (g, names[i], key.translated (0.0f, key.getHeight() + 2.0f).withHeight (12.0f).expanded (6.0f, 0.0f), 6.5f);
+        }
     }
 
     // The printed lines between the sections.
@@ -210,20 +218,20 @@ void InstrumentRack::paint (juce::Graphics& g)
     // The page's name, over it.
     auto title = pageArea().withY (content().getY()).withHeight (titleHeight);
     g.setFont (font (15.0f, juce::Font::bold | juce::Font::italic));
-    ParagonLookAndFeel::drawStampedText (g, page == Page::playing ? "PLAYING" : page == Page::routing ? "ROUTING" : "STAGE",
-                                         title.removeFromLeft (110.0f), juce::Justification::centredLeft, Finish::ink());
+    ParagonLookAndFeel::drawStampedText (g, page == Page::playing ? "PLAYING" : page == Page::routing ? "ROUTING" : page == Page::stage ? "STAGE" : "ENSEMBLE",
+                                         title.removeFromLeft (124.0f), juce::Justification::centredLeft, Finish::ink());
     g.setColour (Finish::printedRed());
     g.setFont (font (8.0f));
     g.drawText (page == Page::playing ? "HOW THE INSTRUMENT PLAYS" : page == Page::routing ? "WHERE IT GOES: THE SENDS AND AN INSERT BUS"
-                                                                                            : "WHERE IT SITS: ITS SEATS, THE MICS AND THE ROOM",
+              : page == Page::stage ? "WHERE IT SITS: ITS SEATS, THE MICS AND THE ROOM" : "HOW BIG IT IS: MORE PLAYERS, LINES DOUBLED IN OCTAVES",
                 title, juce::Justification::centredLeft, false);
 
     // The page's right-hand column: its menu's name and screen (the menu sits on it); PLAYING's AUTO SUSTAIN key's name.
     const auto menu = menuCell (0).toFloat();
-    stamped (g, page == Page::playing ? "DYNAMICS" : page == Page::routing ? "INSERT BUS" : "ROOM",
+    stamped (g, page == Page::playing ? "DYNAMICS" : page == Page::routing ? "INSERT BUS" : page == Page::stage ? "ROOM" : "DOUBLE",
              menu.withHeight (12.0f).translated (0.0f, -15.0f), 8.0f, juce::Justification::centredLeft);
     LedDisplay::paintScreen (g, menu, screenSize);
-    if (page != Page::routing)
+    if (page == Page::playing || page == Page::stage)
     {
         for (int i = 0; i < 2; ++i)
         {

@@ -292,6 +292,10 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     add (stageControls, ParamIDs::stageRoomLevel, "ROOM LEVEL", "The room's reflections and tail, louder or quieter than they'd be");
     add (stageControls, ParamIDs::stageDecay, "DECAY", "How long the room's tail rings, times its own");
     add (stageControls, ParamIDs::stageSpread, "SPREAD", "How wide the seats spread across the stage: 0, all in the middle; 100%, as placed; more, wider");
+    add (ensembleControls, ParamIDs::ensPlayers, "PLAYERS", "How many players each note has: x1 as recorded; more, copies of it a little out of tune, early or late and spread across, for a bigger section (as loud as before)");
+    add (ensembleControls, ParamIDs::ensDetune, "DETUNE", "How far out of tune the extra players are, at most (cents: 100 to a semitone)");
+    add (ensembleControls, ParamIDs::ensTiming, "TIMING", "How early or late the extra players come in, at most");
+    add (ensembleControls, ParamIDs::ensDoubleLevel, "DOUBLE LEVEL", "How loud the doubled octaves are, against the note played");
     add (sendControls, ParamIDs::instSendReverb, "SEND REVERB", "How much of the instrument goes to the REVERB (FX page: switch it on there)");
     const auto menu = [this, &state] (const char* id, const char* label, const char* tip)
     {
@@ -304,6 +308,7 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     dynamicsMenu = menu (ParamIDs::instDynamics, "DYNAMICS", "VELOCITY: how hard you play picks the recording (as the file says). MOD WHEEL: "
                                                              "a held note (sustain, tremolo) starts every dynamic at once and the mod wheel "
                                                              "crossfades between them, soft to loud, as you hold it; shorts still go by velocity");
+    doubleMenu = menu (ParamIDs::ensDouble, "DOUBLE", "Every note also an octave up, an octave down, or both, as orchestrators double a line; in a section, played by whichever part has that key");
     roomMenu = menu (ParamIDs::stageRoom, "ROOM", "The room the stage is in: a studio (small, quick), a scoring stage, a concert hall, a cathedral (big, long)");
     insertMenu = menu (ParamIDs::instInsert, "INSERT BUS", "Play it through an insert bus's DRIVE, GLITCH, MOD and LO-FI (FX page, INSERTS). "
                                                            "On a bus, the bus's own sends are used instead of these");
@@ -364,7 +369,7 @@ void InstrumentPage::showRackPage()
 {
     const auto page = rack.getPage();
     const auto playing = page == InstrumentRack::Page::playing, routing = page == InstrumentRack::Page::routing,
-               onStage = page == InstrumentRack::Page::stage;
+               onStage = page == InstrumentRack::Page::stage, ensemble = page == InstrumentRack::Page::ensemble;
     for (auto& c : playControls)
         c->setVisible (playing);
     dynamicsMenu->setVisible (playing);
@@ -378,6 +383,9 @@ void InstrumentPage::showRackPage()
     roomMenu->setVisible (onStage);
     stageOnKey.setVisible (onStage);
     resetSeatsKey.setVisible (onStage);
+    for (auto& c : ensembleControls)
+        c->setVisible (ensemble);
+    doubleMenu->setVisible (ensemble);
 }
 
 void InstrumentPage::chooseRegions (bool regions)
@@ -807,6 +815,9 @@ void InstrumentPage::resized()
     for (int i = 0; i < (int) stageControls.size(); ++i)
         stageControls[(size_t) i]->setBounds (rack.routingKnobCell (i));
     roomMenu->setBounds (rack.menuCell (0).reduced (4, 2));
+    for (int i = 0; i < (int) ensembleControls.size(); ++i)
+        ensembleControls[(size_t) i]->setBounds (rack.routingKnobCell (i));
+    doubleMenu->setBounds (rack.menuCell (0).reduced (4, 2));
     stageOnKey.setBounds (rack.pageKeyCell (0));
     resetSeatsKey.setBounds (rack.pageKeyCell (1));
 }
