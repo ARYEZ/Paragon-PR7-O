@@ -15,7 +15,8 @@ proportions; the bass with sloping shoulders); no maker's instrument traced.
 | `trumpet.jpg`, `horn.jpg`, `trombone.jpg`, `tuba.jpg` | 0.6.0, THE BRASS (`brass3d.py`): one lying across, bell right; 2200 x 900 |
 | `brass-section.jpg` | The tuba standing at the left, the trombone across the top right, the horn and trumpet under it; 2200 x 900 |
 | `brass-section-lit.jpg` | The same, the neon brighter (faded in per part, as `section-lit.jpg`) |
-| `orchestra.json` | Where each string's bridge and nut ends land (px), each brass instrument's valves (`valves`, valve 1 first; the horn's thumb valve last) and the trombone's hand at 1st and 7th position (`slide`), and each instrument's area: `single.<kind>`, `section.<kind>`, `brassSection.<kind>` |
+| `stage.jpg` | 0.8.0, THE STAGE (`stage3d.py`): our concert stage seen from above and behind the conductor; 2048 x 842 |
+| `orchestra.json` | Where each string's bridge and nut ends land (px), each brass instrument's valves (`valves`, valve 1 first; the horn's thumb valve last) and the trombone's hand at 1st and 7th position (`slide`), and each instrument's area: `single.<kind>`, `section.<kind>`, `brassSection.<kind>`; `stage`: a grid of picture points every 0.5 m of the stage (x from -9, y from -2; 37 x 29) and the podium |
 
 ## Making them again
 
@@ -52,3 +53,15 @@ python3 process_orchestra.py <the strings' folder> <the repo>/resources/orchestr
 
 The pictures are drawn filling their panel, centred (cropped at the edges at other window shapes, never stretched); the
 geometry is mapped the same way.
+
+The stage (0.8.0), in a third scratch folder:
+
+```bash
+blender -b -P stage3d.py -- $PWD/stage.png 64 2048 842 stage none $PWD/stage.json
+python3 process_orchestra.py <the strings' folder> <the repo>/resources/orchestra - <the stage's folder>
+```
+
+- `stage3d.py`: our own stage (no hall's plan traced): the platform with its front curving towards the hall, three
+  tiers of risers round a point 6 m in front of it, the podium, the back wall, in metres (x across from the conductor's
+  left, y back from the front, z up). The geometry file maps stage metres to the picture's pixels; the plugin draws each
+  part's seat through it (`StageView`) and hears it from the same metres (`dsp/stage/Stage`).

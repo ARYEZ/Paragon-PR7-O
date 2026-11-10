@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures")
 
-project(ParagonX1 VERSION 0.7.0 LANGUAGES C CXX)
+project(ParagonX1 VERSION 0.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -60,6 +60,7 @@ juce_add_binary_data(ParagonX1Orchestra
         resources/orchestra/tuba.jpg
         resources/orchestra/brass-section.jpg
         resources/orchestra/brass-section-lit.jpg
+        resources/orchestra/stage.jpg
         resources/orchestra/orchestra.json)
 
 target_sources(ParagonX1
@@ -72,6 +73,8 @@ target_sources(ParagonX1
         source/dsp/sampler/Sample.cpp
         source/dsp/sampler/Sfz.cpp
         source/dsp/sampler/Section.cpp
+        source/dsp/stage/Seating.cpp
+        source/dsp/stage/Stage.cpp
         source/dsp/sampler/Sampler.cpp
         source/dsp/sampler/DiskStreamer.cpp    # PR7-D's disk streaming, kept for the libraries (plan stage 3)
         source/dsp/mixer/MixerEffects.cpp      # PR7-D's mixer effects, kept for the stage (plan stage 6)
@@ -115,6 +118,7 @@ target_sources(ParagonX1
         source/ui/PedalBody.cpp
         source/ui/InstrumentRack.cpp
         source/ui/OrchestraView.cpp
+        source/ui/StageView.cpp
         source/ui/SynthDisplays.cpp
         source/ui/InstrumentPage.cpp
         source/ui/ProgressBox.cpp

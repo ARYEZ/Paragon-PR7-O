@@ -47,6 +47,18 @@ std::unique_ptr<juce::XmlElement> Rig::toXml() const
     }
     if (instrument.isNotEmpty())
         xml->createNewChildElement (instrumentTag)->setAttribute ("file", instrument);
+    if (! seats.empty())
+    {
+        auto* stageXml = xml->createNewChildElement ("Stage");
+        for (const auto& [name, seat] : seats)
+        {
+            auto* e = stageXml->createNewChildElement ("Seat");
+            e->setAttribute ("name", name);
+            e->setAttribute ("x", seat.x);
+            e->setAttribute ("y", seat.y);
+            e->setAttribute ("width", seat.width);
+        }
+    }
     return xml;
 }
 
@@ -75,6 +87,11 @@ std::optional<Rig> Rig::fromXml (const juce::XmlElement& xml)
 
     if (const auto* e = xml.getChildByName (instrumentTag))
         rig.instrument = e->getStringAttribute ("file");
+    if (const auto* stageXml = xml.getChildByName ("Stage"))
+        for (const auto* e : stageXml->getChildWithTagNameIterator ("Seat"))
+            if (const auto name = e->getStringAttribute ("name"); name.isNotEmpty())
+                rig.seats[name] = stage::clamp ({ (float) e->getDoubleAttribute ("x"), (float) e->getDoubleAttribute ("y"),
+                                                  (float) e->getDoubleAttribute ("width", 3.0) });
 
     return rig;
 }

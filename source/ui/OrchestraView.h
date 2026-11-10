@@ -47,6 +47,11 @@ namespace orchestra
     // harmonic). The 7th and 11th harmonics are left out (out of tune). `playable` false: out of the instrument's reach.
     struct Fingering { bool playable = false; int valves = 0; int position = 0; };   // valves: bit 0 = valve 1
     Fingering fingeringFor (Kind, int note);
+
+    // The pictures' geometry (orchestra.json), and a picture's every hue pulled into the family's range (0.8.0: for the
+    // stage's picture too).
+    const juce::var& geometry();
+    juce::Image inFamily (juce::Image);
 }
 
 class OrchestraView final : public juce::Component, private juce::Timer

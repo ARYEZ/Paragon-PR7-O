@@ -17,6 +17,7 @@ namespace
     const juce::Identifier parameterVersionKey { "parameterVersion" };
     constexpr int parameterVersion = 1;
     const juce::Identifier instrumentKey { "Instrument" };
+    const juce::Identifier stageKey { "Stage" }, seatKey { "Seat" };   // 0.8.0
     const juce::Identifier midiLinksKey { "MidiLinks" };
     // A replaced instrument is kept this long after the audio thread has moved on from it (its voices fade in 20 ms).
     constexpr double retiredMs = 2000.0;
@@ -109,6 +110,11 @@ void ParagonX1AudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     keyboardState.reset();
     sampler.prepare (sampleRate);
     instrumentBuffer.setSize (2, preparedBlockSize);
+    stage.prepare (sampleRate, preparedBlockSize);
+    partBuffers.setSize (2 * stage::maxParts + 2, preparedBlockSize);
+    stageMix = isOn (ParamIDs::stageOn) ? 1.0f : 0.0f;
+    pushedSeatCount = -1;
+    pushSeats();
 
     outputGain.reset (sampleRate, gainRampSeconds);
     outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (param (ParamIDs::outputGain) + param (ParamIDs::patchLevel)));
@@ -665,7 +671,45 @@ void ParagonX1AudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, co
     instrumentBuffer.clear (0, numSamples);
     auto* left = instrumentBuffer.getWritePointer (0);
     auto* right = instrumentBuffer.getWritePointer (1);
-    sampler.render (programForAudio.load(), left, right, numSamples, midi, start, getSamplerSettings());
+    const auto stageWanted = isOn (ParamIDs::stageOn);
+    if ((stageWanted || stageMix > 0.0f) && partBuffers.getNumSamples() >= numSamples)
+    {
+        // THE STAGE (0.8.0): each part into its own pair, then from its seat through the mics and the room. Switched
+        // on or off, it crossfades with the parts as they are over 20 ms.
+        if (stageMix <= 0.0f)
+            stage.reset();
+        const auto numParts = juce::jlimit (1, stage::maxParts, stagePartCount.load());
+        partBuffers.clear (0, numSamples);
+        sampler::Sampler::PartOutputs outputs;
+        std::array<const float*, stage::maxParts> partLeft {}, partRight {};
+        outputs.count = numParts;
+        for (int p = 0; p < numParts; ++p)
+        {
+            outputs.left[(size_t) p] = partBuffers.getWritePointer (2 * p);
+            outputs.right[(size_t) p] = partBuffers.getWritePointer (2 * p + 1);
+            partLeft[(size_t) p] = outputs.left[(size_t) p];
+            partRight[(size_t) p] = outputs.right[(size_t) p];
+        }
+        sampler.render (programForAudio.load(), left, right, numSamples, midi, start, getSamplerSettings(), &outputs);
+        auto* stageLeft = partBuffers.getWritePointer (2 * stage::maxParts);
+        auto* stageRight = partBuffers.getWritePointer (2 * stage::maxParts + 1);
+        stage.process (partLeft, partRight, numParts, stageLeft, stageRight, numSamples, getStageSettings());
+        const auto step = (float) (1.0 / (0.02 * getSampleRate())) * (stageWanted ? 1.0f : -1.0f);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            auto plainLeft = 0.0f, plainRight = 0.0f;
+            for (int p = 0; p < numParts; ++p)
+            {
+                plainLeft += partLeft[(size_t) p][i];
+                plainRight += partRight[(size_t) p][i];
+            }
+            stageMix = juce::jlimit (0.0f, 1.0f, stageMix + step);
+            left[i] = plainLeft + (stageLeft[i] - plainLeft) * stageMix;
+            right[i] = plainRight + (stageRight[i] - plainRight) * stageMix;
+        }
+    }
+    else
+        sampler.render (programForAudio.load(), left, right, numSamples, midi, start, getSamplerSettings());
 
     // Where it goes: an INSERT BUS (A to D: its effects, then its own sends), or straight into the mix and its own
     // sends (each only while its effect is on, as on PR7-D).
@@ -763,6 +807,7 @@ void ParagonX1AudioProcessor::timerCallback()
     rack->eqMatch.update (rack->eqInputTap);   // EQ Match listens with its window closed too
     recordCheckpointIfReady();
     applyDefaultRigIfPending();
+    pushSeats();
     notenames::middleCOctave = notenames::octaveForChoice (juce::roundToInt (param (ParamIDs::noteNames)));
 }
 
@@ -824,6 +869,7 @@ void ParagonX1AudioProcessor::installProgram (std::shared_ptr<const sampler::Pro
     // The project's articulation, once its instrument is in (the sampler takes it after it sees the new program).
     if (program != nullptr && pendingKeyswitch >= 0 && program->isKeyswitch (pendingKeyswitch))
         sampler.chooseKeyswitch (std::exchange (pendingKeyswitch, -1));
+    pushSeats();   // 0.8.0: its parts' seats to the stage at once
     instrumentBroadcaster.sendChangeMessage();
 }
 
@@ -1018,6 +1064,7 @@ Rig ParagonX1AudioProcessor::captureRig() const
             if (! ParamIDs::notInRigs.contains (ranged->paramID))
                 rig.parameters[ranged->paramID] = ranged->convertFrom0to1 (ranged->getValue());
     rig.instrument = instrumentFile;
+    rig.seats = movedSeats;   // 0.8.0
     return rig;
 }
 
@@ -1038,6 +1085,10 @@ void ParagonX1AudioProcessor::applyRig (const Rig& rig)
                                   : ranged->getDefaultValue();
         ranged->setValueNotifyingHost (normalised);
     }
+
+    // THE STAGE's seats (0.8.0): the preset's (none moved: every part in its usual seat).
+    movedSeats = rig.seats;
+    pushSeats();
 
     // THE INSTRUMENT: the preset's, loaded again (the one it already has kept as it is).
     if (rig.instrument != instrumentFile)
@@ -1250,6 +1301,13 @@ void ParagonX1AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
         state.appendChild (juce::ValueTree (instrumentKey, { { "file", instrumentFile }, { "keyswitch", sampler.getKeyswitch() } }), nullptr);
     if (! midiLinks.isEmpty())
         state.appendChild (juce::ValueTree::fromXml (*midiLinks.toXml()), nullptr);
+    if (! movedSeats.empty())
+    {
+        juce::ValueTree seatsTree (stageKey);
+        for (const auto& [name, seat] : movedSeats)
+            seatsTree.appendChild (juce::ValueTree (seatKey, { { "name", name }, { "x", seat.x }, { "y", seat.y }, { "width", seat.width } }), nullptr);
+        state.appendChild (seatsTree, nullptr);
+    }
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -1277,6 +1335,16 @@ void ParagonX1AudioProcessor::setStateInformation (const void* data, int sizeInB
             setMidiLinks (MidiLinks::fromXml (*links));
         state.removeChild (saved, nullptr);
     }
+    // THE STAGE's seats (0.8.0): the project's (none: every part in its usual seat).
+    movedSeats.clear();
+    if (auto saved = state.getChildWithName (stageKey); saved.isValid())
+    {
+        for (const auto seat : saved)
+            if (seat.hasType (seatKey) && seat["name"].toString().isNotEmpty())
+                movedSeats[seat["name"].toString()] = stage::clamp ({ (float) seat["x"], (float) seat["y"], (float) seat.getProperty ("width", 3.0f) });
+        state.removeChild (saved, nullptr);
+    }
+    pushSeats();
     parameters.replaceState (state);
     if (instrument != instrumentFile || (instrument.isNotEmpty() && program == nullptr && ! isLoadingInstrument()))
     {
@@ -1373,3 +1441,84 @@ void ParagonX1AudioProcessor::controllerForTest (int controller, float value)
 
 //==============================================================================
 // THE SONG TRACK (0.8.0)
+
+//==============================================================================
+std::vector<ParagonX1AudioProcessor::StagePart> ParagonX1AudioProcessor::getStageParts() const
+{
+    std::vector<StagePart> parts;
+    juce::StringArray names;
+    if (const auto section = getSection())
+        for (const auto& p : section->parts)
+            names.addIfNotAlreadyThere (sampler::section::nameOf (p));
+    else if (const auto file = getInstrumentFile(); file.isNotEmpty())
+        names.add (sampler::section::describe (file));
+    for (const auto& name : names)
+    {
+        StagePart part { name, stage::seatFor (name), false };
+        if (const auto it = movedSeats.find (name); it != movedSeats.end())
+        {
+            part.seat = it->second;
+            part.moved = true;
+        }
+        parts.push_back (part);
+    }
+    return parts;
+}
+
+void ParagonX1AudioProcessor::setSeat (const juce::String& partName, stage::Seat seat)
+{
+    movedSeats[partName] = stage::clamp (seat);
+    pushSeats();
+}
+
+void ParagonX1AudioProcessor::resetSeats()
+{
+    movedSeats.clear();
+    seatMoveFinished();
+}
+
+void ParagonX1AudioProcessor::seatMoveFinished()
+{
+    markModified();
+    requestCheckpoint();
+    pushSeats();
+}
+
+stage::Settings ParagonX1AudioProcessor::getStageSettings() const noexcept
+{
+    stage::Settings s;
+    s.room = juce::roundToInt (param (ParamIDs::stageRoom));
+    s.micDistance = param (ParamIDs::stageMic);
+    s.roomLevelDb = param (ParamIDs::stageRoomLevel);
+    s.decay = param (ParamIDs::stageDecay);
+    s.spread = param (ParamIDs::stageSpread);
+    return s;
+}
+
+void ParagonX1AudioProcessor::pushSeats()
+{
+    // By the sampler's part numbers: a section's parts in order (Region::part), else the one instrument.
+    std::array<stage::Seat, stage::maxParts> seats {};
+    auto count = 0;
+    const auto seatOf = [this] (const juce::String& name)
+    {
+        const auto it = movedSeats.find (name);
+        return it != movedSeats.end() ? it->second : stage::seatFor (name);
+    };
+    if (const auto section = getSection())
+        for (const auto& part : section->parts)
+        {
+            if (count == stage::maxParts)
+                break;
+            seats[(size_t) count++] = seatOf (sampler::section::nameOf (part));
+        }
+    else if (instrumentFile.isNotEmpty())
+        seats[(size_t) count++] = seatOf (sampler::section::describe (instrumentFile));
+    if (count == pushedSeatCount && seats == pushedSeats)
+        return;
+    pushedSeats = seats;
+    pushedSeatCount = count;
+    ++seatsVersion;
+    stagePartCount = juce::jmax (1, count);
+    stage.setSeats (seats, count);
+}

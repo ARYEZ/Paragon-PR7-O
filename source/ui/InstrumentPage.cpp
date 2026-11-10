@@ -230,7 +230,7 @@ juce::String articulationName (const sampler::Program::Articulation& a)
 }
 
 //==============================================================================
-InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map (p), picture (p)
+InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map (p), picture (p), stageView (p)
 {
     auto& state = processor.getParameters();
     rack.loadKey.setTooltip ("LOAD: an SFZ instrument (or one audio file, played across the keyboard from C3/C4). You can also drop one on this page.");
@@ -252,9 +252,10 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     info.setColour (juce::TextEditor::textColourId, ParagonColours::text);
     for (auto* c : std::initializer_list<juce::Component*> { &rack, &info, &map, &picture })
         addAndMakeVisible (c);
+    addChildComponent (stageView);
 
     // The INSTRUMENT / REGIONS switch over the picture panel.
-    for (auto* b : { &showPicture, &showRegions })
+    for (auto* b : { &showPicture, &showStage, &showRegions })
     {
         b->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff0d0a0e));
         b->setColour (juce::TextButton::buttonOnColourId, ParagonColours::accentDim);
@@ -264,7 +265,9 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     }
     showPicture.setTooltip ("The instrument itself, its notes lit as they play");
     showRegions.setTooltip ("Its regions: where each recording plays (keys across, velocity up)");
+    showStage.setTooltip ("The stage: where each part sits, heard from there through the mics in front (switch STAGE on, on the rack's STAGE page). Drag a part to move it");
     showPicture.onClick = [this] { chooseRegions (false); };
+    showStage.onClick = [this] { chooseStage(); };
     showRegions.onClick = [this] { chooseRegions (true); };
 
     // The rack's knobs and menus, in its pearl black.
@@ -285,6 +288,10 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     add (playControls, ParamIDs::instGlide, "GLIDE", "With LEGATO: a joined note slides in pitch from the note before over this time "
                                                      "(a string player's shift). Off: it moves straight to its pitch");
     add (sendControls, ParamIDs::instSendDelay, "SEND DELAY", "How much of the instrument goes to the DELAY (FX page: switch it on there)");
+    add (stageControls, ParamIDs::stageMic, "MIC", "How far in front of the stage the pair of mics stands: close, the parts clear and dry; far, more of the room");
+    add (stageControls, ParamIDs::stageRoomLevel, "ROOM LEVEL", "The room's reflections and tail, louder or quieter than they'd be");
+    add (stageControls, ParamIDs::stageDecay, "DECAY", "How long the room's tail rings, times its own");
+    add (stageControls, ParamIDs::stageSpread, "SPREAD", "How wide the seats spread across the stage: 0, all in the middle; 100%, as placed; more, wider");
     add (sendControls, ParamIDs::instSendReverb, "SEND REVERB", "How much of the instrument goes to the REVERB (FX page: switch it on there)");
     const auto menu = [this, &state] (const char* id, const char* label, const char* tip)
     {
@@ -297,6 +304,7 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     dynamicsMenu = menu (ParamIDs::instDynamics, "DYNAMICS", "VELOCITY: how hard you play picks the recording (as the file says). MOD WHEEL: "
                                                              "a held note (sustain, tremolo) starts every dynamic at once and the mod wheel "
                                                              "crossfades between them, soft to loud, as you hold it; shorts still go by velocity");
+    roomMenu = menu (ParamIDs::stageRoom, "ROOM", "The room the stage is in: a studio (small, quick), a scoring stage, a concert hall, a cathedral (big, long)");
     insertMenu = menu (ParamIDs::instInsert, "INSERT BUS", "Play it through an insert bus's DRIVE, GLITCH, MOD and LO-FI (FX page, INSERTS). "
                                                            "On a bus, the bus's own sends are used instead of these");
     Finish::paintAs (std::nullopt);
@@ -327,6 +335,23 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     legatoKey.onClick = [this] { legatoAttachment->setValueAsCompleteGesture (legatoKey.getToggleState() ? 0.0f : 1.0f); };
     legatoAttachment->sendInitialUpdate();
     rack.addAndMakeVisible (legatoKey);
+    // THE STAGE's keys (0.8.0): STAGE on, RESET SEATS.
+    for (auto* key : { &stageOnKey, &resetSeatsKey })
+    {
+        key->getProperties().set (ParagonLookAndFeel::pedalButtonProperty, true);
+        rack.addAndMakeVisible (*key);
+    }
+    stageOnKey.setTooltip ("STAGE: each part heard from its seat on the stage through a pair of mics, with the room's reflections and tail, "
+                           "so parts recorded apart sit in one space (our own; off: they play as recorded)");
+    stageOnAttachment = std::make_unique<juce::ParameterAttachment> (*state.getParameter (ParamIDs::stageOn), [this] (float v)
+    {
+        stageOnKey.setToggleState (v > 0.5f, juce::dontSendNotification);
+        stageView.repaint();
+    });
+    stageOnKey.onClick = [this] { stageOnAttachment->setValueAsCompleteGesture (stageOnKey.getToggleState() ? 0.0f : 1.0f); };
+    stageOnAttachment->sendInitialUpdate();
+    resetSeatsKey.setTooltip ("RESET SEATS: every part back to its usual seat");
+    resetSeatsKey.onClick = [this] { processor.resetSeats(); stageView.refresh(); };
     rack.onPageChanged = [this] { showRackPage(); };
     showRackPage();
 
@@ -337,33 +362,53 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
 
 void InstrumentPage::showRackPage()
 {
-    const auto playing = rack.getPage() == InstrumentRack::Page::playing;
+    const auto page = rack.getPage();
+    const auto playing = page == InstrumentRack::Page::playing, routing = page == InstrumentRack::Page::routing,
+               onStage = page == InstrumentRack::Page::stage;
     for (auto& c : playControls)
         c->setVisible (playing);
     dynamicsMenu->setVisible (playing);
     autoSustainKey.setVisible (playing);
     legatoKey.setVisible (playing);
     for (auto& c : sendControls)
-        c->setVisible (! playing);
-    insertMenu->setVisible (! playing);
+        c->setVisible (routing);
+    insertMenu->setVisible (routing);
+    for (auto& c : stageControls)
+        c->setVisible (onStage);
+    roomMenu->setVisible (onStage);
+    stageOnKey.setVisible (onStage);
+    resetSeatsKey.setVisible (onStage);
 }
 
 void InstrumentPage::chooseRegions (bool regions)
 {
     regionsChosen = regions;
+    stageChosen = false;
+    showView();
+}
+
+void InstrumentPage::chooseStage()
+{
+    stageChosen = true;
     showView();
 }
 
 void InstrumentPage::showView()
 {
+    // INSTRUMENT (when there's a picture), STAGE (0.8.0: when something's loaded), REGIONS.
     const auto hasPicture = picture.getMode() != OrchestraView::Mode::none;
-    const auto showing = hasPicture && ! regionsChosen;
+    const auto hasStage = shown != nullptr || shownFile.isNotEmpty();
+    const auto onStage = hasStage && stageChosen;
+    const auto showing = hasPicture && ! regionsChosen && ! onStage;
     picture.setVisible (showing);
-    map.setVisible (! showing);
+    stageView.setVisible (onStage);
+    map.setVisible (! showing && ! onStage);
     showPicture.setVisible (hasPicture);
-    showRegions.setVisible (hasPicture);
+    showStage.setVisible (hasStage);
+    showRegions.setVisible (hasPicture || hasStage);
     showPicture.setToggleState (showing, juce::dontSendNotification);
-    showRegions.setToggleState (! showing, juce::dontSendNotification);
+    showStage.setToggleState (onStage, juce::dontSendNotification);
+    showRegions.setToggleState (! showing && ! onStage, juce::dontSendNotification);
     repaint (mapArea);
 }
 
@@ -605,6 +650,7 @@ void InstrumentPage::refresh()
     rebuildArticulations();
     rack.clearKey.setEnabled (shownFile.isNotEmpty() || shown != nullptr);
     picture.refresh();
+    stageView.refresh();
     showView();
     updateScreen();
     rebuildSplits();
@@ -696,7 +742,9 @@ void InstrumentPage::paintOverChildren (juce::Graphics& g)
 {
     // The picture panel's title, over the picture.
     juce::String title = "ITS REGIONS: KEYS ACROSS, VELOCITY UP";
-    if (picture.isVisible())
+    if (stageView.isVisible())
+        title = "THE STAGE: DRAG A PART TO ITS SEAT";
+    else if (picture.isVisible())
         title = picture.getMode() == OrchestraView::Mode::section ? "THE SECTION: EACH PART LIT AS IT PLAYS"
               : picture.getKind() == orchestra::Kind::trombone ? juce::String ("THE TROMBONE: EACH NOTE'S SLIDE POSITION LIT")
               : orchestra::isBrass (picture.getKind()) ? "THE " + orchestra::nameOf (picture.getKind()).toUpperCase() + ": EACH NOTE'S VALVES LIT"
@@ -739,8 +787,11 @@ void InstrumentPage::resized()
     info.setBounds (infoArea.reduced (14, 0).withTrimmedTop (36 + articulationArea.getHeight() + splitArea.getHeight()).withTrimmedBottom (12));
     map.setBounds (mapArea.withTrimmedTop (30).reduced (6, 4));
     picture.setBounds (mapArea.reduced (2));
+    stageView.setBounds (mapArea.reduced (2));
     auto switches = mapArea.reduced (14, 0).withHeight (32).withSizeKeepingCentre (mapArea.getWidth() - 28, 22);
     showRegions.setBounds (switches.removeFromRight (90));
+    switches.removeFromRight (4);
+    showStage.setBounds (switches.removeFromRight (78));   // (0.8.0)
     switches.removeFromRight (4);
     showPicture.setBounds (switches.removeFromRight (104));
 
@@ -753,4 +804,9 @@ void InstrumentPage::resized()
     for (int i = 0; i < (int) sendControls.size(); ++i)
         sendControls[(size_t) i]->setBounds (rack.routingKnobCell (i));
     insertMenu->setBounds (rack.menuCell (0).reduced (4, 2));
+    for (int i = 0; i < (int) stageControls.size(); ++i)
+        stageControls[(size_t) i]->setBounds (rack.routingKnobCell (i));
+    roomMenu->setBounds (rack.menuCell (0).reduced (4, 2));
+    stageOnKey.setBounds (rack.pageKeyCell (0));
+    resetSeatsKey.setBounds (rack.pageKeyCell (1));
 }

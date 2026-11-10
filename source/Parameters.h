@@ -37,6 +37,17 @@ namespace ParamIDs
     // 0.7.0 (version hint 44): LEGATO (on: a note played over a held one joins it, past its attack) and GLIDE (seconds:
     // a joined note's slide in pitch). In presets; off and 0 by default (as 0.6.0 played).
     inline constexpr auto instLegato = "instLegato";
+    // 0.8.0 (version hint 45): THE STAGE. STAGE on (each part heard from its seat through a pair of mics, with the
+    // room's reflections and tail), the ROOM (stageRoomNames), MIC (the pair's distance from the stage's front, metres),
+    // ROOM LEVEL (dB on the reflections and tail), DECAY (x the room's), SPREAD (the seats' width across, x). In presets;
+    // off by default (as 0.7.0 played).
+    inline constexpr auto stageOn        = "stageOn";
+    inline constexpr auto stageRoom      = "stageRoom";
+    inline constexpr auto stageMic       = "stageMic";
+    inline constexpr auto stageRoomLevel = "stageRoomLevel";
+    inline constexpr auto stageDecay     = "stageDecay";
+    inline constexpr auto stageSpread    = "stageSpread";
+    inline const juce::StringArray stageRoomNames { "Studio", "Scoring Stage", "Concert Hall", "Cathedral" };   // by index: only append
     inline constexpr auto instGlide  = "instGlide";
     // Global, like OUTPUT: they suit the player's controller, not a sound.
     inline constexpr auto midiChannel = "midiChannel";       // midiChannelNames' index (0: any)

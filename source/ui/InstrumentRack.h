@@ -8,7 +8,7 @@
 // printed red lines, the orange LED screen, the big knobs with their values on small screens, the small keys with neon
 // stripes). Always pearl black, as PR7-I's: it sits on the dark instrument picture.
 //
-// Left to right: the badge and the PAGE keys (PLAYING, ROUTING); the screen (the instrument, where it's from, the
+// Left to right: the badge and the PAGE keys (PLAYING, ROUTING; 0.8.0: STAGE); the screen (the instrument, where it's from, the
 // articulation) over the INSTRUMENT keys (LOAD, SECTION, CLEAR); the page: PLAYING (LEVEL, PAN, TRANSPOSE, TUNE,
 // RELEASE, POLYPHONY; the DYNAMICS menu and the AUTO SUSTAIN key) or ROUTING (SEND DELAY, SEND REVERB, the INSERT BUS
 // menu). The window's OUTPUT stays where it is, beside the pages.
@@ -32,11 +32,11 @@ public:
     void setScreen (const Screen&);
     const Screen& getScreen() const noexcept { return screen; }
 
-    enum class Page { playing, routing };
+    enum class Page { playing, routing, stage };   // (0.8.0: STAGE)
     void setPage (Page);
     Page getPage() const noexcept { return page; }
     std::function<void()> onPageChanged;
-    juce::TextButton& getPageKey (Page p) noexcept { return p == Page::playing ? playingKey : routingKey; }
+    juce::TextButton& getPageKey (Page p) noexcept { return p == Page::playing ? playingKey : p == Page::routing ? routingKey : stageKey; }
 
     // The INSTRUMENT keys under the screen.
     juce::TextButton loadKey, sectionKey, clearKey;
@@ -44,9 +44,9 @@ public:
     // Where the page's controls go, in the unit's pixels.
     static constexpr int numKnobs = 7;
     juce::Rectangle<int> knobCell (int index) const;          // PLAYING: LEVEL ... POLYPHONY, GLIDE (0.7.0)
-    juce::Rectangle<int> menuCell (int index) const;          // PLAYING: DYNAMICS (0); ROUTING: INSERT BUS (0)
-    juce::Rectangle<int> pageKeyCell (int index) const;       // PLAYING: AUTO SUSTAIN (0), LEGATO (1; 0.7.0)
-    juce::Rectangle<int> routingKnobCell (int index) const;   // ROUTING: SEND DELAY, SEND REVERB
+    juce::Rectangle<int> menuCell (int index) const;          // PLAYING: DYNAMICS (0); ROUTING: INSERT BUS (0); STAGE: ROOM (0)
+    juce::Rectangle<int> pageKeyCell (int index) const;       // PLAYING: AUTO SUSTAIN (0), LEGATO (1; 0.7.0); STAGE: STAGE (0), RESET (1)
+    juce::Rectangle<int> routingKnobCell (int index) const;   // ROUTING: SEND DELAY, SEND REVERB; STAGE: MIC, ROOM LEVEL, DECAY, SPREAD
     juce::Rectangle<int> screenArea() const;
     juce::Rectangle<int> instrumentKeyCell (int index) const; // LOAD, SECTION, CLEAR
 
@@ -65,5 +65,5 @@ private:
     juce::Image satin;
     Screen screen;
     Page page = Page::playing;
-    juce::TextButton playingKey, routingKey;
+    juce::TextButton playingKey, routingKey, stageKey;
 };

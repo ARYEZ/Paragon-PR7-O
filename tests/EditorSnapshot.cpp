@@ -23,6 +23,7 @@
 //   PARAGON_SNAPSHOT_SWITCH=<key>    with its keyswitch `key` (a MIDI note number) chosen
 //   PARAGON_SNAPSHOT_ROUTING=1       the INSTRUMENT page's rack on its ROUTING page (0.5.0)
 //   PARAGON_SNAPSHOT_REGIONS=1       the region map instead of the instrument's picture (0.5.0)
+//   PARAGON_SNAPSHOT_STAGE=1         the STAGE view and the rack's STAGE page (0.8.0)
 //   PARAGON_SNAPSHOT_NOTES=1         and a C major chord (C2 G2 E3 C4) held on the keyboard, sounding
 //   PARAGON_SNAPSHOT_LOADING=1       the instrument page while an instrument loads, its progress box 62% done
 //   PARAGON_SNAPSHOT_KEYBOARD=0      the keyboard hidden (the shorter window)
@@ -305,6 +306,11 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
         view->getInstrumentPage().getRack().setPage (InstrumentRack::Page::routing);
     if (env ("PARAGON_SNAPSHOT_REGIONS") == "1")
         view->getInstrumentPage().chooseRegions (true);
+    if (env ("PARAGON_SNAPSHOT_STAGE") == "1")
+    {
+        view->getInstrumentPage().getRack().setPage (InstrumentRack::Page::stage);
+        view->getInstrumentPage().chooseStage();
+    }
 
     // PARAGON_SNAPSHOT_LOADING=1: an instrument loading, the progress box over the page.
     if (env ("PARAGON_SNAPSHOT_LOADING") == "1")

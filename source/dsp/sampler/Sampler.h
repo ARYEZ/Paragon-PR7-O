@@ -82,9 +82,12 @@ namespace sampler
         void reset() noexcept;          // silence, now
 
         // Plays `numSamples` into (adds to) `left` / `right`, with `midi`'s events whose positions fall in
-        // [midiStart, midiStart + numSamples).
+        // [midiStart, midiStart + numSamples). 0.8.0, THE STAGE: with `parts`, each region's part (Region::part; past
+        // the last given, the last) is added into its own pair instead, and `left` / `right` are left alone.
+        static constexpr int maxParts = 8;
+        struct PartOutputs { std::array<float*, maxParts> left {}, right {}; int count = 0; };
         void render (const Program*, float* left, float* right, int numSamples, const juce::MidiBuffer& midi, int midiStart,
-                     const Settings&) noexcept;
+                     const Settings&, const PartOutputs* parts = nullptr) noexcept;
 
         int getActiveVoices() const noexcept { return activeVoices.load(); }
         int getActiveNotes() const noexcept { return activeNotes.load(); }
@@ -152,7 +155,7 @@ namespace sampler
         void updatePitch (const Settings&) noexcept;
         void updateWheel() noexcept;   // each voice on the wheel: its gain for the wheel now
         float wheelGainOf (const Voice&) const noexcept;
-        void renderVoices (float* left, float* right, int numSamples) noexcept;
+        void renderVoices (int numSamples, int numParts) noexcept;   // into each part's scratch
         float nextRandom() noexcept;
 
         std::vector<Voice> voices;   // numSlots, made once (on the heap: too big to sit in the processor)
@@ -176,7 +179,9 @@ namespace sampler
         std::uint64_t counter = 0, notes = 0;
         std::uint32_t random = 0x9e3779b9u;
         float shownGain = -1.0f, shownLeft = 1.0f, shownRight = 1.0f;   // LEVEL / PAN / EXPRESSION the last piece ended on
-        std::array<float, 256> scratchLeft {}, scratchRight {};
+        static constexpr int scratchSize = 256;
+        std::array<std::array<float, scratchSize>, maxParts> scratchLeft {}, scratchRight {};   // a part each
+        std::array<float, scratchSize> rampLeft {}, rampRight {};
         std::atomic<int> activeVoices { 0 }, activeNotes { 0 }, lastNote { -1 }, shownSwitch { -1 }, pendingSwitch { -1 };
         std::atomic<float> shownWheel { 0.0f }, shownExpression { 1.0f };
         std::array<std::atomic<bool>, 128> held {};

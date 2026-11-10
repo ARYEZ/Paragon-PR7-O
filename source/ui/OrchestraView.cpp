@@ -157,11 +157,6 @@ namespace
     const std::array<juce::Colour, 4> stringColours { juce::Colour (0xffff2d6e), juce::Colour (0xffff2b48),
                                                       juce::Colour (0xffff3a28), juce::Colour (0xffff6a24) };
 
-    juce::var geometry()
-    {
-        static const auto parsed = juce::JSON::parse (juce::String::fromUTF8 (OrchestraImages::orchestra_json, OrchestraImages::orchestra_jsonSize));
-        return parsed;
-    }
 
     juce::Point<float> pointOf (const juce::var& v) { return { (float) v[0], (float) v[1] }; }
 
@@ -186,27 +181,34 @@ namespace
         return s;
     }
 
-    // Every hue into the family's range once more as a picture loads (JPEG moves a few colours a few degrees past the
-    // processing's), as PR7-D's kit view does: a colour outside 318 through 0 to 42 degrees goes to the nearer end (4 degrees inside it).
-    juce::Image inFamily (juce::Image image)
-    {
-        if (image.isNull())
-            return image;
-        image = image.convertedToFormat (juce::Image::ARGB);
-        juce::Image::BitmapData pixels (image, juce::Image::BitmapData::readWrite);
-        for (int y = 0; y < pixels.height; ++y)
-            for (int x = 0; x < pixels.width; ++x)
-            {
-                const auto c = pixels.getPixelColour (x, y);
-                const auto hue = c.getHue() * 360.0f;
-                // (to 4 degrees inside the range: 8-bit rounding moves a colour set exactly to its end a little past
-                // it. Every pixel with any colour, the nearly grey too: drawn smaller, a nearly grey lilac pixel blended
-                // into a bright pink one made a 317-degree pink on Windows' renderer)
-                if (c.getSaturation() > 0.0f && hue > 38.0f && hue < 322.0f)
-                    pixels.setPixelColour (x, y, c.withHue ((hue - 38.0f < 322.0f - hue ? 38.0f : 322.0f) / 360.0f));
-            }
+}
+
+const juce::var& orchestra::geometry()
+{
+    static const auto parsed = juce::JSON::parse (juce::String::fromUTF8 (OrchestraImages::orchestra_json, OrchestraImages::orchestra_jsonSize));
+    return parsed;
+}
+
+// Every hue into the family's range once more as a picture loads (JPEG moves a few colours a few degrees past the
+// processing's), as PR7-D's kit view does: a colour outside 318 through 0 to 42 degrees goes to the nearer end (4 degrees inside it).
+juce::Image orchestra::inFamily (juce::Image image)
+{
+    if (image.isNull())
         return image;
-    }
+    image = image.convertedToFormat (juce::Image::ARGB);
+    juce::Image::BitmapData pixels (image, juce::Image::BitmapData::readWrite);
+    for (int y = 0; y < pixels.height; ++y)
+        for (int x = 0; x < pixels.width; ++x)
+        {
+            const auto c = pixels.getPixelColour (x, y);
+            const auto hue = c.getHue() * 360.0f;
+            // (to 4 degrees inside the range: 8-bit rounding moves a colour set exactly to its end a little past
+            // it. Every pixel with any colour, the nearly grey too: drawn smaller, a nearly grey lilac pixel blended
+            // into a bright pink one made a 317-degree pink on Windows' renderer)
+            if (c.getSaturation() > 0.0f && hue > 38.0f && hue < 322.0f)
+                pixels.setPixelColour (x, y, c.withHue ((hue - 38.0f < 322.0f - hue ? 38.0f : 322.0f) / 360.0f));
+        }
+    return image;
 }
 
 const OrchestraView::Picture& OrchestraView::single (orchestra::Kind k)
@@ -218,8 +220,8 @@ const OrchestraView::Picture& OrchestraView::single (orchestra::Kind k)
         const auto name = orchestra::nameOf (k);
         int size = 0;
         if (const auto* data = OrchestraImages::getNamedResource ((name + "_jpg").toRawUTF8(), size))
-            p.image = inFamily (juce::ImageFileFormat::loadFrom (data, (size_t) size));
-        p.instruments[k] = geometryOf<Strings> (geometry()["single"][juce::Identifier (name)]);
+            p.image = orchestra::inFamily (juce::ImageFileFormat::loadFrom (data, (size_t) size));
+        p.instruments[k] = geometryOf<Strings> (orchestra::geometry()["single"][juce::Identifier (name)]);
     }
     return p;
 }
@@ -234,12 +236,12 @@ const OrchestraView::Picture& OrchestraView::section (bool lit, bool brass)
         int size = 0;
         const char* name = brass ? (lit ? "brasssectionlit_jpg" : "brasssection_jpg") : (lit ? "sectionlit_jpg" : "section_jpg");
         if (const auto* data = OrchestraImages::getNamedResource (name, size))
-            p.image = inFamily (juce::ImageFileFormat::loadFrom (data, (size_t) size));
+            p.image = orchestra::inFamily (juce::ImageFileFormat::loadFrom (data, (size_t) size));
         const auto kinds = brass ? std::vector { Kind::tuba, Kind::trombone, Kind::horn, Kind::trumpet }
                                  : std::vector { Kind::bass, Kind::cello, Kind::viola, Kind::violin };
         for (const auto k : kinds)
         {
-            const auto s = geometryOf<Strings> (geometry()[brass ? "brassSection" : "section"][juce::Identifier (orchestra::nameOf (k))]);
+            const auto s = geometryOf<Strings> (orchestra::geometry()[brass ? "brassSection" : "section"][juce::Identifier (orchestra::nameOf (k))]);
             p.instruments[k] = s;
             if (lit && p.image.isValid())
             {

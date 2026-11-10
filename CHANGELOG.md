@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.8.0
+
+**THE STAGE** (you: "Let's do the stage", then "Build it" after the mock-up). Each part of what you load now has a
+**seat** on our own neon concert stage, and with **STAGE** on it's heard from there, through a pair of mics in front of
+the stage, in a room, so parts recorded apart sound like one orchestra in one space.
+
+- **Where it is:** the picture panel's new **STAGE** view (between INSTRUMENT and REGIONS): the stage seen from behind
+  the conductor, every part a lit zone at its seat, brighter while it plays. **Drag a part** to move it (point at one to
+  see how far left or right and how far back it sits). The orchestra's usual places are drawn faintly as a guide.
+- **Usual seats** come from each part's name: violins front left, violas centre right, cellos front right, basses
+  behind them, woodwinds in the middle, horns left at the back, trumpets centre, trombones and tuba right, timpani and
+  percussion on the top riser, harp and keyboards at the left edge. A single instrument gets its usual seat too.
+- **The controls**, on the rack's new third page, **STAGE**: **MIC** (how far in front of the stage the mics stand:
+  close, the parts clear and dry; far, more room; 2.5 m to start), **ROOM LEVEL** (the room's reflections and ring; -3 dB
+  to start, as open samples carry some room of their own), **DECAY**, **SPREAD** (everyone towards the middle, or wider),
+  the **ROOM** (Studio, Scoring Stage, Concert Hall, Cathedral), **STAGE** on / off, **RESET SEATS**.
+- **How it sounds** (our own design, nothing measured from a real hall): from its seat a part reaches each mic directly
+  (farther: a little later, quieter and duller; on the left: the left mic first and louder), then off the floor,
+  ceiling and walls, then one room ring every part shares. A part in the middle of the stage keeps the level it plays
+  at, so moving the mics changes how roomy it sounds, not how loud. The delay to the front of the stage is taken off:
+  playing stays tight. Moving a seat while it plays glides (no clicks); switching STAGE on or off crossfades.
+- **Seats are saved** with your project and in presets, and moving one is one undo step.
+
+STAGE is off by default: your projects and presets sound as before.
+
+Worth knowing: with VSCO's strings at the defaults, each section alone comes out about 4 dB to its side (violins
+left, cellos right) plus the mics' timing; the basses barely move sideways (their low notes are mostly room by the time
+they reach mics this far off): bring MIC closer for clearer seats. One plugin instance is one room: a section loaded in
+one instance shares the room exactly; instances in your DAW set the same will match closely, but are separate rooms.
+
+Not checked: listening (how the rooms and seats sound to you).
+
 ## 0.7.0
 
 **LEGATO** (you chose it as the next step; our own design, since the open libraries have no recorded transitions
