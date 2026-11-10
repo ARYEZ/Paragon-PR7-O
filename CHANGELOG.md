@@ -25,7 +25,7 @@ loops included. Measured on VSCO: the string section is 73 MB in memory, all 75 
   It never happened in our tests, but they ran on a fast SSD: a slow hard disk with a very big chord is the case we
   couldn't check here.
 - The INSTRUMENT page's info shows the split ("MEMORY 72.8 MB in memory, 376.7 MB streamed from disk as it plays").
-- Short recordings (staccatos, pizzicatos) stay whole in memory: streaming them would save little.
+- Recordings under 2 s (staccatos, pizzicatos) stay whole in memory: streaming them would save little.
 
 Nothing changes in your projects or presets.
 

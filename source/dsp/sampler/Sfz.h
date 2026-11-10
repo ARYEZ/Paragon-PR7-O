@@ -199,6 +199,7 @@ namespace sampler
     // regions need kept (keptInMemory: `headSeconds` from each place a voice can start without warning). Call after
     // the program's regions are prepared; recordings already streamed are left as they are.
     inline constexpr double streamHeadSeconds = 0.5;
+    inline constexpr double shortestStreamedSeconds = 2.0;   // shorter recordings stay whole
     std::vector<std::pair<juce::int64, juce::int64>> keptInMemory (const Region&, double headSeconds = streamHeadSeconds);
     void streamSamples (Program&, double headSeconds = streamHeadSeconds);
 

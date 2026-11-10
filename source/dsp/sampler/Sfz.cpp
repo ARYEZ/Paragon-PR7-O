@@ -450,7 +450,9 @@ namespace sampler
                 if (it == made.end())
                 {
                     std::shared_ptr<const Sample> streamed;
-                    if (auto trimmed = sampleFiles::streamedFrom (*r.sample, needs[r.sample.get()]);
+                    // (under 2 s it stays whole: small, and streaming shorts only adds disk reads to fast playing)
+                    const auto longEnough = (double) r.sample->length() >= shortestStreamedSeconds * r.sample->sampleRate;
+                    if (auto trimmed = longEnough ? sampleFiles::streamedFrom (*r.sample, needs[r.sample.get()]) : nullptr;
                         trimmed != nullptr && (double) trimmed->bytes() < 0.7 * (double) r.sample->wholeBytes())
                     {
                         streamed = trimmed;

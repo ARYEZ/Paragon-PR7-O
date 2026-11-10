@@ -1766,6 +1766,15 @@ TEST_CASE ("Disk streaming: a streamed recording plays as the whole one does, sa
     INFO ("in memory " << streamed->bytes << " of " << streamed->wholeBytes);
     CHECK (streamed->wholeBytes == whole->bytes);
     CHECK ((double) streamed->bytes < 0.2 * (double) streamed->wholeBytes);
+    {
+        // A short one (1.5 s) stays whole: little to save.
+        const auto shortFile = f.sfz ("short.sfz", "<region> sample=short.wav\n");
+        unlikeTones (f, "short.wav", 1.5);
+        auto shortProgram = sampler::sfz::load (shortFile);
+        sampler::streamSamples (*shortProgram);
+        REQUIRE (shortProgram->regions.size() == 1);
+        CHECK (! shortProgram->regions[0].sample->streamed());
+    }
 
     // Two notes: one at its root, one a tone up (between frames), held through several times round the loop; let go
     // inside the loop (the stream told to go on past it) and inside its crossfade (once more round first).

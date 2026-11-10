@@ -339,7 +339,7 @@ tools, which need the owner's riffs)
   (`pieces` in memory, `frames`, `streamedChannels`, `stream` = its `StreamSource` with `resident` ranges);
   `sampleFiles::streamedFrom`. `sfz::keptInMemory (region)`: 0.5 s (`streamHeadSeconds`) from the offset (+ offset
   random + 8 ms), from `legatoStart`, from the loop end (the tail when let go), and +-4 frames round the loop start;
-  `sfz::streamSamples (program)` makes each recording streamed if that keeps < 70% of it, carries its `Analysis` to
+  `sfz::streamSamples (program)` makes each recording of 2 s or more (`shortestStreamedSeconds`: CI failed with 1 s ones played faster than real time) streamed if that keeps < 70% of it, carries its `Analysis` to
   the new pointer (loop likeness cached by loop in `Analysis::likeness`; a streamed sample never analysed again),
   sets `Program::bytes` / `wholeBytes`. The processor's loader calls it on every load (`setStreamFromDisk`, on); the
   streamer (`getStreamer`) is made with the first streamed instrument (rings 64 MB), declared last.
