@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.11.0
+
+**THE LIBRARY, and instruments that stream from disk** (the plan's stage 3; you: "Build it" after the browser
+mock-up, then "Release it as 0.11.0").
+
+**The library browser.** LOAD now opens a browser over the INSTRUMENT page instead of a file box. Add the folders your
+libraries are in once (ADD FOLDER...: VSCO 2 CE, Sonatina, any plain WAV + SFZ library); PR7-O remembers them for every
+project. It sorts every instrument file into a **section** (strings, brass, woodwinds, percussion, keys & harp, choir)
+and an **instrument** (Violins, Solo Violin, Horns...) by its name: our own rule, made from the names VSCO and Sonatina
+use. Click a file to see its keys and articulations, LOAD it, or ADD TO SECTION to build a section file by file (LOAD
+SECTION). A search box looks through every section ("pizz", "horn"). OPEN FILE... is still there for anything else.
+
+**Disk streaming.** Until now every recording was loaded whole into memory: VSCO's string section took 450 MB, all of
+VSCO 5.6 GB. Now a long recording keeps only a few short stretches in memory (its first half second, where a legato
+join starts it, the start of its tail after its loop) and the rest is read from disk just ahead of where it's playing,
+loops included. Measured on VSCO: the string section is 73 MB in memory, all 75 VSCO instruments 811 MB.
+- **It sounds the same.** A test passage (a 10-note chord on the string section with four players on the mod wheel and
+  a legato line over it: 92 recordings streaming at once) came out identical, sample for sample, to the same passage
+  played from memory, both bounced and played live at real speed from a cold disk; the same for Sonatina's violins,
+  horn and organ (its release samples too).
+- **Bouncing** (offline export) always waits for the disk, so a bounce is always complete.
+- **Playing live**, if a disk ever couldn't keep up, the missing moments would be silent rather than stall your DAW.
+  It never happened in our tests, but they ran on a fast SSD: a slow hard disk with a very big chord is the case we
+  couldn't check here.
+- The INSTRUMENT page's info shows the split ("MEMORY 72.8 MB in memory, 376.7 MB streamed from disk as it plays").
+- Short recordings (staccatos, pizzicatos) stay whole in memory: streaming them would save little.
+
+Nothing changes in your projects or presets.
+
 ## 0.10.0
 
 **THE ENSEMBLE: a bigger section, and lines doubled in octaves** (the plan's next step; you: "Build it" after the
