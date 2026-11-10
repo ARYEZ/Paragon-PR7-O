@@ -6,13 +6,15 @@
 # 0.6.0, the brass (brass3d.py): a second folder, with single-<trumpet|trombone|horn|tuba>.png/.json, section.png/.json
 # and section-lit.png:
 #   python3 process_orchestra.py <the strings' renders> <resources/orchestra> <the brass's renders>
-# Without it, the brass's pictures and geometry already in <resources/orchestra> are kept.
+# Without it ("-"), the brass's pictures and geometry already in <resources/orchestra> are kept.
+# 0.8.0, the stage (stage3d.py): a fourth folder with stage.png / stage.json (without it, the stage's kept).
 import json, os, sys
 import numpy as np
 from PIL import Image
 
 raw, out = sys.argv[1], sys.argv[2]
-brass = sys.argv[3] if len(sys.argv) > 3 else None
+brass = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "-" else None
+stage = sys.argv[4] if len(sys.argv) > 4 else None   # 0.8.0: stage3d.py's stage.png / stage.json
 
 def family_hues(path):
     rgb = np.asarray(Image.open(path).convert("RGB")).astype(np.float32) / 255.0
@@ -93,6 +95,17 @@ else:
             geometry["single"][kind] = kept["single"][kind]
     if "brassSection" in kept:
         geometry["brassSection"] = kept["brassSection"]
+if stage:
+    family_hues(os.path.join(stage, "stage.png")).save(os.path.join(out, "stage.jpg"), quality=88, optimize=True)
+    g = json.load(open(os.path.join(stage, "stage.json")))
+    # the grid: stage metres to pixels, every 0.5 m from x -9, y -2 (37 x 29 points)
+    geometry["stage"] = {"size": [g["width"], g["height"]], "x0": -9.0, "y0": -2.0, "step": 0.5, "columns": 37, "rows": 29,
+                         "points": [g["grid"]["%d,%d" % (i, j)] for j in range(29) for i in range(37)],
+                         "podium": g["podium"]}
+else:
+    kept = json.load(open(os.path.join(out, "orchestra.json")))
+    if "stage" in kept:
+        geometry["stage"] = kept["stage"]
 with open(os.path.join(out, "orchestra.json"), "w") as f:
     json.dump(geometry, f, indent=1)
 print("wrote", out)

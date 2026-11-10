@@ -14,6 +14,7 @@ namespace
     constexpr int pr7o010 = 42;   // PR7-O 0.1.0: the instrument, MIDI CHANNEL, NOTE NAMES
     constexpr int pr7o020 = 43;   // PR7-O 0.2.0: DYNAMICS, AUTO SUSTAIN
     constexpr int pr7o070 = 44;   // PR7-O 0.7.0: LEGATO, GLIDE
+    constexpr int pr7o080 = 45;   // PR7-O 0.8.0: THE STAGE
 
     const ToText asDb = [] (float value, int) { return juce::String (value, 1) + " dB"; };
     const ToText asPercent = [] (float value, int) { return juce::String (juce::roundToInt (value * 100.0f)) + "%"; };
@@ -91,6 +92,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         addSwitch (layout, instLegato, "Legato", false, pr7o070);
         add (layout, instGlide, "Glide", { 0.0f, 0.5f, 0.001f, 0.5f }, 0.0f,
              [] (float v, int) { return v < 0.0005f ? juce::String ("Off") : juce::String (juce::roundToInt (v * 1000.0f)) + " ms"; }, pr7o070);
+        addSwitch (layout, stageOn, "Stage", false, pr7o080);
+        addChoice (layout, stageRoom, "Room", stageRoomNames, 2, pr7o080);
+        add (layout, stageMic, "Mic Distance", logRange (1.0, 25.0), 6.0f,
+             [] (float v, int) { return juce::String (v, v < 10.0f ? 1 : 0) + " m"; }, pr7o080);
+        add (layout, stageRoomLevel, "Room Level", { -24.0f, 6.0f, 0.1f }, 0.0f, asDb, pr7o080);
+        add (layout, stageDecay, "Decay", logRange (0.5, 2.0), 1.0f,
+             [] (float v, int) { return "x" + juce::String (v, 2); }, pr7o080);
+        add (layout, stageSpread, "Spread", { 0.0f, 1.5f, 0.01f }, 1.0f, asPercent, pr7o080);
         addChoice (layout, midiChannel, "MIDI Channel", midiChannelNames, 0, pr7o010);
         addChoice (layout, noteNames, "Note Names", notenames::choiceNames, 0, pr7o010);
     }

@@ -5,6 +5,7 @@
 #include "PluginProcessor.h"
 #include "ui/InstrumentRack.h"
 #include "ui/OrchestraView.h"
+#include "ui/StageView.h"
 #include "ui/SynthControls.h"
 
 // THE KEYBOARD (PR7-O 0.1.0): 88 keys under the pages, in the plugin's colours; the keys the instrument plays tinted,
@@ -107,6 +108,10 @@ public:
     OrchestraView& getOrchestraView() noexcept { return picture; }
     bool isShowingPicture() const noexcept { return picture.isVisible(); }
     void chooseRegions (bool regions);
+    // 0.8.0: the panel's STAGE view (each part's seat on our stage), between INSTRUMENT and REGIONS.
+    StageView& getStageView() noexcept { return stageView; }
+    bool isShowingStage() const noexcept { return stageView.isVisible(); }
+    void chooseStage();
     // 0.4.0: a section's SPLITS: a row a part (its name and keys); moving the split under part `part` (1 on) by
     // `semitones` (each part keeps a key at least), applied after a moment (applyPendingSplits: now).
     int getNumSplitRows() const noexcept { return (int) splitRows.size(); }
@@ -126,10 +131,13 @@ private:
     juce::TextEditor info;
     RegionMap map;
     OrchestraView picture;
-    juce::TextButton showPicture { "INSTRUMENT" }, showRegions { "REGIONS" };
-    bool regionsChosen = false;
-    std::vector<std::unique_ptr<ParamControl>> playControls, sendControls;   // the rack's knobs
-    std::unique_ptr<ParamControl> dynamicsMenu, insertMenu;                  // the rack's menus
+    StageView stageView;
+    juce::TextButton showPicture { "INSTRUMENT" }, showStage { "STAGE" }, showRegions { "REGIONS" };
+    bool regionsChosen = false, stageChosen = false;
+    std::vector<std::unique_ptr<ParamControl>> playControls, sendControls, stageControls;   // the rack's knobs
+    std::unique_ptr<ParamControl> dynamicsMenu, insertMenu, roomMenu;                       // the rack's menus
+    juce::TextButton stageOnKey, resetSeatsKey;   // 0.8.0: the STAGE page's keys
+    std::unique_ptr<juce::ParameterAttachment> stageOnAttachment;
     juce::TextButton autoSustainKey;
     std::unique_ptr<juce::ParameterAttachment> autoSustainAttachment;
     juce::TextButton legatoKey;   // 0.7.0

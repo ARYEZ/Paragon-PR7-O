@@ -13,6 +13,7 @@
 #include "Rack.h"
 #include "dsp/sampler/Sampler.h"
 #include "dsp/sampler/Section.h"
+#include "dsp/stage/Seating.h"
 #include "rigs/RigLibrary.h"
 #include "rigs/UndoHistory.h"
 #include "rigs/MidiLinks.h"
@@ -113,6 +114,13 @@ public:
     // Its text stands where a file's path would (getInstrumentFile, presets, projects, undo).
     void loadSection (const sampler::section::Section&);
     std::optional<sampler::section::Section> getSection() const;
+
+    // 0.8.0, THE STAGE: the parts loaded (a section's parts, else the instrument) with their seats (a seat moved is
+    // kept by the part's name), on the message thread.
+    struct StagePart { juce::String name; stage::Seat seat; bool moved = false; };
+    std::vector<StagePart> getStageParts() const;
+    void setSeat (const juce::String& partName, stage::Seat);
+    void resetSeats();
     void clearInstrument();
     // Tests (and anything that made one in memory): this program now, under `file`'s name (not loaded again from it).
     void setProgram (std::shared_ptr<const sampler::Program>, const juce::String& file = {});
@@ -318,6 +326,8 @@ private:
     juce::AudioBuffer<float> instrumentBuffer;   // what the sampler plays, before it goes to MAIN or its insert bus
 
     LevelMeterSource outputMeter;
+
+    std::map<juce::String, stage::Seat> movedSeats;   // 0.8.0: seats moved off their default, by part name
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ParagonX1AudioProcessor)
 };

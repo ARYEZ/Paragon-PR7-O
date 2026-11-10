@@ -1373,3 +1373,36 @@ void ParagonX1AudioProcessor::controllerForTest (int controller, float value)
 
 //==============================================================================
 // THE SONG TRACK (0.8.0)
+
+//==============================================================================
+std::vector<ParagonX1AudioProcessor::StagePart> ParagonX1AudioProcessor::getStageParts() const
+{
+    std::vector<StagePart> parts;
+    juce::StringArray names;
+    if (const auto section = getSection())
+        for (const auto& p : section->parts)
+            names.addIfNotAlreadyThere (sampler::section::nameOf (p));
+    else if (const auto file = getInstrumentFile(); file.isNotEmpty())
+        names.add (sampler::section::describe (file));
+    for (const auto& name : names)
+    {
+        StagePart part { name, stage::seatFor (name), false };
+        if (const auto it = movedSeats.find (name); it != movedSeats.end())
+        {
+            part.seat = it->second;
+            part.moved = true;
+        }
+        parts.push_back (part);
+    }
+    return parts;
+}
+
+void ParagonX1AudioProcessor::setSeat (const juce::String& partName, stage::Seat seat)
+{
+    movedSeats[partName] = stage::clamp (seat);
+}
+
+void ParagonX1AudioProcessor::resetSeats()
+{
+    movedSeats.clear();
+}
