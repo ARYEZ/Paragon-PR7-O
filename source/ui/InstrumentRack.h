@@ -42,10 +42,10 @@ public:
     juce::TextButton loadKey, sectionKey, clearKey;
 
     // Where the page's controls go, in the unit's pixels.
-    static constexpr int numKnobs = 6;
-    juce::Rectangle<int> knobCell (int index) const;          // PLAYING: LEVEL ... POLYPHONY
+    static constexpr int numKnobs = 7;
+    juce::Rectangle<int> knobCell (int index) const;          // PLAYING: LEVEL ... POLYPHONY, GLIDE (0.7.0)
     juce::Rectangle<int> menuCell (int index) const;          // PLAYING: DYNAMICS (0); ROUTING: INSERT BUS (0)
-    juce::Rectangle<int> pageKeyCell (int index) const;       // PLAYING: AUTO SUSTAIN (0)
+    juce::Rectangle<int> pageKeyCell (int index) const;       // PLAYING: AUTO SUSTAIN (0), LEGATO (1; 0.7.0)
     juce::Rectangle<int> routingKnobCell (int index) const;   // ROUTING: SEND DELAY, SEND REVERB
     juce::Rectangle<int> screenArea() const;
     juce::Rectangle<int> instrumentKeyCell (int index) const; // LOAD, SECTION, CLEAR

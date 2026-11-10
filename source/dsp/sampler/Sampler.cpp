@@ -45,6 +45,7 @@ namespace sampler
     Sampler::Sampler()
     {
         voices.resize ((size_t) numSlots);
+        cameFrom.fill (-1);
         noteScratch.resize ((size_t) numSlots);
         idScratch.resize ((size_t) numSlots);
     }
@@ -63,6 +64,8 @@ namespace sampler
             h = false;
         pedal = false;
         bend = 0.0f;
+        keyDown.fill (false);
+        cameFrom.fill (-1);
         activeVoices = 0;
         activeNotes = 0;
     }
@@ -84,6 +87,7 @@ namespace sampler
                 if (v.active)
                     fadeOut (v, 0.02);
             current = program;
+            cameFrom.fill (-1);
             keyswitch = -1;
             if (program != nullptr)
                 keyswitch = program->swDefault >= 0 ? program->swDefault
@@ -142,6 +146,7 @@ namespace sampler
             if (settings.channel > 0 && channel != settings.channel)
                 continue;
             playTo (at);
+            now = clock + at;
             if (message.isNoteOn())
             {
                 if (program != nullptr)
@@ -153,7 +158,7 @@ namespace sampler
                 }
             }
             else if (message.isNoteOff())
-                noteOff (message.getNoteNumber(), channel);
+                noteOff (program, message.getNoteNumber(), channel, settings);
             else if (message.isSustainPedalOn())
                 pedal = true;
             else if (message.isSustainPedalOff())
@@ -177,6 +182,8 @@ namespace sampler
                 expression = (float) message.getControllerValue() / 127.0f;
             else if (message.isAllNotesOff())
             {
+                keyDown.fill (false);
+                cameFrom.fill (-1);
                 for (auto& v : voices)
                     if (v.active)
                         release (v);
@@ -189,6 +196,7 @@ namespace sampler
             }
         }
         playTo (numSamples);
+        clock += numSamples;
 
         auto active = 0;
         std::array<bool, 128> keys {};
@@ -218,6 +226,41 @@ namespace sampler
         if (note < 0 || note > 127 || velocity <= 0)
             return;
         lastNote = note;
+        const auto from = settings.legato ? joinableFrom (note) : -1;
+        keyDown[(size_t) note] = true;
+        keyVelocity[(size_t) note] = velocity;
+        keyChannel[(size_t) note] = channel;
+        keyStart[(size_t) note] = now;
+        cameFrom[(size_t) note] = playNote (program, note, velocity, channel, settings, from) ? from : -1;
+    }
+
+    int Sampler::joinableFrom (int note) const noexcept
+    {
+        // The nearest sounding held note within an octave, begun at least chordWindow ago (the most recent when two are
+        // as near).
+        const auto earliest = now - (juce::int64) (chordWindow * rate);
+        auto best = -1, bestDistance = 13;
+        juce::int64 bestStart = 0;
+        for (const auto& v : voices)
+        {
+            if (! v.active || v.released || v.fading || v.region == nullptr || ! v.region->held || v.note == note)
+                continue;
+            const auto start = keyStart[(size_t) v.note];
+            const auto distance = std::abs (v.note - note);
+            if (start > earliest || distance > 12)
+                continue;
+            if (distance < bestDistance || (distance == bestDistance && start > bestStart))
+            {
+                best = v.note;
+                bestDistance = distance;
+                bestStart = start;
+            }
+        }
+        return best;
+    }
+
+    bool Sampler::playNote (const Program& program, int note, int velocity, int channel, const Settings& settings, int joinFrom) noexcept
+    {
         const auto chance = nextRandom();
         const auto onWheel = settings.dynamics == Dynamics::modWheel;
         // The regions this note plays: on the wheel, a held recording's every velocity layer.
@@ -241,7 +284,33 @@ namespace sampler
                 chosen[(size_t) numChosen++] = &r;
         }
         if (numChosen == 0)
-            return;
+            return false;
+        // LEGATO: joined only when it plays a held recording.
+        Join join;
+        if (joinFrom >= 0)
+            for (int i = 0; i < numChosen && join.from < 0; ++i)
+                if (chosen[(size_t) i]->held && chosen[(size_t) i]->legatoStart >= 0)
+                    join.from = joinFrom;
+        if (join.from >= 0)
+        {
+            join.seconds = joinSeconds ((double) (now - keyStart[(size_t) join.from]) / rate);
+            join.glide = juce::jmax (0.0, (double) settings.glideSeconds);
+            // The note joined fades out (equal power) as this one fades in, its pitch gliding with it.
+            const auto count = (int) std::lround (join.glide * rate);
+            const auto cents = 100.0 * (double) (note - join.from);
+            for (auto& v : voices)
+                if (v.active && v.note == join.from && ! v.released && ! v.fading)
+                {
+                    fadeOut (v, join.seconds);
+                    v.legatoOut = true;
+                    if (count > 0)
+                    {
+                        v.glideTarget = std::pow (2.0, cents / 1200.0);
+                        v.glideStep = std::pow (2.0, cents / 1200.0 / (double) count);
+                        v.glideCount = count;
+                    }
+                }
+        }
         makeRoom (settings);
         const auto noteId = ++notes;
         // On the wheel: each held layer's neighbours, by the middles of the velocity ranges started.
@@ -271,8 +340,9 @@ namespace sampler
                         upper = 0.5f * (float) middles[(size_t) k];
                 }
             }
-            startVoice (r, note, velocity, channel, settings, noteId, lower, upper);
+            startVoice (r, note, velocity, channel, settings, noteId, lower, upper, join.from >= 0 ? &join : nullptr);
         }
+        return join.from >= 0;
     }
 
     void Sampler::fadeNote (std::uint64_t noteId, double seconds) noexcept
@@ -346,7 +416,7 @@ namespace sampler
     }
 
     void Sampler::startVoice (const Region& r, int note, int velocity, int channel, const Settings& settings, std::uint64_t noteId,
-                              float lowerMiddle, float upperMiddle) noexcept
+                              float lowerMiddle, float upperMiddle, const Join* join) noexcept
     {
         if (r.sample == nullptr || r.sample->length() < 2)
             return;
@@ -417,6 +487,24 @@ namespace sampler
         v.sustain = r.sustain;
         v.decayCoef = fallCoef (-60.0f, r.decay * rate);
         v.releaseCoef = fallCoef (-80.0f, juce::jmax (minReleaseSeconds, r.release * settings.releaseScale) * rate);
+        // LEGATO: a joined held recording starts past its attack, fading in over the join (equal power), its pitch
+        // gliding from the note it joins.
+        if (join != nullptr && r.held && r.legatoStart >= 0)
+        {
+            v.position = (double) r.legatoStart;
+            v.countdown = 0;
+            v.stage = Voice::Stage::attack;
+            v.attackStep = (float) (1.0 / juce::jmax (1.0, join->seconds * rate));
+            v.legatoIn = true;
+            if (const auto count = (int) std::lround (join->glide * rate); count > 0 && join->from != note)
+            {
+                const auto cents = 100.0 * (double) (join->from - note);
+                v.glideRatio = std::pow (2.0, cents / 1200.0);
+                v.glideStep = std::pow (2.0, -cents / 1200.0 / (double) count);
+                v.glideTarget = 1.0;
+                v.glideCount = count;
+            }
+        }
         updatePitch (settings);
     }
 
@@ -451,8 +539,24 @@ namespace sampler
             }
     }
 
-    void Sampler::noteOff (int note, int channel) noexcept
+    void Sampler::noteOff (const Program* program, int note, int channel, const Settings& settings) noexcept
     {
+        if (note < 0 || note > 127)
+            return;
+        keyDown[(size_t) note] = false;
+        // LEGATO: let go of a joined note while a key it came from is still down: it joins back to that one.
+        auto back = cameFrom[(size_t) note];
+        cameFrom[(size_t) note] = -1;
+        for (int guard = 0; guard < 128 && back >= 0 && ! keyDown[(size_t) back]; ++guard)
+            back = cameFrom[(size_t) back];
+        if (settings.legato && ! pedal && program != nullptr && back >= 0 && keyDown[(size_t) back])
+        {
+            auto sounding = false;
+            for (const auto& v : voices)
+                sounding = sounding || (v.active && v.note == note && ! v.released && ! v.fading && v.region != nullptr && v.region->held);
+            if (sounding)   // (the join's length follows how long this note played)
+                playNote (*program, back, keyVelocity[(size_t) back], keyChannel[(size_t) back], settings, note);
+        }
         for (auto& v : voices)
             if (v.active && ! v.released && v.note == note && v.channel == channel)
             {
@@ -469,6 +573,9 @@ namespace sampler
     {
         if (v.released || v.region == nullptr || v.region->oneShot)
             return;
+        if (v.legatoIn && v.stage == Voice::Stage::attack)   // (from the equal-power rise's level: no step)
+            v.level = std::sin (juce::MathConstants<float>::halfPi * v.level);
+        v.legatoIn = false;
         v.released = true;
         v.pedalHeld = false;
         v.stage = Voice::Stage::release;
@@ -521,7 +628,7 @@ namespace sampler
             if (tilted)
             {
                 v.tiltGain = tiltAt (v.position);
-                v.tiltStep = (float) std::exp (v.tiltK * v.increment);
+                v.tiltStep = (float) std::exp (v.tiltK * v.increment * v.glideRatio);
             }
             for (int i = 0; i < numSamples; ++i)
             {
@@ -583,10 +690,19 @@ namespace sampler
                     x = x * from + read (l, back) * to;
                     y = stereo ? y * from + read (r, back) * to : x;
                 }
-                const auto gain = v.level * v.fade * (v.onWheel ? v.wheelGain : 1.0f);
+                auto level = v.level, fade = v.fade;
+                if (v.legatoIn && v.stage == Voice::Stage::attack)   // LEGATO's equal-power crossfade
+                    level = std::sin (juce::MathConstants<float>::halfPi * level);
+                if (v.legatoOut)
+                    fade = std::sin (juce::MathConstants<float>::halfPi * juce::jmax (0.0f, fade));
+                const auto gain = level * fade * (v.onWheel ? v.wheelGain : 1.0f);
                 left[i] += x * gain * v.gainLeft;
                 right[i] += y * gain * v.gainRight;
-                v.position += v.increment;
+                v.position += v.increment * v.glideRatio;
+                if (v.glideCount > 0 && --v.glideCount == 0)
+                    v.glideRatio = v.glideTarget;
+                else if (v.glideCount > 0)
+                    v.glideRatio *= v.glideStep;
                 if (v.looping && v.position >= (double) v.loopEnd)
                 {
                     v.position -= (double) (v.loopEnd - v.loopStart);

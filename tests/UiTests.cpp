@@ -486,7 +486,7 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: which instrument a file is; each note's st
     CHECK (orchestra::kindOf ("Contrabass-KS") == Kind::bass);
     CHECK (orchestra::kindOf ("Double Bass Pizz") == Kind::bass);
     CHECK (orchestra::kindOf ("BassoonSus") == Kind::none);
-    CHECK (orchestra::kindOf ("TromboneSus") == Kind::none);
+    CHECK (orchestra::kindOf ("TromboneSus") == Kind::trombone);   // 0.6.0: the brass
     CHECK (orchestra::kindOf ("GM-StylePerc bassdrum") == Kind::none);
     CHECK (orchestra::kindOf ("FluteSusVib") == Kind::none);
 
@@ -532,7 +532,7 @@ TEST_CASE ("THE INSTRUMENT page 0.5.0: PR7-I's rack holds its knobs, menus and k
     };
     CHECK (rack.getPage() == InstrumentRack::Page::playing);
     CHECK (shownOnRack() == juce::StringArray { ParamIDs::instLevel, ParamIDs::instPan, ParamIDs::instTranspose, ParamIDs::instTune,
-                                                ParamIDs::instRelease, ParamIDs::instVoices, ParamIDs::instDynamics });
+                                                ParamIDs::instRelease, ParamIDs::instVoices, ParamIDs::instGlide, ParamIDs::instDynamics });
     rack.getPageKey (InstrumentRack::Page::routing).onClick();
     CHECK (rack.getPage() == InstrumentRack::Page::routing);
     CHECK (shownOnRack() == juce::StringArray { ParamIDs::instSendDelay, ParamIDs::instSendReverb, ParamIDs::instInsert });
@@ -586,6 +586,25 @@ TEST_CASE ("THE INSTRUMENT page 0.5.0: PR7-I's rack holds its knobs, menus and k
             key->onClick();
         }
     CHECK ((autoSustain->getValue() > 0.5f) != before);
+
+    // 0.7.0: LEGATO's key beside it, off by default, sets its parameter; GLIDE a seventh knob, inside the rack.
+    auto* legato = w.processor.getParameters().getParameter (ParamIDs::instLegato);
+    CHECK (legato->getValue() < 0.5f);
+    auto legatoKeys = 0;
+    for (auto* c : rack.getChildren())
+        if (auto* key = dynamic_cast<juce::TextButton*> (c); key != nullptr && key->getTooltip().startsWith ("LEGATO"))
+        {
+            ++legatoKeys;
+            CHECK (key->isVisible());
+            CHECK_FALSE (key->getToggleState());
+            CHECK_FALSE (key->getBounds().intersects (rack.pageKeyCell (0)));
+            key->onClick();
+            CHECK (key->getToggleState());
+        }
+    CHECK (legatoKeys == 1);
+    CHECK (legato->getValue() > 0.5f);
+    CHECK (rack.getLocalBounds().contains (rack.knobCell (InstrumentRack::numKnobs - 1)));
+    CHECK (w.processor.getParameters().getParameter (ParamIDs::instGlide)->getCurrentValueAsText() == "Off");
 }
 
 TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: a section's parts glow while they play, their notes on their strings", "[ui][orchestra][section]")
@@ -605,7 +624,8 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: a section's parts glow while they play, th
     REQUIRE (w.processor.waitForInstrument());
     page.refresh();
     auto& view = page.getOrchestraView();
-    CHECK (view.getMode() == OrchestraView::Mode::section);   // the horns aren't modelled: they play, unpictured
+    CHECK (view.getMode() == OrchestraView::Mode::section);   // two string parts, one brass: the strings shown, the horns unpictured
+    CHECK_FALSE (view.showsBrass());
     CHECK (page.isShowingPicture());
     CHECK (w.processor.getInstrumentFile().contains ("Horns.sfz"));
 
@@ -643,6 +663,10 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: every picture's colours sit inside 322-38 
         pictures.push_back ({ orchestra::nameOf (k), OrchestraView::getPicture (k) });
     pictures.push_back ({ "section", OrchestraView::getSectionPicture (false) });
     pictures.push_back ({ "section lit", OrchestraView::getSectionPicture (true) });
+    for (const auto k : { orchestra::Kind::trumpet, orchestra::Kind::horn, orchestra::Kind::trombone, orchestra::Kind::tuba })
+        pictures.push_back ({ orchestra::nameOf (k), OrchestraView::getPicture (k) });
+    pictures.push_back ({ "brass section", OrchestraView::getSectionPicture (false, true) });
+    pictures.push_back ({ "brass section lit", OrchestraView::getSectionPicture (true, true) });
     for (const auto& [name, image] : pictures)
     {
         REQUIRE (image.isValid());
@@ -676,4 +700,150 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.5.1: a stop past the picture's left edge (a cel
     const auto at = [] (int semitones) { return 940.0f + (-500.0f - 940.0f) * orchestra::alongString (semitones, 940.0f, -500.0f, 14.0f); };
     CHECK (std::abs (at (24) - 14.0f) < 1.0e-3f);
     CHECK (std::abs (at (12) - 220.0f) < 1.0e-3f);
+}
+
+TEST_CASE ("THE ORCHESTRA VIEW 0.6.0: the brass, which a file is, and each note's valves or slide position", "[ui][orchestra][brass]")
+{
+    using orchestra::Kind;
+    CHECK (orchestra::kindOf ("TrumpetSusVib") == Kind::trumpet);
+    CHECK (orchestra::kindOf ("FHornStac") == Kind::horn);
+    CHECK (orchestra::kindOf ("Tuba-KS") == Kind::tuba);
+    CHECK (orchestra::kindOf ("Bass Trombone") == Kind::trombone);   // not a double bass
+    CHECK (orchestra::kindOf ("English Horn") == Kind::none);        // a woodwind
+    CHECK (orchestra::isBrass (Kind::horn));
+    CHECK_FALSE (orchestra::isBrass (Kind::cello));
+    CHECK (orchestra::stopsFor (Kind::trumpet, { 60 }).empty());
+
+    const auto valves = [] (Kind k, int note)
+    {
+        const auto f = orchestra::fingeringFor (k, note);
+        return f.playable ? f.valves : -1;
+    };
+    // B-flat trumpet (sounding pitch: written D4 sounds C4): the usual chart.
+    CHECK (valves (Kind::trumpet, 58) == 0b000);   // written C4: open
+    CHECK (valves (Kind::trumpet, 60) == 0b101);   // written D4: 1 + 3
+    CHECK (valves (Kind::trumpet, 62) == 0b011);   // written E4: 1 + 2
+    CHECK (valves (Kind::trumpet, 64) == 0b010);   // written F#4: 2
+    CHECK (valves (Kind::trumpet, 65) == 0b000);   // written G4: open
+    CHECK (valves (Kind::trumpet, 68) == 0b001);   // written B-flat4: 1
+    CHECK (valves (Kind::trumpet, 52) == 0b111);   // written F#3, its lowest: 1 + 2 + 3
+    CHECK (valves (Kind::trumpet, 51) == -1);      // under its reach
+    // F horn (sounding a fifth under written): written G4 open, B4 on 2, F4 on 1.
+    CHECK (valves (Kind::horn, 60) == 0b000);
+    CHECK (valves (Kind::horn, 64) == 0b010);
+    CHECK (valves (Kind::horn, 58) == 0b001);
+    // 4-valve tuba: the 4th valve for five semitones under its second harmonic (F1), 1 + 3 + 4 for C1, all four for B0.
+    CHECK (valves (Kind::tuba, 29) == 0b1000);
+    CHECK (valves (Kind::tuba, 24) == 0b1101);
+    CHECK (valves (Kind::tuba, 23) == 0b1111);
+    CHECK (valves (Kind::tuba, 22) == 0b0000);    // its pedal B-flat0
+    CHECK (valves (Kind::tuba, 21) == -1);
+    CHECK (valves (Kind::tuba, 50) == 0b0000);    // D3: its 5th harmonic
+    // Tenor trombone: positions.
+    const auto position = [] (int note) { const auto f = orchestra::fingeringFor (Kind::trombone, note); return f.playable ? f.position : -1; };
+    CHECK (position (53) == 1);   // F3
+    CHECK (position (50) == 4);   // D3
+    CHECK (position (48) == 6);   // C3
+    CHECK (position (40) == 7);   // E2, its lowest outside the pedals
+    CHECK (position (37) == -1);  // no F trigger: out of reach
+    CHECK (position (31) == 4);   // a pedal
+
+    // The pictures' geometry: three valves (the horn: three and its thumb valve; the tuba: four), the slide's run.
+    CHECK (OrchestraView::getValves (Kind::trumpet, false).size() == 3);
+    CHECK (OrchestraView::getValves (Kind::horn, false).size() == 4);
+    CHECK (OrchestraView::getValves (Kind::tuba, false).size() == 4);
+    CHECK (OrchestraView::hasSlide (Kind::trombone, false));
+    CHECK (OrchestraView::hasSlide (Kind::trombone, true));
+    CHECK (OrchestraView::getValves (Kind::trumpet, true).size() == 3);
+    for (const auto k : { Kind::trumpet, Kind::horn, Kind::tuba })
+        for (const auto inSection : { false, true })
+            for (const auto& v : OrchestraView::getValves (k, inSection))
+            {
+                const auto& image = inSection ? OrchestraView::getSectionPicture (false, true) : OrchestraView::getPicture (k);
+                CHECK (image.getBounds().toFloat().contains (v));   // in the picture
+            }
+}
+
+TEST_CASE ("THE ORCHESTRA VIEW 0.6.0: a brass instrument shows its note's fingering; a brass section lights each part", "[ui][orchestra][brass]")
+{
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("t.wav"), *testkit::sine (220.0, 2.0), 24);
+    const auto file = [&dir] (const char* name, int low, int high)
+    {
+        const auto f = dir.getChildFile (name);
+        f.replaceWithText ("<region> sample=t.wav lokey=" + juce::String (low) + " hikey=" + juce::String (high) + " pitch_keycenter=60\n");
+        return f.getFullPathName();
+    };
+    Window w;
+    auto& page = w.view->getInstrumentPage();
+    auto& view = page.getOrchestraView();
+    w.processor.setPlayConfigDetails (0, 2, 48000.0, 256);
+    w.processor.prepareToPlay (48000.0, 256);
+    juce::AudioBuffer<float> buffer (2, 256);
+    const auto play = [&] (std::initializer_list<int> notes)
+    {
+        juce::MidiBuffer midi;
+        for (const auto n : notes)
+            midi.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 100), 0);
+        w.processor.processBlock (buffer, midi);
+        juce::Timer::callPendingTimersSynchronously();
+        juce::Thread::sleep (60);
+        juce::Timer::callPendingTimersSynchronously();
+    };
+
+    // One trumpet: its picture; a chord shows its highest note (a trumpet plays one), C4 + D4 -> D4: valves 1 + 2.
+    w.processor.loadInstrument (juce::File (file ("TrumpetSus.sfz", 52, 84)));
+    REQUIRE (w.processor.waitForInstrument());
+    page.refresh();
+    CHECK (view.getMode() == OrchestraView::Mode::single);
+    CHECK (view.getKind() == orchestra::Kind::trumpet);
+    CHECK (view.showsBrass());
+    CHECK (page.isShowingPicture());
+    CHECK (view.getBrassNote (orchestra::Kind::trumpet) == -1);
+    play ({ 60, 62 });
+    CHECK (view.getBrassNote (orchestra::Kind::trumpet) == 62);
+    // ...and drawn: the view with the note differs from the view without it at valve 1 (pressed), not at valve 3.
+    view.setBounds (0, 0, 1100, 450);
+    const auto withNote = view.createComponentSnapshot (view.getLocalBounds(), true, 1.0f);
+    juce::MidiBuffer off;
+    off.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+    off.addEvent (juce::MidiMessage::noteOff (1, 62), 0);
+    w.processor.processBlock (buffer, off);
+    juce::Timer::callPendingTimersSynchronously();
+    juce::Thread::sleep (60);
+    juce::Timer::callPendingTimersSynchronously();
+    REQUIRE (view.getBrassNote (orchestra::Kind::trumpet) == -1);
+    const auto without = view.createComponentSnapshot (view.getLocalBounds(), true, 1.0f);
+    const auto& picture = OrchestraView::getPicture (orchestra::Kind::trumpet);
+    const auto scale = juce::jmax (1100.0f / (float) picture.getWidth(), 450.0f / (float) picture.getHeight());
+    const auto offset = juce::Point<float> ((1100.0f - (float) picture.getWidth() * scale) * 0.5f, (450.0f - (float) picture.getHeight() * scale) * 0.5f);
+    const auto difference = [&] (juce::Point<float> p)
+    {
+        const auto at = (p * scale + offset).toInt();
+        const auto a = withNote.getPixelAt (at.x, at.y), b = without.getPixelAt (at.x, at.y);
+        return std::abs (a.getBrightness() - b.getBrightness());
+    };
+    const auto points = OrchestraView::getValves (orchestra::Kind::trumpet, false);
+    REQUIRE (points.size() == 3);
+    CHECK (difference (points[0]) > 0.1f);   // (its neon ring is bright already: the dot adds about 0.17)
+    CHECK (difference (points[1]) > 0.1f);
+    CHECK (difference (points[2]) < 0.05f);
+
+    // A brass section: the brass picture; a trombone note lights the trombone, not the tuba.
+    w.processor.loadSection (sampler::section::fromFiles ({ file ("TubaSus.sfz", 29, 62), file ("TromboneSus.sfz", 34, 65),
+                                                            file ("FHornSus.sfz", 33, 77), file ("TrumpetSus.sfz", 52, 84) }));
+    REQUIRE (w.processor.waitForInstrument());
+    page.refresh();
+    juce::Timer::callPendingTimersSynchronously();
+    CHECK (view.getMode() == OrchestraView::Mode::section);
+    CHECK (view.showsBrass());
+    play ({});       // (a block first: the audio side takes up the new instrument, fading all voices, then the note)
+    play ({ 50 });   // D3: the trombone's split (48-56), 4th position
+    CHECK (view.getGlow (orchestra::Kind::trombone) > 0.9f);
+    CHECK (view.getGlow (orchestra::Kind::tuba) == 0.0f);
+    CHECK (view.getBrassNote (orchestra::Kind::trombone) == 50);
+    CHECK (orchestra::fingeringFor (orchestra::Kind::trombone, view.getBrassNote (orchestra::Kind::trombone)).position == 4);
+    CHECK (view.getBrassNote (orchestra::Kind::horn) == -1);
 }

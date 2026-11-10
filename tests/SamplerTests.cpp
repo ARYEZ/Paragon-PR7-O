@@ -1090,3 +1090,166 @@ TEST_CASE ("SECTION 0.4.0: a split moved reads only what's new; the rest is the 
     CHECK (partAt (49) == "low");
     CHECK (partAt (50) == "high");
 }
+
+TEST_CASE ("SECTION 0.6.0: default splits by the middle of each range; a part that would squeeze the one beneath shares the middle of the overlap (brass)", "[sfz][section]")
+{
+    // Invented files with VSCO 2 CE's brass sustains' ranges: tuba 29-62, tenor trombone 34-65, horn 33-77, trumpet
+    // 52-84.
+    Folder folder;
+    folder.wav ("t.wav", 220.0, 0.2);
+    const auto file = [&folder] (const char* name, int low, int high)
+    {
+        return folder.sfz (name, "<region> sample=t.wav lokey=" + juce::String (low) + " hikey=" + juce::String (high) + " pitch_keycenter=60\n")
+            .getFullPathName();
+    };
+    const auto tuba = file ("TubaSus.sfz", 29, 62), trombone = file ("TromboneSus.sfz", 34, 65);
+    const auto horn = file ("FHornSus.sfz", 33, 77), trumpet = file ("TrumpetSus.sfz", 52, 84);
+    const auto section = sampler::section::fromFiles ({ trumpet, horn, tuba, trombone });
+    REQUIRE (section.parts.size() == 4);
+    CHECK (section.parts[0].file == tuba);
+    CHECK (section.parts[1].file == trombone);
+    CHECK (section.parts[2].file == horn);   // above the trombone, though its lowest note is under the trombone's
+    CHECK (section.parts[3].file == trumpet);
+    CHECK ((section.parts[0].low == 29 && section.parts[0].high == 47));   // the trombone from 34 would leave it 5 keys
+    CHECK ((section.parts[1].low == 48 && section.parts[1].high == 56));   // 48: the middle of 34-62
+    CHECK ((section.parts[2].low == 57 && section.parts[2].high == 67));   // 57: the middle of 49-65
+    CHECK ((section.parts[3].low == 68 && section.parts[3].high == 84));   // 68: the middle of 58-77
+    // The strings' splits are as they were (each from its own lowest, the violas keeping 7 keys): basses 24-60,
+    // cellos 36-77, violas 48-86, violins 55-86.
+    const auto strings = sampler::section::fromFiles ({ file ("V.sfz", 55, 86), file ("C.sfz", 36, 77), file ("B.sfz", 24, 60), file ("A.sfz", 48, 86) });
+    REQUIRE (strings.parts.size() == 4);
+    CHECK ((strings.parts[0].low == 24 && strings.parts[0].high == 35));
+    CHECK ((strings.parts[1].low == 36 && strings.parts[1].high == 47));
+    CHECK ((strings.parts[2].low == 48 && strings.parts[2].high == 54));
+    CHECK ((strings.parts[3].low == 55 && strings.parts[3].high == 86));
+}
+
+namespace
+{
+    // 0.7.0: a held note per key, each its own tone (no keytracking between them), every one rising from -30 dB to its
+    // level over 0.4 s (a slow bowed attack), 4 s long; a plucked one on key 64.
+    std::shared_ptr<sampler::Program> legatoInstrument()
+    {
+        auto program = std::make_shared<sampler::Program>();
+        const auto add = [&] (std::shared_ptr<const sampler::Sample> s, int key)
+        {
+            sampler::Region r;
+            r.sample = std::move (s);
+            r.loKey = r.hiKey = r.keyCenter = key;
+            r.velTrack = 0.0f;
+            r.release = 0.05f;
+            program->regions.push_back (r);
+        };
+        const auto bowedAttack = curve ({ { 0.0, -30.0 }, { 0.4, 0.0 }, { 4.0, 0.0 } });
+        add (shaped (220.0, 4.0, bowedAttack), 60);
+        add (shaped (330.0, 4.0, bowedAttack), 62);
+        add (plucked (440.0, 1.0), 64);
+        add (shaped (550.0, 4.0, bowedAttack), 73);   // 13 semitones over 60: past an octave
+        sampler::prepareRegions (*program);
+        program->index();
+        return program;
+    }
+
+    juce::MidiBuffer notes (std::initializer_list<std::tuple<bool, int, double>> events)   // (on, key, seconds)
+    {
+        juce::MidiBuffer m;
+        for (const auto& [on, key, at] : events)
+            m.addEvent (on ? juce::MidiMessage::noteOn (1, key, (juce::uint8) 100) : juce::MidiMessage::noteOff (1, key),
+                        (int) std::lround (at * sampleRate));
+        return m;
+    }
+}
+
+TEST_CASE ("SFZ 0.7.0: a held recording's LEGATO start is where its attack is over; a short has none", "[sfz][legato]")
+{
+    const auto program = legatoInstrument();
+    const auto& bowedNote = program->regions[0];
+    REQUIRE (bowedNote.held);
+    // Its level reaches within 3 dB of its body at 0.3 s (-30 dB to 0 dB over 0.4 s); the 50 ms windows place it there.
+    CHECK_THAT ((double) bowedNote.legatoStart / sampleRate, WithinAbs (0.3, 0.06));
+    CHECK (bowedNote.legatoStart <= bowedNote.loopStart);   // before AUTO SUSTAIN's loop
+    CHECK (program->regions[2].legatoStart == -1);           // the plucked note
+}
+
+TEST_CASE ("SAMPLER 0.7.0: LEGATO joins a note played over a held one: past its attack, an equal-power crossfade, timed by how fast you play", "[sampler][legato]")
+{
+    const auto program = legatoInstrument();
+    sampler::Sampler::Settings legato;
+    legato.legato = true;
+    const auto level = [] (const std::vector<float>& x, double hz, double at, double length = 0.03)
+    {
+        return levelAt (x, hz, (size_t) (at * sampleRate), (size_t) (length * sampleRate));
+    };
+    // The tones' steady levels (one note held alone).
+    const auto steady220 = level (render (*program, noteOn (60), 1.5)[0], 220.0, 1.2);
+    const auto steady330 = level (render (*program, noteOn (62), 1.5)[0], 330.0, 1.2);
+    REQUIRE (steady220 > 0.2);
+
+    // 60 held, 62 played at 1.0 s: joined. A second since the first note: the crossfade is its longest, 0.15 s.
+    const auto line = notes ({ { true, 60, 0.0 }, { true, 62, 1.0 } });
+    const auto joined = render (*program, line, 1.6, legato)[0];
+    CHECK_THAT (db (level (joined, 330.0, 1.17) / steady330), WithinAbs (0.0, 1.0));   // at its level: no 0.4 s attack again
+    CHECK (level (joined, 220.0, 1.05) > 0.3 * steady220);                            // the old note in the crossfade...
+    CHECK (level (joined, 220.0, 1.17) < 0.01 * steady220);                           // ...and gone after it
+    // Equal power: the two tones' power together stays at one tone's through the crossfade (within 1 dB).
+    for (double t = 0.95; t < 1.25; t += 0.01)
+    {
+        const auto a = level (joined, 220.0, t, 0.01) / steady220, b = level (joined, 330.0, t, 0.01) / steady330;
+        INFO (t);
+        CHECK_THAT (db (std::sqrt (a * a + b * b)), WithinAbs (0.0, 1.0));
+    }
+    // LEGATO off (as 0.6.0): both sound, the new one from its attack (-30 dB at its start, about -12 dB 0.15 s in).
+    const auto plain = render (*program, line, 1.6)[0];
+    CHECK (level (plain, 220.0, 1.17) > 0.9 * steady220);
+    CHECK (db (level (plain, 330.0, 1.13) / steady330) < -8.0);
+
+    // Played fast (the second note 0.2 s after the first): a crossfade of a quarter of that, 0.05 s.
+    const auto fast = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 0.2 } }), 0.6, legato)[0];
+    CHECK (level (fast, 220.0, 0.26) < 0.01 * steady220);
+    CHECK_THAT (sampler::Sampler::joinSeconds (0.2), WithinAbs (0.05, 1.0e-9));
+    CHECK_THAT (sampler::Sampler::joinSeconds (0.01), WithinAbs (sampler::Sampler::shortestJoin, 1.0e-9));
+    CHECK_THAT (sampler::Sampler::joinSeconds (5.0), WithinAbs (sampler::Sampler::longestJoin, 1.0e-9));
+
+    // A chord (pressed 10 ms apart, under the 40 ms window) isn't joined: both sound.
+    const auto chord = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 0.01 } }), 0.8, legato)[0];
+    CHECK (level (chord, 220.0, 0.6) > 0.9 * steady220);
+    CHECK (level (chord, 330.0, 0.6) > 0.9 * steady330);
+    // Past an octave isn't joined either (key 73 over 60).
+    const auto wide = render (*program, notes ({ { true, 60, 0.0 }, { true, 73, 1.0 } }), 1.5, legato)[0];
+    CHECK (level (wide, 220.0, 1.3) > 0.9 * steady220);
+    // A short (plucked) note over a held one is never joined: the held one goes on.
+    const auto pluck = render (*program, notes ({ { true, 60, 0.0 }, { true, 64, 1.0 } }), 1.5, legato)[0];
+    CHECK (level (pluck, 220.0, 1.3) > 0.9 * steady220);
+    CHECK (level (pluck, 440.0, 1.02) > 0.05);
+
+    // Let go of the joined note while the first key is still down: it joins back, at its level at once.
+    const auto trill = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 1.0 }, { false, 62, 2.0 } }), 2.5, legato)[0];
+    CHECK_THAT (db (level (trill, 220.0, 2.17) / steady220), WithinAbs (0.0, 1.0));
+    CHECK (level (trill, 330.0, 2.2) < 0.01 * steady330);
+    // ...and letting go of both ends it.
+    const auto both = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 1.0 }, { false, 62, 2.0 }, { false, 60, 2.5 } }), 3.0, legato)[0];
+    CHECK (peakOf (both, (size_t) (2.9 * sampleRate)) < 1.0e-3);
+    // The first key let go first: the joined note goes on alone; letting it go ends it (nothing to join back to).
+    const auto firstUp = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 1.0 }, { false, 60, 1.5 }, { false, 62, 2.0 } }), 2.5, legato)[0];
+    CHECK (level (firstUp, 330.0, 1.8) > 0.9 * steady330);
+    CHECK (peakOf (firstUp, (size_t) (2.4 * sampleRate)) < 1.0e-3);
+}
+
+TEST_CASE ("SAMPLER 0.7.0: GLIDE slides a joined note's pitch from the old note's over its time", "[sampler][legato]")
+{
+    const auto program = legatoInstrument();
+    sampler::Sampler::Settings glide;
+    glide.legato = true;
+    glide.glideSeconds = 0.2f;
+    const auto out = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 1.0 } }), 1.6, glide)[0];
+    // Past the crossfade (0.15 s) and before the glide's end (0.2 s): on its way up, 87% of the 7 semitones at 1.175 s.
+    const auto during = frequencyOf (out, (size_t) (1.16 * sampleRate), (size_t) (1.19 * sampleRate));
+    CHECK (during > 295.0);
+    CHECK (during < 328.0);
+    CHECK_THAT (frequencyOf (out, (size_t) (1.3 * sampleRate), (size_t) (1.5 * sampleRate)), WithinAbs (330.0, 2.0));
+    // No glide: at its own pitch as soon as the crossfade is over.
+    sampler::Sampler::Settings none;
+    none.legato = true;
+    const auto straight = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 1.0 } }), 1.6, none)[0];
+    CHECK_THAT (frequencyOf (straight, (size_t) (1.16 * sampleRate), (size_t) (1.19 * sampleRate)), WithinAbs (330.0, 4.0));
+}

@@ -602,6 +602,8 @@ sampler::Sampler::Settings ParagonX1AudioProcessor::getSamplerSettings() const n
     s.dynamics = juce::roundToInt (param (ParamIDs::instDynamics)) == 1 ? sampler::Sampler::Dynamics::modWheel
                                                                        : sampler::Sampler::Dynamics::velocity;
     s.autoSustain = isOn (ParamIDs::instAutoSustain);
+    s.legato = isOn (ParamIDs::instLegato);
+    s.glideSeconds = param (ParamIDs::instGlide);
     return s;
 }
 

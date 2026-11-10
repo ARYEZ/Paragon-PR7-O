@@ -3,11 +3,16 @@
 # turns pink towards purple), saved as JPEG, and the renders' geometry merged into orchestra.json.
 #   python3 process_orchestra.py <the renders' folder> <resources/orchestra>
 # The renders' folder holds single-<violin|viola|cello|bass>.png/.json, section.png/.json and section-lit.png.
+# 0.6.0, the brass (brass3d.py): a second folder, with single-<trumpet|trombone|horn|tuba>.png/.json, section.png/.json
+# and section-lit.png:
+#   python3 process_orchestra.py <the strings' renders> <resources/orchestra> <the brass's renders>
+# Without it, the brass's pictures and geometry already in <resources/orchestra> are kept.
 import json, os, sys
 import numpy as np
 from PIL import Image
 
 raw, out = sys.argv[1], sys.argv[2]
+brass = sys.argv[3] if len(sys.argv) > 3 else None
 
 def family_hues(path):
     rgb = np.asarray(Image.open(path).convert("RGB")).astype(np.float32) / 255.0
@@ -57,6 +62,37 @@ family_hues(os.path.join(raw, "section-lit.png")).save(os.path.join(out, "sectio
 g = json.load(open(os.path.join(raw, "section.json")))
 geometry["section"] = g["instruments"]
 geometry["sectionSize"] = [g["width"], g["height"]]
+
+def brass_geometry(g):
+    # the valves (valve 1 first; the horn's thumb valve last) and the trombone's hand at 1st and 7th position: the
+    # slide's brace, 0.60 m behind its crook at 1st, 0.55 m further at 7th (brass3d.py exports the crook at 1st and
+    # 0.55 m on)
+    out = {"area": g["area"]}
+    points = g["points"]
+    out["valves"] = [points[n] for n in ("valve1", "valve2", "valve3", "valve4", "thumb") if n in points]
+    if "slide" in points:
+        (sx, sy), (ex, ey) = points["slide"], g["slideEnd"]
+        hx, hy = sx - (ex - sx) * 0.60 / 0.55, sy - (ey - sy) * 0.60 / 0.55
+        out["slide"] = [[round(hx, 2), round(hy, 2)], [round(hx + ex - sx, 2), round(hy + ey - sy, 2)]]
+    return out
+
+if brass:
+    for kind in ("trumpet", "trombone", "horn", "tuba"):
+        family_hues(os.path.join(brass, "single-%s.png" % kind)).save(os.path.join(out, "%s.jpg" % kind), quality=88, optimize=True)
+        g = json.load(open(os.path.join(brass, "single-%s.json" % kind)))
+        geometry["single"][kind] = brass_geometry(g["instruments"][kind])
+        geometry["single"][kind]["size"] = [g["width"], g["height"]]
+    family_hues(os.path.join(brass, "section.png")).save(os.path.join(out, "brass-section.jpg"), quality=88, optimize=True)
+    family_hues(os.path.join(brass, "section-lit.png")).save(os.path.join(out, "brass-section-lit.jpg"), quality=88, optimize=True)
+    g = json.load(open(os.path.join(brass, "section.json")))
+    geometry["brassSection"] = {k: brass_geometry(v) for k, v in g["instruments"].items()}
+else:
+    kept = json.load(open(os.path.join(out, "orchestra.json")))
+    for kind in ("trumpet", "trombone", "horn", "tuba"):
+        if kind in kept["single"]:
+            geometry["single"][kind] = kept["single"][kind]
+    if "brassSection" in kept:
+        geometry["brassSection"] = kept["brassSection"]
 with open(os.path.join(out, "orchestra.json"), "w") as f:
     json.dump(geometry, f, indent=1)
 print("wrote", out)

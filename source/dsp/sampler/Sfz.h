@@ -59,6 +59,9 @@ namespace sampler
         // a note still settling); the sampler turns the loop up across its length by this, so each time round it
         // arrives at the level it goes back to. 0 for the file's own loops.
         float loopTilt = 0.0f;
+        // 0.7.0, LEGATO: where a held recording's attack is over (frames: the first 50 ms window at its steady level,
+        // within 3 dB of its body), so a note joined to the one before starts there; -1: not held (never joined).
+        juce::int64 legatoStart = -1;
         // A HELD recording: one that sustains (no one_shot, longer than 2.5 s, and shaped like a bowed or blown note:
         // isSustained), as against a short (spiccato, pizzicato). MOD WHEEL dynamics and AUTO SUSTAIN work on these only.
         bool held = false;
@@ -145,6 +148,8 @@ namespace sampler
     // core's first quarter no more than 9 dB louder than its last (a plucked or struck note peaks at its start and keeps
     // falling); the core at least 0.8 s.
     bool isSustained (const Sample&);
+    // 0.7.0: where a recording reaches its steady level (frames; 0 if it never settles), our own rule for LEGATO.
+    juce::int64 settledFrame (const Sample&);
     SustainPoints findSustain (const Sample&);
     // Sets each region's `held` and AUTO SUSTAIN points (regions without loops of their own). Called by sfz::load and
     // programFrom; tests that build regions by hand call it too.

@@ -282,6 +282,8 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     add (playControls, ParamIDs::instRelease, "RELEASE", "The instrument's release times (how long a note takes to fade once let go) times this");
     add (playControls, ParamIDs::instVoices, "POLYPHONY", "How many notes can sound at once; past it one fades out in 10 ms: the oldest let go, "
                                                           "else the oldest held that isn't the chord's lowest or highest");
+    add (playControls, ParamIDs::instGlide, "GLIDE", "With LEGATO: a joined note slides in pitch from the note before over this time "
+                                                     "(a string player's shift). Off: it moves straight to its pitch");
     add (sendControls, ParamIDs::instSendDelay, "SEND DELAY", "How much of the instrument goes to the DELAY (FX page: switch it on there)");
     add (sendControls, ParamIDs::instSendReverb, "SEND REVERB", "How much of the instrument goes to the REVERB (FX page: switch it on there)");
     const auto menu = [this, &state] (const char* id, const char* label, const char* tip)
@@ -310,6 +312,21 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     autoSustainKey.onClick = [this] { autoSustainAttachment->setValueAsCompleteGesture (autoSustainKey.getToggleState() ? 0.0f : 1.0f); };
     autoSustainAttachment->sendInitialUpdate();
     rack.addAndMakeVisible (autoSustainKey);
+
+    // LEGATO (0.7.0): a key beside it.
+    legatoKey.getProperties().set (ParagonLookAndFeel::pedalButtonProperty, true);
+    legatoKey.setTooltip ("LEGATO: a note played while you still hold a sustained one joins it: the old note fades as the new one "
+                          "fades in, started past its attack, so the line flows instead of starting again (faster playing, a "
+                          "shorter join). Let go of the new note and it goes back to the one still held. Chords (keys pressed "
+                          "together), shorts and notes over an octave apart aren't joined. Our own: the open libraries have no "
+                          "recorded transitions");
+    legatoAttachment = std::make_unique<juce::ParameterAttachment> (*state.getParameter (ParamIDs::instLegato), [this] (float v)
+    {
+        legatoKey.setToggleState (v > 0.5f, juce::dontSendNotification);
+    });
+    legatoKey.onClick = [this] { legatoAttachment->setValueAsCompleteGesture (legatoKey.getToggleState() ? 0.0f : 1.0f); };
+    legatoAttachment->sendInitialUpdate();
+    rack.addAndMakeVisible (legatoKey);
     rack.onPageChanged = [this] { showRackPage(); };
     showRackPage();
 
@@ -325,6 +342,7 @@ void InstrumentPage::showRackPage()
         c->setVisible (playing);
     dynamicsMenu->setVisible (playing);
     autoSustainKey.setVisible (playing);
+    legatoKey.setVisible (playing);
     for (auto& c : sendControls)
         c->setVisible (! playing);
     insertMenu->setVisible (! playing);
@@ -680,6 +698,8 @@ void InstrumentPage::paintOverChildren (juce::Graphics& g)
     juce::String title = "ITS REGIONS: KEYS ACROSS, VELOCITY UP";
     if (picture.isVisible())
         title = picture.getMode() == OrchestraView::Mode::section ? "THE SECTION: EACH PART LIT AS IT PLAYS"
+              : picture.getKind() == orchestra::Kind::trombone ? juce::String ("THE TROMBONE: EACH NOTE'S SLIDE POSITION LIT")
+              : orchestra::isBrass (picture.getKind()) ? "THE " + orchestra::nameOf (picture.getKind()).toUpperCase() + ": EACH NOTE'S VALVES LIT"
               : "THE " + orchestra::nameOf (picture.getKind()).toUpperCase() + ": EACH NOTE LIT WHERE IT'S PLAYED";
     DockStyle::drawTitle (g, mapArea.reduced (16, 0).withHeight (32), title);
 }
@@ -729,6 +749,7 @@ void InstrumentPage::resized()
         playControls[(size_t) i]->setBounds (rack.knobCell (i));
     dynamicsMenu->setBounds (rack.menuCell (0).reduced (4, 2));
     autoSustainKey.setBounds (rack.pageKeyCell (0));
+    legatoKey.setBounds (rack.pageKeyCell (1));
     for (int i = 0; i < (int) sendControls.size(); ++i)
         sendControls[(size_t) i]->setBounds (rack.routingKnobCell (i));
     insertMenu->setBounds (rack.menuCell (0).reduced (4, 2));

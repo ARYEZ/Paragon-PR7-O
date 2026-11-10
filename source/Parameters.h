@@ -34,6 +34,10 @@ namespace ParamIDs
     inline constexpr auto instDynamics    = "instDynamics";
     inline constexpr auto instAutoSustain = "instAutoSustain";
     inline const juce::StringArray dynamicsNames { "Velocity", "Mod Wheel" };   // saved by index: only append
+    // 0.7.0 (version hint 44): LEGATO (on: a note played over a held one joins it, past its attack) and GLIDE (seconds:
+    // a joined note's slide in pitch). In presets; off and 0 by default (as 0.6.0 played).
+    inline constexpr auto instLegato = "instLegato";
+    inline constexpr auto instGlide  = "instGlide";
     // Global, like OUTPUT: they suit the player's controller, not a sound.
     inline constexpr auto midiChannel = "midiChannel";       // midiChannelNames' index (0: any)
     inline constexpr auto noteNames = "noteNames";           // notenames::choiceNames: middle C is C3 or C4 (PR7-D 0.35.1's)

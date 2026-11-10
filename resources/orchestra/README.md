@@ -12,7 +12,10 @@ proportions; the bass with sloping shoulders); no maker's instrument traced.
 | `violin.jpg`, `viola.jpg`, `cello.jpg`, `bass.jpg` | ONE INSTRUMENT: it lies across, scroll right, low string on top; 2200 x 900 |
 | `section.jpg` | THE SECTION: bass, cello, viola, violin standing, low to high, at their real sizes; 2200 x 900 |
 | `section-lit.jpg` | The same, every instrument's neon 4x brighter (a part's area is faded in over `section.jpg` while it plays) |
-| `orchestra.json` | Where each string's bridge and nut ends land (px), and each instrument's area: `single.<kind>`, `section.<kind>` |
+| `trumpet.jpg`, `horn.jpg`, `trombone.jpg`, `tuba.jpg` | 0.6.0, THE BRASS (`brass3d.py`): one lying across, bell right; 2200 x 900 |
+| `brass-section.jpg` | The tuba standing at the left, the trombone across the top right, the horn and trumpet under it; 2200 x 900 |
+| `brass-section-lit.jpg` | The same, the neon brighter (faded in per part, as `section-lit.jpg`) |
+| `orchestra.json` | Where each string's bridge and nut ends land (px), each brass instrument's valves (`valves`, valve 1 first; the horn's thumb valve last) and the trombone's hand at 1st and 7th position (`slide`), and each instrument's area: `single.<kind>`, `section.<kind>`, `brassSection.<kind>` |
 
 ## Making them again
 
@@ -24,6 +27,22 @@ blender -b -P strings3d.py -- $PWD/section.png 64 2200 900 section none $PWD/sec
 blender -b -P strings3d.py -- $PWD/section-lit.png 64 2200 900 section bass,cello,viola,violin $PWD/section-lit.json
 python3 process_orchestra.py . <the repo>/resources/orchestra
 ```
+
+The brass (0.6.0), in another scratch folder, then both folders together:
+
+```bash
+for k in trumpet trombone horn tuba; do blender -b -P brass3d.py -- $PWD/single-$k.png 64 2200 900 single:$k none $PWD/single-$k.json; done
+blender -b -P brass3d.py -- $PWD/section.png 64 2200 900 section none $PWD/section.json
+blender -b -P brass3d.py -- $PWD/section-lit.png 64 2200 900 section tuba,trombone,horn,trumpet $PWD/section-lit.json
+python3 process_orchestra.py <the strings' folder> <the repo>/resources/orchestra <the brass's folder>
+```
+
+- `brass3d.py`: the brass's scene, the same arguments; strings3d.py's materials, floor, lights and bloom (copied in),
+  satin gunmetal tubes (metal shows only what it reflects: two extra lights reach the instruments alone through Cycles'
+  light linking, so the floor stays black), a neon line along each tube (pink at the mouthpiece end, orange at the bell),
+  bright bell rims, neon rings on the valves. Our own side views at real sizes. Trumpet, horn and trombone at one scale
+  (0.745 m across: the geometric middle of the trumpet filling the picture and the trombone; the trombone framed on its
+  bell end), the tuba whole. Under 2 minutes each at 64 samples.
 
 - `strings3d.py`: the scene. Arguments: output, samples, width, height, view (`single:<kind>` or `section`), the
   instruments lit (`none`, or a list), the geometry file. Each about 2.5 minutes on 4 CPU cores at 64 samples.

@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.7.0
+
+**LEGATO** (you chose it as the next step; our own design, since the open libraries have no recorded transitions
+between notes). A new key on the rack, beside AUTO SUSTAIN. With it on, a note you play while still holding a sustained
+one takes over from it instead of starting again:
+- the old note fades out as the new one fades in, with no dip in loudness;
+- the new note starts **past its attack** (no fresh bow stroke or tongued start), so the line flows. Where the attack is
+  over is measured on each recording as it loads: VSCO's violins swell in slowly and skip about 0.75 s, cellos about
+  0.15 s, horn and trombone about 0.1 s;
+- the join follows how you play: quick notes join in about 30 ms, slow ones in up to 150 ms;
+- let go of the new note while still holding the old key and it flows back (trills);
+- notes pressed together as a chord (within 40 ms), short articulations (staccato, pizzicato) and notes more than an
+  octave apart are never joined.
+
+**GLIDE**, a seventh knob after POLYPHONY: with LEGATO, a joined note slides in pitch from the note before over this
+time (0-500 ms), as a string player shifts.
+
+LEGATO is off and GLIDE at 0 by default: your presets and projects play as before.
+
+Worth knowing: holding a chord with one hand while playing a melody with the other, a melody note can take over the
+chord note nearest it (within an octave): for pads under a melody, leave LEGATO off. On loud violins the difference is
+subtle (they reach full level in about 0.2 s anyway); on soft and slowly swelling notes it's large. The join times and
+the chord window are our guesses: tell us how they feel.
+
+## 0.6.0
+
+**The brass in the neon look** (you: "Build it but make the metal a bit more visible", after the mock-up). Load a
+trumpet, horn, trombone or tuba (by its file's name: VSCO 2 CE's TrumpetSus, FHornSus, TromboneSus, Tuba-KS...) and the
+INSTRUMENT page shows our own model of it, lying across with its bell to the right:
+- **trumpet, horn, tuba:** the valves a player presses for the note you play light up (the usual charts: B-flat
+  trumpet, F horn on its F side, 4-valve B-flat tuba; sounding pitch, TRANSPOSE included). A brass instrument plays one
+  note at a time, so with a chord held it shows the highest;
+- **trombone:** the slide's positions 1-7 are marked where the player's hand goes, the note's position lit with the
+  slide's run to it (B-flat tenor without the F trigger: the notes it can't reach light nothing).
+Trumpet, horn and trombone share one scale (the trombone framed on its bell and slide end); the tuba, 92 cm tall, is
+shown whole. **The metal is more visible than in the mock-up:** satin gunmetal with two lights that shine on the
+instruments only, so the floor stays black.
+
+**A brass section** (NEW SECTION... with the brass files) shows the four together: the tuba standing at the left, the
+trombone across the top, the horn and trumpet under it, each lit while its part plays, with its valves or slide
+position. A section mixing strings and brass shows the family with more parts.
+
+**Smarter split points for a section.** 0.4.0 started each part at its own lowest note, which works for the strings
+but not the brass (VSCO's horn recordings start under the trombone's: the horn got a key or two). Now the parts are
+ordered by the middle of their ranges, and a part starts at its own lowest note only if the part below keeps at least
+7 keys; otherwise the two split the notes they share down the middle. VSCO's brass: tuba F0-B1, trombone C2-G#2, horn
+A2-G3, trumpet G#3-C5 (MIDI 29-47, 48-56, 57-67, 68-84; middle C = C3, as the page names them). The strings' splits
+are as before. You can still move any split with - / +.
+
+Not checked: listening (how the brass section sounds with these splits), and how the pictures look on your screen.
+
 ## 0.5.1
 
 **The single instruments bigger, at one common scale** (you: "much closer to the scale that we used for the guitar in

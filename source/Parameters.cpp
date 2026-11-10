@@ -13,6 +13,7 @@ namespace
     constexpr int firstVersion = 1;
     constexpr int pr7o010 = 42;   // PR7-O 0.1.0: the instrument, MIDI CHANNEL, NOTE NAMES
     constexpr int pr7o020 = 43;   // PR7-O 0.2.0: DYNAMICS, AUTO SUSTAIN
+    constexpr int pr7o070 = 44;   // PR7-O 0.7.0: LEGATO, GLIDE
 
     const ToText asDb = [] (float value, int) { return juce::String (value, 1) + " dB"; };
     const ToText asPercent = [] (float value, int) { return juce::String (juce::roundToInt (value * 100.0f)) + "%"; };
@@ -87,6 +88,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         addChoice (layout, instInsert, "Insert Bus", insertBusNames, 0, pr7o010);
         addChoice (layout, instDynamics, "Dynamics", dynamicsNames, 0, pr7o020);
         addSwitch (layout, instAutoSustain, "Auto Sustain", true, pr7o020);
+        addSwitch (layout, instLegato, "Legato", false, pr7o070);
+        add (layout, instGlide, "Glide", { 0.0f, 0.5f, 0.001f, 0.5f }, 0.0f,
+             [] (float v, int) { return v < 0.0005f ? juce::String ("Off") : juce::String (juce::roundToInt (v * 1000.0f)) + " ms"; }, pr7o070);
         addChoice (layout, midiChannel, "MIDI Channel", midiChannelNames, 0, pr7o010);
         addChoice (layout, noteNames, "Note Names", notenames::choiceNames, 0, pr7o010);
     }
