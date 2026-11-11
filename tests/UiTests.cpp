@@ -7,6 +7,8 @@
 #include "PluginProcessor.h"
 #include "PluginTestUtils.h"
 #include "library/Library.h"
+#include "dsp/mixer/MixerEffects.h"
+#include "ui/MixerPage.h"
 #include "NoteNames.h"
 #include "ui/InstrumentPage.h"
 
@@ -528,6 +530,86 @@ TEST_CASE ("THE INSTRUMENT page 0.14.0: articulations and splits on the rack's A
     CHECK (page.getStageView().getWidth() > page.getWidth() - 20);
     page.chooseRegions (true);
     CHECK (page.getInfoText().contains ("REGIONS"));
+}
+
+TEST_CASE ("THE MIXER tab 0.15.0: a strip per part and the section's; its keys, fader, knobs and effect editor set the processor's strips; family colours", "[ui][mixer]")
+{
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("t.wav"), *testkit::sine (220.0, 0.3), 24);
+    dir.getChildFile ("CelloEns-KS.sfz").replaceWithText ("<region> sample=t.wav lokey=36 hikey=59\n");
+    dir.getChildFile ("ViolinEns-KS.sfz").replaceWithText ("<region> sample=t.wav lokey=60 hikey=90\n");
+    Window w;
+    auto& page = w.view->getMixerPage();
+    page.refresh();
+    CHECK (page.getNumStrips() == 0);   // nothing loaded: no strips
+    w.processor.loadSection (sampler::section::fromFiles ({ dir.getChildFile ("CelloEns-KS.sfz").getFullPathName(),
+                                                            dir.getChildFile ("ViolinEns-KS.sfz").getFullPathName() }));
+    REQUIRE (w.processor.waitForInstrument());
+    juce::Timer::callPendingTimersSynchronously();
+    page.refresh();
+    juce::Timer::callPendingTimersSynchronously();
+    w.view->showPage (MainView::Page::mixer);
+    CHECK (page.isVisible());
+    REQUIRE (page.getNumStrips() == 3);
+    CHECK (page.getStripName (0) == "CELLOS");   // plain names (library::partLabel)
+    CHECK (page.getStripName (1) == "VIOLINS");
+    CHECK (page.getStripName (2) == "SECTION");
+    for (int i = 0; i < 3; ++i)
+        CHECK (page.getLocalBounds().contains (page.getStripBounds (i)));
+
+    // The keys: MUTE on the violins' strip, SOLO on the cellos'; the section has no SOLO.
+    page.getKey (1, MixerPage::Key::mute).onClick();
+    CHECK (w.processor.getStrip ("ViolinEns-KS").mute);
+    page.getKey (0, MixerPage::Key::solo).onClick();
+    CHECK (w.processor.getStrip ("CelloEns-KS").solo);
+    CHECK_FALSE (page.getKey (2, MixerPage::Key::solo).isVisible());
+    // The fader and a knob.
+    page.moveFader (0, -7.5f);
+    CHECK (std::abs (w.processor.getStrip ("CelloEns-KS").levelDb + 7.5f) < 1.0e-4f);
+    page.getPanKnob (2).setValue (0.4, juce::sendNotificationSync);
+    CHECK (std::abs (w.processor.getSectionStrip().pan - 0.4f) < 1.0e-4f);
+
+    // An effect chosen into a slot (as its list does), its editor, a knob there, ON, REMOVE.
+    page.chooseEffect (1, 0, mixerfx::eq);
+    CHECK (w.processor.getStrip ("ViolinEns-KS").fx[0].type == mixerfx::eq);
+    page.openEditor (1, 0);
+    REQUIRE (page.isEditorOpen());
+    REQUIRE (page.getEditorKnobCount() == (int) mixerfx::paramsOf (mixerfx::eq).size() + 1);   // its settings and OUTPUT
+    page.getEditorKnob (0).setValue (400.0, juce::sendNotificationSync);   // LOW CUT
+    CHECK (std::abs (w.processor.getStrip ("ViolinEns-KS").fx[0].values[0] - 400.0f) < 0.5f);
+    page.getEffectKey (1, 0).onClick();   // the slot's key: off
+    CHECK_FALSE (w.processor.getStrip ("ViolinEns-KS").fx[0].on);
+
+    // Shown again after a change elsewhere (an undo): the strip follows.
+    auto cellos = w.processor.getStrip ("CelloEns-KS");
+    cellos.mute = true;
+    w.processor.setStrip ("CelloEns-KS", cellos);
+    juce::Timer::callPendingTimersSynchronously();
+    page.refresh();
+    CHECK (page.getKey (0, MixerPage::Key::mute).getToggleState());
+
+    // Every pixel of the page (the strips, then the editor over them) in the family's colours.
+    for (const auto editorOpen : { false, true })
+    {
+        if (! editorOpen)
+            page.closeEditor();
+        else
+            page.openEditor (1, 0);
+        const auto image = w.editor->createComponentSnapshot (w.editor->getLocalBounds());
+        auto outside = 0;
+        juce::String examples;
+        for (int y = 0; y < image.getHeight(); y += 2)
+            for (int x = 0; x < image.getWidth(); x += 2)
+                if (const auto c = image.getPixelAt (x, y); ! inFamily (c) && ++outside <= 6)
+                    examples << " (" << x << "," << y << ") #" << c.toDisplayString (false) << " hue " << juce::roundToInt (c.getHue() * 360.0f) << ";";
+        INFO ((editorOpen ? "editor open" : "strips") << ": " << outside << " pixels outside:" << examples);
+        CHECK (outside == 0);
+    }
+    page.removeEffectForTest (1, 0);
+    CHECK_FALSE (w.processor.getStrip ("ViolinEns-KS").fx[0].isLoaded());
+    CHECK_FALSE (page.isEditorOpen());
 }
 
 TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: which instrument a file is; each note's string, as a player in low position stops it", "[ui][orchestra]")

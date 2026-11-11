@@ -462,6 +462,33 @@ tools, which need the owner's riffs)
   table: "ViolinEns-KS" -> "Violins", "Contrabass-KS" -> "Basses"); stage labels, split screens, the rack screen's
   section name. Seats and everything saved go by `nameOf`. Test: "THE INSTRUMENT page 0.14.0".
 
+## 0.15.0: THE MIXER (the owner: "Let's do mixer strips next"; on the rack-style mock-up: "OMG that Tron style mixer looks amazing!!! Build it in that style and give it its own mixer tab")
+
+- **`dsp/mixer/Strip.h`** (light: presets include it): `mixer::StripSettings` (levelDb -60 off..+12, pan, mute, solo,
+  invert, delayDb / reverbDb -60 off..+6, `fx[4]` FxSlot), `isPlain`, XML (`toXml` / `fromXml`; `mixerXml` /
+  `readMixerXml`: <Mixer><Strip name/>..<Section/>, only non-plain strips); `maxPartStrips` 8, `sectionStrip` 8.
+- **`dsp/mixer/PartMixer.*`**: per strip `processStrip`: `mixerfx::Host` effects (table indexed by strip: parts at
+  their numbers, the section at 8), then gains (fader x balance x polarity, 0 muted / not soloed) smoothed 20 ms
+  (`SmoothedValue`), sends post-fader into the given pairs (null: off), peaks (`takePeak`). `setStrips` (message
+  thread: `host.sync`, then a SpinLock'd pending copy), `beginBlock` (try-lock take). A plain strip: no work.
+- **Processor**: the sampler **always** renders parts apart (`PartOutputs`); `partMixer.processPart` each, then STAGE
+  or the sum, then `processSection`; the delay / reverb send buffers cleared first, the strips add (gated on
+  delayOn / reverbOn), the instrument's own sends now `+=`. `partStrips` (by part name) / `sectionStrip`; `getStrip`,
+  `setStrip (name, s, final)` (final: modified + checkpoint), `setSectionStrip`, `pushMixer` (by part number, from
+  `pushSeats` and the timer; `getMixerVersion`), `takeStripPeak`. State child "Mixer"; `Rig::strips` /
+  `sectionStrip`; captureRig / applyRig. **Undo `Snapshot::operator==` now compares seats and strips** (a seat moved
+  alone made no undo step since 0.8.0).
+- **`ui/MixerPage.*`** (`MainView::Page::mixer`, tab between INSTRUMENT and FX, `Icons::Type::mixer`; five tabs:
+  `tabEdges` re-spaced): strips (`Strip`: PedalBody units, `SlotScreen`s, rack knobs `pedalKnobProperty`, `Fader`
+  (scale +12 / 0 at a quarter / -60, a pedal key as its cap, double-click 0 dB), meter, keys; the section's SOLO
+  hidden; OUTPUT text from stageOn / instInsert), `EffectEditor` (over the strips, sized to rows of up to 10 knobs,
+  OUTPUT beside the keys; click outside closes); names by `library::partLabel`. Test hooks: `getKey`, `getEffectKey`,
+  `getPanKnob`, `moveFader`, `getEditorKnob`... Snapshot `PARAGON_SNAPSHOT_PAGE=mixer` (`_MIXERDEMO=1`,
+  `_MIXERFX=<strip>,<slot>`). **Tests' sliders: `setValue (v, juce::sendNotificationSync)`** (the default is async).
+- Tests: `tests/MixerTests.cpp` (sound, state, undo; its invented recordings are 1.8 s: 2 s and longer stream from
+  disk and a test playing faster than real time loses frames), UiTests "THE MIXER tab 0.15.0" (controls, editor,
+  every pixel in family colours).
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:

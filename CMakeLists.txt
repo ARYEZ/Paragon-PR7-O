@@ -135,6 +135,7 @@ target_sources(ParagonX1
         source/ui/LibraryBrowser.cpp
         source/ui/SynthDisplays.cpp
         source/ui/InstrumentPage.cpp
+        source/ui/MixerPage.cpp                # 0.15.0: THE MIXER tab
         source/ui/ProgressBox.cpp
         source/ui/FxPage.cpp
         source/ui/SendPages.cpp

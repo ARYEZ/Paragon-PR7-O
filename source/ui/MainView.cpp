@@ -22,8 +22,8 @@ namespace
 
     const auto tabsGroup = mockF (336, 10, 1087, 55);   // the family's tab group: four tabs here
     const auto rigGroup = mockF (1102, 10, 1399, 55);
-    // The tabs' edges in the group, in the mockup's pixels: INSTRUMENT | FX | PRESETS | SETTINGS.
-    constexpr float tabEdges[] = { 338.0f, 524.75f, 711.5f, 898.25f, 1085.0f };
+    // The tabs' edges in the group, in the mockup's pixels: INSTRUMENT | MIXER | FX | PRESETS | SETTINGS (0.15.0: five).
+    constexpr float tabEdges[] = { 338.0f, 487.4f, 636.8f, 786.2f, 935.6f, 1085.0f };
 
     // In canvas pixels.
     const juce::Rectangle<int> outputArea { 1496, 68, 92, 672 };
@@ -74,11 +74,12 @@ MainView::MainView (ParagonX1AudioProcessor& processorToShow)
       keyboard (processorToShow),
       instrumentPage (processorToShow),
       fxPage (processorToShow),
+      mixerPage (processorToShow),
       rigBrowser (processorToShow),
       settingsPage (processorToShow)
 {
     setOpaque (true);   // it fills itself: nothing behind it needs drawing
-    for (auto* tab : { &instrumentTab, &fxTab, &presetsTab, &settingsTab })
+    for (auto* tab : { &instrumentTab, &mixerTab, &fxTab, &presetsTab, &settingsTab })
     {
         tab->setClickingTogglesState (true);
         tab->setRadioGroupId (100);
@@ -87,10 +88,12 @@ MainView::MainView (ParagonX1AudioProcessor& processorToShow)
     instrumentTab.setToggleState (true, juce::dontSendNotification);
     instrumentTab.setComponentID ("instrumentTab");
     fxTab.setComponentID ("fxTab");
+    mixerTab.setComponentID ("mixerTab");
     presetsTab.setComponentID ("presetsTab");
     settingsTab.setComponentID ("settingsTab");
     instrumentTab.onClick = [this] { showPage (Page::instrument); };
     fxTab.onClick = [this] { showPage (Page::fx); };
+    mixerTab.onClick = [this] { showPage (Page::mixer); };
     presetsTab.onClick = [this] { showPage (Page::presets); };
     settingsTab.onClick = [this] { showPage (Page::settings); };
 
@@ -113,6 +116,7 @@ MainView::MainView (ParagonX1AudioProcessor& processorToShow)
 
     addAndMakeVisible (instrumentPage);
     addChildComponent (fxPage);
+    addChildComponent (mixerPage);
     addChildComponent (rigBrowser);
     addChildComponent (settingsPage);
     addChildComponent (progressBox);
@@ -137,10 +141,12 @@ MainView::~MainView()
 void MainView::showPage (Page newPage)
 {
     page = newPage;
-    auto& tab = newPage == Page::presets ? presetsTab : newPage == Page::settings ? settingsTab : newPage == Page::fx ? fxTab : instrumentTab;
+    auto& tab = newPage == Page::presets ? presetsTab : newPage == Page::settings ? settingsTab : newPage == Page::fx ? fxTab
+              : newPage == Page::mixer ? mixerTab : instrumentTab;
     tab.setToggleState (true, juce::dontSendNotification);
     instrumentPage.setVisible (newPage == Page::instrument);
     fxPage.setVisible (newPage == Page::fx);
+    mixerPage.setVisible (newPage == Page::mixer);
     rigBrowser.setVisible (newPage == Page::presets);
     settingsPage.setVisible (newPage == Page::settings);
     if (progressBox.isVisible())
@@ -309,7 +315,7 @@ void MainView::paintBackground (juce::Graphics& g)
         g.setColour (ParagonColours::panelEdge);
         g.drawRoundedRectangle (group.reduced (0.5f), 5.0f, 1.0f);
     }
-    for (auto x : { tabEdges[1], tabEdges[2], tabEdges[3] })
+    for (auto x : { tabEdges[1], tabEdges[2], tabEdges[3], tabEdges[4] })
         g.drawVerticalLine (juce::roundToInt (x * mockScale), tabsGroup.getY() + 8.0f, tabsGroup.getBottom() - 8.0f);
 
     g.setColour (ParagonColours::panelEdge);
@@ -324,7 +330,7 @@ void MainView::resized()
 {
     backgroundCache.invalidate();
     {
-        IconButton* tabs[] = { &instrumentTab, &fxTab, &presetsTab, &settingsTab };
+        IconButton* tabs[] = { &instrumentTab, &mixerTab, &fxTab, &presetsTab, &settingsTab };
         for (size_t i = 0; i < std::size (tabs); ++i)
             tabs[i]->setBounds (mock (tabEdges[i] + (i > 0 ? 1.0f : 0.0f), 12, tabEdges[i + 1] - (i + 1 < std::size (tabs) ? 1.0f : 0.0f), 53));
     }
@@ -345,6 +351,7 @@ void MainView::resized()
 
     instrumentPage.setBounds (pageArea);
     fxPage.setBounds (pageArea);
+    mixerPage.setBounds (pageArea);
     rigBrowser.setBounds (pageArea);
     settingsPage.setBounds (pageArea);
     progressBox.setCentrePosition (getLocalBounds().getCentre());
