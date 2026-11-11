@@ -484,6 +484,8 @@ tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE: the owner's riffs asked for)
   - `tests/PluginTestUtils.h`: `testkit::sine`, `saw`, `useSample` (a one-region instrument rooted at 60, amp_veltrack
     0: note 60 plays it sample for sample), `useTones` (a region per key with its own pan / level), `keyFor
     (semitones)`, `writeWav`. `tests/TestUtils.h`: `levelAt`, `rms`, `frequencyOf`, `Spectrum`...
+  - **Paths in tests: build absolute ones from a temp folder** (`"/x/y.sfz"` isn't absolute on Windows: 0.4.0 and
+    0.13.0 both failed CI's Windows job on this). After a push, check CI passed even when no release is due.
   - Notes in tests go in as MIDI at a sample position, not through the keyboard state (it spreads presses by the clock).
   - `tests/SamplerTests.cpp`: the SFZ reader and the sampler on invented files; also the kept MixerEffects and
     DiskStreamer.
