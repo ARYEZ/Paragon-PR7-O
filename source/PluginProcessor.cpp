@@ -1256,7 +1256,8 @@ bool ParagonX1AudioProcessor::saveCurrentRigAs (const juce::String& name)
     // made from the blank page isn't "a blank page").
     if (const auto* entry = findCurrentRigEntry(); entry != nullptr && ! (entry->isFactory && entry->rig.name == "Init"))
     {
-        rig.bank = entry->rig.bank;
+        // (An expansion's bank holds its own presets only: a copy of one goes to bank A.)
+        rig.bank = Rig::isExpansionBank (entry->rig.bank) ? 0 : entry->rig.bank;
         rig.tags = entry->rig.tags;
         rig.notes = entry->rig.notes;
     }

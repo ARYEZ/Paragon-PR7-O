@@ -1,6 +1,7 @@
 #include "Rig.h"
 
 #include "Parameters.h"
+#include "rigs/Expansions.h"
 
 namespace
 {
@@ -16,13 +17,22 @@ namespace
     const juce::Identifier instrumentTag { "Instrument" };
 }
 
+int Rig::numBanksWithExpansions()
+{
+    return numBanks + (int) expansions::list.size();
+}
+
 juce::String Rig::bankName (int bankIndex)
 {
+    if (isExpansionBank (bankIndex) && bankIndex < numBanksWithExpansions())
+        return expansions::list[(size_t) (bankIndex - numBanks)].name;
     return juce::String::charToString ((juce::juce_wchar) ('A' + juce::jlimit (0, numBanks - 1, bankIndex)));
 }
 
 juce::String Rig::getSlotName() const
 {
+    if (isExpansionBank (bank) && bank < numBanksWithExpansions())
+        return juce::String (expansions::list[(size_t) (bank - numBanks)].code) + juce::String (number).paddedLeft ('0', 2);
     return bankName (bank) + juce::String (number).paddedLeft ('0', 2);
 }
 
@@ -32,7 +42,7 @@ std::unique_ptr<juce::XmlElement> Rig::toXml() const
     xml->setAttribute ("version", fileVersion);
     xml->setAttribute ("parameterVersion", parameterVersion);
     xml->setAttribute ("name", name);
-    xml->setAttribute ("bank", bankName (bank));
+    xml->setAttribute ("bank", bankName (isExpansionBank (bank) ? 0 : bank));   // (0.13.0: files never hold an expansion bank)
     xml->setAttribute ("number", number);
     xml->setAttribute ("favourite", favourite);
     xml->setAttribute ("tags", tags.joinIntoString (","));

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.13.0
+
+**GET the two free orchestras from inside the plugin, and ready-made sections in two expansion banks** (you: "do both
+libraries with GET buttons"; then, after the preset mock-up: "Build it").
+
+- **GET buttons** in the library browser (LOAD): one click downloads and unpacks **VSCO 2 Community Edition** (about
+  2.4 GB) or the **Sonatina Symphonic Orchestra** (about 1.4 GB) into a "Libraries" folder beside your presets, with
+  progress and CANCEL. A downloaded library is listed by its name ("VSCO 2 CE", "SONATINA") with your own folders.
+  Both libraries are credited on SETTINGS > THE SOUNDS. (The downloads themselves couldn't be tried here: this
+  machine's network won't fetch those archives. The tests download and unpack a small stand-in archive the same way.)
+- **Presets that work on any computer:** an instrument from a downloaded library is saved by its place in the library,
+  not by your disk's path, so a preset or project opened on another computer finds it there too (or in a copy of the
+  library you added yourself). If the library isn't there, the INSTRUMENT page says which one to GET.
+- **Two expansion banks** on the PRESETS page, after banks A-E (A-E now sit side by side on one row, the expansions
+  under their own heading):
+  - **VSCO ORCHESTRA** (VO01-VO08): String Section, String Section Wide (three players a part, spread wide),
+    Pizzicato Strings, Tremolo Strings, Brass Section, Epic Brass (doubled an octave down), Woodwind Section, Chamber
+    Woodwinds (LEGATO on, a Studio's sound).
+  - **SONATINA** (SO01-SO06): Sonatina Strings (five parts: 1st and 2nd violins), Sonatina Pizzicato, Sonatina
+    Brass, Sonatina Woodwinds, Sonatina Full Woodwinds (all eight, contrabassoon to piccolo, split by register),
+    Sonatina Choir.
+  - Each is a whole section across the keyboard, every instrument on its own stretch, with dynamics on the mod wheel
+    and STAGE on (each part where an orchestra seats it). The panel shows each part's keys (THE LAYOUT), what the bank
+    is, and, when its library isn't downloaded yet, says so with a GET button right there.
+  - Sonatina's presets carry its name ("Sonatina Strings") because PR7-O finds a factory preset by its name (in your
+    projects and THE DEFAULT), so two can't share one.
+  - Saving a copy of an expansion preset (SAVE CURRENT SOUND AS NEW) files it in bank A: the expansion banks hold their
+    own presets only.
+  - The splits are the plugin's own rule worked out on the real files, except Sonatina's eight woodwinds (set by hand:
+    the rule put the bass clarinet above the bassoons). Not checked here: how they sound to your ears.
+
 ## 0.12.1
 
 **A crash fixed, and the orchestra takes about a third less of your computer** (your PR7-S log; you: "run another round

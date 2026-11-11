@@ -1,6 +1,9 @@
 #include "RigBrowser.h"
 
 #include "dsp/sampler/Section.h"
+#include "library/Downloads.h"
+#include "library/Library.h"
+#include "rigs/Expansions.h"
 
 #include "Parameters.h"
 #include "ParagonLookAndFeel.h"
@@ -63,7 +66,10 @@ RigBrowser::RigBrowser (ParagonX1AudioProcessor& p) : processor (p)
     addRadio (filterButtons, "Factory Presets", 1, [this] { filter = Filter::factory; refreshList(); });
     addRadio (bankButtons, "All Banks", 2, [this] { bankFilter = -1; refreshList(); });
     for (int bank = 0; bank < Rig::numBanks; ++bank)
-        addRadio (bankButtons, "Bank " + Rig::bankName (bank), 2, [this, bank] { bankFilter = bank; refreshList(); });
+        addRadio (bankButtons, Rig::bankName (bank), 2, [this, bank] { bankFilter = bank; refreshList(); });   // A-E, one row
+    // 0.13.0: the built-in expansions, a bank each, under their own heading (PR7-K's).
+    for (int bank = Rig::numBanks; bank < Rig::numBanksWithExpansions(); ++bank)
+        addRadio (bankButtons, Rig::bankName (bank), 2, [this, bank] { bankFilter = bank; refreshList(); });
     filterButtons[0]->setToggleState (true, juce::dontSendNotification);
     bankButtons[0]->setToggleState (true, juce::dontSendNotification);
 
@@ -96,8 +102,10 @@ RigBrowser::RigBrowser (ParagonX1AudioProcessor& p) : processor (p)
     addAndMakeVisible (nameEditor);
     addAndMakeVisible (tagsEditor);
 
-    for (int bank = 0; bank < Rig::numBanks; ++bank)
+    for (int bank = 0; bank < Rig::numBanksWithExpansions(); ++bank)
         bankBox.addItem (Rig::bankName (bank), bank + 1);
+    for (int bank = Rig::numBanks; bank < Rig::numBanksWithExpansions(); ++bank)
+        bankBox.setItemEnabled (bank + 1, false);   // shown for an expansion's presets; nothing can be filed there
     for (int number = 1; number <= Rig::maxNumber; ++number)
         numberBox.addItem (juce::String (number).paddedLeft ('0', 3), number);
     for (auto* box : { &bankBox, &numberBox })
@@ -137,6 +145,16 @@ RigBrowser::RigBrowser (ParagonX1AudioProcessor& p) : processor (p)
     for (auto* button : { &loadButton, &saveDetailsButton, &saveAsButton, &deleteButton, &folderButton, &defaultButton })
         addAndMakeVisible (*button);
 
+    // 0.13.0: GET the library the chosen preset plays (as the library browser's GET).
+    getButton.onClick = [this]
+    {
+        if (neededLibrary != nullptr)
+            processor.getLibrary (*neededLibrary);
+        showDetails();
+    };
+    addChildComponent (getButton);
+    startTimerHz (4);
+
     processor.rigBroadcaster.addChangeListener (this);
 
     if (const auto* current = processor.findCurrentRigEntry())
@@ -147,6 +165,15 @@ RigBrowser::RigBrowser (ParagonX1AudioProcessor& p) : processor (p)
 RigBrowser::~RigBrowser()
 {
     processor.rigBroadcaster.removeChangeListener (this);
+}
+
+void RigBrowser::timerCallback()
+{
+    // A download under way, or one just finished: the details follow it.
+    const auto& d = processor.getDownload();
+    if (neededLibrary != nullptr && (d.isRunning() || downloads::isInstalled (*neededLibrary)
+                                     || d.getState() == downloads::Download::State::failed))
+        showDetails();
 }
 
 void RigBrowser::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -318,13 +345,45 @@ void RigBrowser::showDetails()
                                                                             : "OPEN WITH THIS IN EVERY NEW PR7-O");
 
     juce::String text;
+    neededLibrary = nullptr;
+    auto getText = juce::String();
     if (hasEntry)
     {
         const auto& rig = entry->rig;
         text << describeBlocks (rig);
         if (rig.notes.isNotEmpty())
             text << "\n\n" << rig.notes;
-        if (entry->isFactory)
+        // 0.13.0: an expansion's bank, and the library its preset plays (GET it when it isn't there).
+        if (Rig::isExpansionBank (rig.bank) && rig.bank < Rig::numBanksWithExpansions())
+            text << "\n\n" << Rig::bankName (rig.bank) << ": " << expansions::list[(size_t) (rig.bank - Rig::numBanks)].description;
+        juce::StringArray names;
+        if (const auto section = sampler::section::fromText (rig.instrument))
+            for (const auto& part : section->parts)
+                names.add (part.file);
+        else if (rig.instrument.isNotEmpty())
+            names.add (rig.instrument);
+        for (const auto& n : names)
+            if (const auto* l = downloads::libraryFor (n); l != nullptr && neededLibrary == nullptr
+                && ! downloads::resolve (n, library::folders()).existsAsFile())
+                neededLibrary = l;
+        if (neededLibrary != nullptr)
+        {
+            const auto& d = processor.getDownload();
+            const auto mine = d.getLibrary().folder == neededLibrary->folder;
+            const auto percent = juce::String (juce::roundToInt (d.getProgress() * 100.0f)) + "%";
+            if (mine && d.getState() == downloads::Download::State::downloading)
+                text << "\n\n" << neededLibrary->what << ": DOWNLOADING " << percent;
+            else if (mine && d.getState() == downloads::Download::State::unpacking)
+                text << "\n\n" << neededLibrary->what << ": UNPACKING " << percent;
+            else
+            {
+                text << "\n\nPLAYS " << neededLibrary->what << ": NOT DOWNLOADED YET"
+                     << (mine && d.getState() == downloads::Download::State::failed ? " (" + d.getMessage() + ")" : juce::String());
+                if (! d.isRunning())
+                    getText = "GET " + neededLibrary->what + "  " + juce::String ((double) neededLibrary->bytes / 1.0e9, 1) + " GB";
+            }
+        }
+        else if (entry->isFactory)
             text << "\n\nFactory presets can't be changed: load it, then save a copy.";
     }
     else
@@ -332,6 +391,12 @@ void RigBrowser::showDetails()
         text = "Select a preset on the left.";
     }
     info.setText (text, juce::dontSendNotification);
+    getButton.setButtonText (getText);
+    if (getButton.isVisible() != getText.isNotEmpty())
+    {
+        getButton.setVisible (getText.isNotEmpty());
+        resized();
+    }
 }
 
 void RigBrowser::saveDetails()
@@ -433,6 +498,8 @@ void RigBrowser::paint (juce::Graphics& g)
     g.drawText ("PRESET BROWSER", sidebarArea.reduced (12, 8).withHeight (16), juce::Justification::centredLeft, false);
     if (bankButtons.size() > 0)
         g.drawText ("BANKS", bankButtons[0]->getBounds().translated (0, -22).withHeight (16), juce::Justification::centredLeft, false);
+    if (bankButtons.size() > Rig::numBanks + 1)
+        g.drawText ("EXPANSIONS", expansionsHeading, juce::Justification::centredLeft, false);
 }
 
 void RigBrowser::resized()
@@ -447,9 +514,24 @@ void RigBrowser::resized()
         sidebar.removeFromTop (4);
     }
     sidebar.removeFromTop (28);
-    for (auto* button : bankButtons)
+    // ALL BANKS, then A-E side by side on one row, then EXPANSIONS and their banks (0.13.0, PR7-K's layout).
+    bankButtons[0]->setBounds (sidebar.removeFromTop (28));
+    sidebar.removeFromTop (4);
     {
-        button->setBounds (sidebar.removeFromTop (28));
+        auto row = sidebar.removeFromTop (28);
+        const auto gap = 4;
+        const auto width = (row.getWidth() - gap * (Rig::numBanks - 1)) / Rig::numBanks;
+        for (int bank = 0; bank < Rig::numBanks; ++bank)
+        {
+            bankButtons[bank + 1]->setBounds (bank == Rig::numBanks - 1 ? row : row.removeFromLeft (width));
+            row.removeFromLeft (gap);
+        }
+    }
+    sidebar.removeFromTop (8);
+    expansionsHeading = sidebar.removeFromTop (22).withTrimmedTop (4).withHeight (16);
+    for (int index = Rig::numBanks + 1; index < bankButtons.size(); ++index)
+    {
+        bankButtons[index]->setBounds (sidebar.removeFromTop (26));
         sidebar.removeFromTop (4);
     }
 
@@ -491,5 +573,10 @@ void RigBrowser::resized()
     saveDetailsButton.setBounds (row.removeFromLeft (row.getWidth() / 2).withTrimmedRight (4));
     deleteButton.setBounds (row);
     details.removeFromBottom (8);
+    if (getButton.isVisible())
+    {
+        getButton.setBounds (details.removeFromBottom (30));
+        details.removeFromBottom (8);
+    }
     info.setBounds (details);
 }

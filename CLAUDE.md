@@ -407,7 +407,7 @@ tools, which need the owner's riffs)
   arithmetic ~14%, per-voice bookkeeping, STAGE ~9% (its tap loop's ring mask): a SIMD / batched voice loop would be
   the next step (not asked yet).
 
-## 0.13.0 (in progress): GET the libraries, then the section presets (the owner: "Release 0.12.1, then do both libraries with GET buttons"; before that, expansion banks "with pre-built layouts where it's the entire string section or the entire woodwind section or the entire brass section")
+## 0.13.0 (not released yet): GET the libraries, then the section presets (the owner: "Release 0.12.1, then do both libraries with GET buttons"; before that, expansion banks "with pre-built layouts where it's the entire string section or the entire woodwind section or the entire brass section")
 
 - **`library/Downloads.*`** (namespace `downloads`; PR7-K 0.71.0's `SampleLibraries` ported: its tar.gz reader and
   `Download` thread unchanged but for names): `vsco()` (the SFZ branch pinned to commit 6dd651d: GitHub archive of the
@@ -425,6 +425,17 @@ tools, which need the owner's riffs)
   off for them; entries' `library` renamed to match); GET buttons (one a library not installed, VSCO on top), the
   download's line (DOWNLOADING / UNPACKING n%, or why it failed) and CANCEL; a 5 Hz timer; the list rescans when it's
   done. Snapshot: `PARAGON_SNAPSHOT_DOWNLOAD=<0-100>` (with LIBRARY). SETTINGS' THE SOUNDS credits both libraries.
+
+- **Expansions** (the owner: "Build it" after the preset mock-up; PR7-K's system): `rigs/Expansions.h` (`list`: VSCO
+  ORCHESTRA "VO", SONATINA "SO", descriptions); `Rig::numBanksWithExpansions`, `isExpansionBank` (bank >= 5),
+  `bankName` / `getSlotName` ("VO01"); `toXml` writes A for an expansion bank (user files never hold one); Save As
+  from an expansion preset files in bank A. `FactoryRigs.cpp`: `sectionRig` (parts as library references; one part
+  over 0-127: a plain reference), `layoutOf` (notes written from the splits, "C1 to B1", middle C = C3); VO01-VO08,
+  SO01-SO06 (instLevel -6, mod wheel, STAGE on). **Factory presets are found by name** (`findFactory`: projects,
+  THE DEFAULT): names must be unique ("Sonatina Strings", not a second "String Section"). `RigBrowser`: A-E on one
+  row, EXPANSIONS heading (`expansionsHeading`), bankBox lists the expansions disabled, the details add the bank's
+  description and, when a part's library isn't found (`resolve`), "PLAYS X: NOT DOWNLOADED YET" + `getButton` (GET,
+  progress through a 4 Hz timer). Tests `[expansions]` in `RigTests.cpp`; the ordering tests now end at SO06.
 
 ## The plan (`PR7-O PLAN.md`), next
 

@@ -6,6 +6,11 @@
 #include "Parameters.h"
 #include "PluginProcessor.h"
 #include "rigs/FactoryRigs.h"
+#include "rigs/Expansions.h"
+#include "dsp/sampler/Section.h"
+#include "library/Downloads.h"
+#include "library/Library.h"
+#include "ui/RigBrowser.h"
 #include "PluginTestUtils.h"
 
 using Catch::Matchers::WithinAbs;
@@ -116,8 +121,10 @@ TEST_CASE ("Every factory rig is valid", "[rigs]")
 TEST_CASE ("PR7-O's factory presets: Init at A01, no instrument, everything at its default; nothing of PR7-D's", "[rigs]")
 {
     const auto rigs = makeFactoryRigs();
-    REQUIRE (rigs.size() == 1);
+    REQUIRE (rigs.size() == 15);   // Init, then the expansions' 14 (0.13.0)
     CHECK (rigs.front().name == "Init");
+    for (size_t i = 1; i < rigs.size(); ++i)
+        CHECK (Rig::isExpansionBank (rigs[i].bank));
     CHECK (rigs.front().getSlotName() == "A01");
     CHECK (rigs.front().parameters.empty());
     CHECK (rigs.front().instrument.isEmpty());
@@ -255,7 +262,7 @@ TEST_CASE ("Rigs are sorted by bank and number, and < > wrap round", "[rigs]")
 
     Rig late;
     late.name = "Late";
-    late.bank = Rig::numBanks - 1;   // the last bank, after every factory rig
+    late.bank = Rig::numBanks - 1;   // the last user bank: after it only the expansions (0.13.0)
     late.number = 50;
     library.saveAsNew (late);
 
@@ -263,7 +270,10 @@ TEST_CASE ("Rigs are sorted by bank and number, and < > wrap round", "[rigs]")
     for (size_t i = 1; i < entries.size(); ++i)
         CHECK (entries[i - 1].rig.bank * 100 + entries[i - 1].rig.number <= entries[i].rig.bank * 100 + entries[i].rig.number);
 
-    CHECK (entries.back().rig.name == "Late");
+    CHECK (entries.back().rig.name == "Sonatina Choir");   // SO06, the last expansion's last
+    CHECK (Rig::isExpansionBank (entries[entries.size() - 14].rig.bank));
+    CHECK (entries[entries.size() - 14].rig.getSlotName() == "VO01");
+    CHECK (entries[entries.size() - 15].rig.name == "Late");
     CHECK (library.step (&entries.back(), 1) == &entries.front());
     CHECK (library.step (&entries.front(), -1) == &entries.back());
     CHECK (library.step (nullptr, 1) == &entries.front());
@@ -366,10 +376,15 @@ TEST_CASE ("< and > step through the presets in order", "[rigs]")
     CHECK (r.processor.getCurrentRig().name == "Second");
     r.processor.stepRig (1);
     CHECK (r.processor.getCurrentRig().name == "Third");
-    r.processor.stepRig (1);   // wraps round to the first
-    CHECK (r.processor.getCurrentRig().name == "Init");
-    r.processor.stepRig (-1);   // and back to the last
+    r.processor.stepRig (1);   // then the expansions (0.13.0): VO01
+    CHECK (r.processor.getCurrentRig().name == "String Section");
+    r.processor.stepRig (-1);
     CHECK (r.processor.getCurrentRig().name == "Third");
+    r.processor.loadRig (r.entryNamed ("Init"));
+    r.processor.stepRig (-1);   // wraps round to the last: SO06
+    CHECK (r.processor.getCurrentRig().name == "Sonatina Choir");
+    r.processor.stepRig (1);   // and back to the first
+    CHECK (r.processor.getCurrentRig().name == "Init");
 }
 
 TEST_CASE ("Deleting the loaded preset keeps the sound, now unsaved", "[rigs]")
@@ -456,4 +471,101 @@ TEST_CASE ("Only .pr7rig files are rigs: the old Paragon X1 .x1rig files aren't 
     RigLibrary library (temp.folder);
     CHECK (std::none_of (library.getEntries().begin(), library.getEntries().end(),
                          [] (const auto& entry) { return entry.rig.name == "From X1"; }));
+}
+
+// 0.13.0: THE EXPANSIONS, PR7-K's system: a bank per built-in expansion after A-E, named by its code, factory only.
+TEST_CASE ("Expansions: VSCO ORCHESTRA and SONATINA are banks after E, their presets named VO01..., SO01...", "[rigs][expansions]")
+{
+    CHECK (Rig::numBanksWithExpansions() == Rig::numBanks + 2);
+    CHECK (Rig::bankName (4) == "E");
+    CHECK (Rig::bankName (Rig::numBanks) == "VSCO ORCHESTRA");
+    CHECK (Rig::bankName (Rig::numBanks + 1) == "SONATINA");
+    juce::StringArray vo, so;
+    for (const auto& rig : makeFactoryRigs())
+        if (rig.bank == Rig::numBanks) vo.add (rig.getSlotName());
+        else if (rig.bank == Rig::numBanks + 1) so.add (rig.getSlotName());
+    CHECK (vo.joinIntoString (" ") == "VO01 VO02 VO03 VO04 VO05 VO06 VO07 VO08");
+    CHECK (so.joinIntoString (" ") == "SO01 SO02 SO03 SO04 SO05 SO06");
+
+    // Written to a file, an expansion's bank (which a user's preset can't be in) reads back as A: never a user's VO slot.
+    auto rig = makeFactoryRigs()[1];
+    const auto back = Rig::fromXml (*rig.toXml());
+    REQUIRE (back.has_value());
+    CHECK (back->bank == 0);
+}
+
+TEST_CASE ("Expansions: each preset plays its own library by reference, its parts in key order inside each file's range", "[rigs][expansions]")
+{
+    for (const auto& rig : makeFactoryRigs())
+    {
+        if (! Rig::isExpansionBank (rig.bank))
+            continue;
+        INFO (rig.name);
+        const auto& wanted = rig.bank == Rig::numBanks ? downloads::vsco() : downloads::sonatina();
+        std::vector<sampler::section::Part> parts;
+        if (const auto section = sampler::section::fromText (rig.instrument))
+            parts = section->parts;
+        else
+            parts.push_back ({ rig.instrument, 0, 127 });
+        REQUIRE_FALSE (parts.empty());
+        CHECK (parts.size() <= 8);   // the sampler's most parts
+        auto lastHigh = -1;
+        for (const auto& part : parts)
+        {
+            INFO (part.file);
+            CHECK (downloads::isRef (part.file));
+            REQUIRE (downloads::libraryFor (part.file) != nullptr);
+            CHECK (downloads::libraryFor (part.file)->folder == wanted.folder);
+            CHECK (part.file.endsWithIgnoreCase (".sfz"));
+            CHECK (part.low <= part.high);
+            CHECK (part.low > lastHigh);   // split, one part a key
+            lastHigh = part.high;
+        }
+        CHECK (rig.notes.isNotEmpty());
+        CHECK (rig.parameters.count (ParamIDs::stageOn) == 1);
+    }
+}
+
+TEST_CASE ("Expansions: a copy saved from one goes to bank A; the browser lists them and offers GET for a missing library", "[rigs][expansions]")
+{
+    const auto userFolders = library::folders();
+    library::setFolders ({});
+    const auto libraries = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                               .getChildFile ("pr7o-exp-" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+    downloads::setFolder (libraries);   // nothing downloaded
+
+    {
+        RigRig r;
+        const auto* strings = r.processor.getRigLibrary().findFactory ("String Section");
+        REQUIRE (strings != nullptr);
+        CHECK (strings->rig.getSlotName() == "VO01");
+        r.processor.loadRig (*strings);
+        REQUIRE (r.processor.saveCurrentRigAs ("My Strings"));
+        CHECK (r.entryNamed ("My Strings").rig.bank == 0);
+        CHECK (r.entryNamed ("My Strings").rig.instrument == strings->rig.instrument);
+
+        RigBrowser browser (r.processor);
+        browser.setSize (1400, 800);
+        juce::StringArray banks;
+        for (auto* c : browser.getChildren())
+            if (auto* b = dynamic_cast<juce::TextButton*> (c); b != nullptr && b->getRadioGroupId() == 2)
+                banks.add (b->getButtonText());
+        CHECK (banks.joinIntoString ("|") == "All Banks|A|B|C|D|E|VSCO ORCHESTRA|SONATINA");
+        CHECK_FALSE (browser.getExpansionsHeading().isEmpty());
+
+        browser.selectForTest (r.processor.getRigLibrary().findFactory ("Sonatina Brass"));
+        CHECK (browser.getInfoText().contains ("SONATINA: "));                    // the bank's description
+        CHECK (browser.getInfoText().contains ("PLAYS SONATINA: NOT DOWNLOADED YET"));
+        REQUIRE (browser.getNeededLibrary() == &downloads::sonatina());
+        CHECK (browser.getGetButton().isVisible());
+        CHECK (browser.getGetButton().getButtonText().startsWith ("GET SONATINA"));
+
+        browser.selectForTest (r.processor.getRigLibrary().findFactory ("Init"));
+        CHECK (browser.getNeededLibrary() == nullptr);
+        CHECK_FALSE (browser.getGetButton().isVisible());
+    }
+
+    downloads::setFolder ({});
+    libraries.deleteRecursively();
+    library::setFolders (userFolders);
 }
