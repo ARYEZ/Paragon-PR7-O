@@ -407,6 +407,25 @@ tools, which need the owner's riffs)
   arithmetic ~14%, per-voice bookkeeping, STAGE ~9% (its tap loop's ring mask): a SIMD / batched voice loop would be
   the next step (not asked yet).
 
+## 0.13.0 (in progress): GET the libraries, then the section presets (the owner: "Release 0.12.1, then do both libraries with GET buttons"; before that, expansion banks "with pre-built layouts where it's the entire string section or the entire woodwind section or the entire brass section")
+
+- **`library/Downloads.*`** (namespace `downloads`; PR7-K 0.71.0's `SampleLibraries` ported: its tar.gz reader and
+  `Download` thread unchanged but for names): `vsco()` (the SFZ branch pinned to commit 6dd651d: GitHub archive of the
+  commit, folder `VSCO-2-CE-<sha>`, marker `ViolinEns-KS.sfz`; it has no release), `sonatina()` (PR7-K's: tag v4.0,
+  `sso-4.0`, `browse` "Sonatina Symphonic Orchestra"); `folder()` = "Libraries" beside the presets' `Rigs` folder
+  (`setFolder` for tests); `isInstalled`, `installedFolders`; references `{sfz:<folder>}/<path>` (`refFor`, `isRef`,
+  `libraryFor`), `resolve (ref, userFolders)` (the download, else the path or its tail in a user's library folder),
+  `portable (path)` (a file in a download made a reference). This session's proxy refuses GitHub's archive URLs for
+  other people's repos (git reads work): the real downloads are untested here; `tests/DownloadTests.cpp` uses a
+  stand-in archive from a file:// URL (PR7-K's `TarWriter`).
+- Processor: `getDownload`, `getLibrary (library, url)`; `loadInstrument` / `loadSection` store `portable` names; the
+  loader resolves each (section parts too) and says "needs VSCO 2 CE: GET it in the library (LOAD)" when a library's
+  missing. `section::nameOf` / `describe` / `folderOf` read references by text (a juce::File can't hold one).
+- `LibraryBrowser`: `userFolders` (remembered) + the downloads (`folders`, listed by `displayName`: "VSCO 2 CE"; REMOVE
+  off for them; entries' `library` renamed to match); GET buttons (one a library not installed, VSCO on top), the
+  download's line (DOWNLOADING / UNPACKING n%, or why it failed) and CANCEL; a 5 Hz timer; the list rescans when it's
+  done. Snapshot: `PARAGON_SNAPSHOT_DOWNLOAD=<0-100>` (with LIBRARY). SETTINGS' THE SOUNDS credits both libraries.
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:

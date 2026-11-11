@@ -28,6 +28,7 @@
 //   PARAGON_SNAPSHOT_ENSEMBLE=1      the rack's ENSEMBLE page (0.10.0)
 //   PARAGON_SNAPSHOT_LIBRARY=<folder>,<folder>...   the library browser open on these folders (not remembered), its
 //                                    strings, the instrument's file chosen if it's in them (0.11.0)
+//   PARAGON_SNAPSHOT_DOWNLOAD=<0-100>   with LIBRARY: VSCO 2 CE shown downloading that far (nothing fetched)
 //   PARAGON_SNAPSHOT_LIBRARY_SECTION=<n>   that section shown (0 strings, 1 brass...); PARAGON_SNAPSHOT_SEARCH=<text>
 //   PARAGON_SNAPSHOT_NOTES=1         and a C major chord (C2 G2 E3 C4) held on the keyboard, sounding (0.12.0: or
 //                                    a list of MIDI notes, "67,72")
@@ -326,6 +327,12 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
         for (const auto& f : juce::StringArray::fromTokens (folders, ",", {}))
             list.add (juce::File (f));
         auto& browser = page.getLibraryBrowser();
+        // 0.13.0: PARAGON_SNAPSHOT_DOWNLOAD=<0-100>: VSCO 2 CE shown downloading that far (nothing fetched)
+        if (const auto d = env ("PARAGON_SNAPSHOT_DOWNLOAD"); d.isNotEmpty())
+        {
+            processor.getDownload().showForTest (downloads::vsco(), downloads::Download::State::downloading, (float) d.getIntValue() / 100.0f);
+            browser.setDownload (&processor.getDownload());
+        }
         browser.setFolders (list, false);
         if (const auto s = env ("PARAGON_SNAPSHOT_LIBRARY_SECTION"); s.isNotEmpty())
             browser.chooseSection ((library::Section) s.getIntValue());

@@ -1,4 +1,6 @@
 #include "PluginProcessor.h"
+#include "library/Downloads.h"
+#include "library/Library.h"
 
 #include "NoteNames.h"
 #include "Parameters.h"
@@ -833,13 +835,19 @@ void ParagonX1AudioProcessor::retireOldData()
 // THE INSTRUMENT
 void ParagonX1AudioProcessor::loadInstrument (const juce::File& file)
 {
-    startLoading (file.getFullPathName(), true);
+    // (0.13.0: a file in a downloaded library kept as its library reference, so a preset saved with it plays on any
+    // computer that has the library)
+    startLoading (downloads::portable (file.getFullPathName()), true);
 }
 
 void ParagonX1AudioProcessor::loadSection (const sampler::section::Section& section)
 {
-    if (! section.parts.empty())
-        startLoading (section.toText(), true);
+    if (section.parts.empty())
+        return;
+    auto portable = section;
+    for (auto& part : portable.parts)
+        part.file = downloads::portable (part.file);
+    startLoading (portable.toText(), true);
 }
 
 std::optional<sampler::section::Section> ParagonX1AudioProcessor::getSection() const
@@ -917,13 +925,30 @@ void ParagonX1AudioProcessor::startLoading (const juce::String& file, bool undoS
                 loadProgress = done;
                 return ! alive.expired() && loadGeneration.load() == generation;
             };
-            const auto section = sampler::section::fromText (file);
-            const juce::File source (section.has_value() ? juce::String() : file);
+            // 0.13.0: library references ("{sfz:<library>}/<file>": factory presets) made files: in the downloaded
+            // library, else in a library folder the user added.
+            auto section = sampler::section::fromText (file);
+            const auto userFolders = library::folders();
+            juce::StringArray needed;
+            const auto find = [&] (const juce::String& name)
+            {
+                const auto found = downloads::resolve (name, userFolders);
+                if (downloads::isRef (name) && ! found.existsAsFile())
+                    if (const auto* l = downloads::libraryFor (name))
+                        needed.addIfNotAlreadyThere (l->what);
+                return found;
+            };
+            if (section.has_value())
+                for (auto& part : section->parts)
+                    part.file = find (part.file).getFullPathName();
+            const auto source = section.has_value() ? juce::File() : find (file);
             std::shared_ptr<sampler::Program> made;
             if (section.has_value())
                 made = sampler::section::load (*section, keepGoing, reuse);   // 0.4.0: several SFZ split over the keys
             else if (sampler::section::isSection (file))
                 problem = "couldn't read the section";
+            else if (! needed.isEmpty())
+                problem = "needs " + needed.joinIntoString (" and ") + ": GET it in the library (LOAD)";
             else if (! source.existsAsFile())
                 problem = "not found: " + file;
             else if (source.hasFileExtension ("sfz"))
@@ -940,6 +965,8 @@ void ParagonX1AudioProcessor::startLoading (const juce::String& file, bool undoS
                         + (made->problems.isEmpty() ? juce::String() : " (" + made->problems[0] + ")");
             else if (made == nullptr && problem.isEmpty())
                 problem = "couldn't read " + what;
+            if (! needed.isEmpty())   // (a section with a part's library missing: that's what to say, whatever plays)
+                problem = "needs " + needed.joinIntoString (" and ") + ": GET it in the library (LOAD)";
             if (made != nullptr && ! made->regions.empty())
             {
                 if (streamFromDisk)

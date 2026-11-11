@@ -97,9 +97,20 @@ namespace sampler::section
         return section;
     }
 
+    namespace
+    {
+        // A file's name without its extension, from a full path or a library reference ("{sfz:sso-4.0}/.../x.sfz",
+        // 0.13.0: not a path a juce::File can hold).
+        juce::String bareName (const juce::String& path)
+        {
+            const auto name = path.replaceCharacter ('\\', '/').fromLastOccurrenceOf ("/", false, false);
+            return name.containsChar ('.') ? name.upToLastOccurrenceOf (".", false, false) : name;
+        }
+    }
+
     juce::String nameOf (const Part& p)
     {
-        return juce::File (p.file).getFileNameWithoutExtension();
+        return bareName (p.file);
     }
 
     juce::String describe (const juce::String& instrument)
@@ -113,13 +124,14 @@ namespace sampler::section
         }
         if (isSection (instrument))
             return "a section";
-        return juce::File::isAbsolutePath (instrument) ? juce::File (instrument).getFileNameWithoutExtension() : instrument;
+        return juce::File::isAbsolutePath (instrument) ? juce::File (instrument).getFileNameWithoutExtension()
+             : instrument.startsWith ("{sfz:") ? bareName (instrument) : instrument;
     }
 
     juce::File folderOf (const juce::String& instrument)
     {
         if (const auto section = fromText (instrument))
-            return juce::File (section->parts.front().file).getParentDirectory();
+            return juce::File::isAbsolutePath (section->parts.front().file) ? juce::File (section->parts.front().file).getParentDirectory() : juce::File();
         return juce::File::isAbsolutePath (instrument) ? juce::File (instrument).getParentDirectory() : juce::File();
     }
 

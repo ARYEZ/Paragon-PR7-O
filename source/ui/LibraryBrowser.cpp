@@ -67,8 +67,8 @@ LibraryBrowser::LibraryBrowser()
             return;
         int n = 0;
         for (const auto& e : entries)
-            n += row == 0 || e.library == folders[row - 1].getFileName();
-        paintText (g, (row == 0 ? juce::String ("ALL LIBRARIES") : folders[row - 1].getFileName()) + "  (" + juce::String (n) + ")",
+            n += row == 0 || e.library == displayName (folders[row - 1]);
+        paintText (g, (row == 0 ? juce::String ("ALL LIBRARIES") : displayName (folders[row - 1])) + "  (" + juce::String (n) + ")",
                    w, h, libraryIndex == row - 1, false, row == 0);
     };
     libraries->clicked = [this] (int row) { if (row <= folders.size()) chooseLibrary (row - 1); };
@@ -80,7 +80,7 @@ LibraryBrowser::LibraryBrowser()
         int n = 0;
         juce::StringArray instrumentsHere;
         for (const auto& e : entries)
-            if ((int) e.section == row && (libraryIndex < 0 || e.library == folders[libraryIndex].getFileName()))
+            if ((int) e.section == row && (libraryIndex < 0 || e.library == displayName (folders[libraryIndex])))
                 ++n;
         paintText (g, library::nameOf ((library::Section) row) + "  (" + juce::String (n) + ")", w, h, (int) section == row, n == 0, true);
     };
@@ -132,7 +132,7 @@ LibraryBrowser::LibraryBrowser()
         {
             if (fc.getResult().isDirectory())
             {
-                auto list = folders;
+                auto list = userFolders;
                 list.addIfNotAlreadyThere (fc.getResult());
                 setFolders (list, true);
             }
@@ -140,10 +140,10 @@ LibraryBrowser::LibraryBrowser()
     };
     removeFolder.onClick = [this]
     {
-        if (libraryIndex < 0)
+        if (libraryIndex < 0 || isDownloadFolder (libraryIndex))
             return;
-        auto list = folders;
-        list.remove (libraryIndex);
+        auto list = userFolders;
+        list.removeFirstMatchingValue (folders[libraryIndex]);
         libraryIndex = -1;
         setFolders (list, true);
     };
@@ -167,21 +167,100 @@ LibraryBrowser::LibraryBrowser()
             onLoadSection (paths);
     };
     clearSection.onClick = [this] { sectionFiles.clear(); resized(); repaint(); instruments->update(); };
+
+    for (const auto* l : downloads::all())
+    {
+        auto* b = getButtons.add (new juce::TextButton ("GET " + l->what + "  " + juce::String ((double) l->bytes / 1.0e9, 1) + " GB"));
+        b->setTooltip ("Download " + l->name + " (" + juce::String ((double) l->bytes / 1.0e9, 1) + " GB; about "
+                       + juce::String (l->unpackedMb / 1000.0, 1) + " GB on disk) into PR7-O's own folder. " + l->credit);
+        b->onClick = [this, l] { if (onGet) onGet (*l); refreshDownloads(); };
+        getFor.push_back (l);
+        addChildComponent (b);
+    }
+    cancelDownload.onClick = [this] { if (download != nullptr) download->cancel(); };
+    addChildComponent (cancelDownload);
+    refreshDownloads();
+    startTimerHz (5);
+}
+
+juce::String LibraryBrowser::displayName (const juce::File& folder)
+{
+    for (const auto* l : downloads::all())
+        if (folder == downloads::rootOf (*l) || (l->browse.isNotEmpty() && folder == downloads::rootOf (*l).getChildFile (l->browse)))
+            return l->what;
+    return folder.getFileName();
+}
+
+bool LibraryBrowser::isDownloadFolder (int index) const
+{
+    return index >= 0 && index < folders.size() && ! userFolders.contains (folders[index]);
+}
+
+void LibraryBrowser::timerCallback()
+{
+    if (download == nullptr)
+        return;
+    const auto state = download->getState();
+    if (state != shownState || download->isRunning())
+        refreshDownloads();
+}
+
+void LibraryBrowser::refreshDownloads()
+{
+    using State = downloads::Download::State;
+    const auto state = download != nullptr ? download->getState() : State::idle;
+    const auto finished = state == State::done && shownState != State::done;
+    shownState = state;
+    auto line = juce::String();
+    if (download != nullptr)
+    {
+        const auto& l = download->getLibrary();
+        const auto percent = juce::String (juce::roundToInt (download->getProgress() * 100.0f)) + "%";
+        if (state == State::downloading)
+            line = l.what + ": DOWNLOADING " + percent;
+        else if (state == State::unpacking)
+            line = l.what + ": UNPACKING " + percent;
+        else if (state == State::failed)
+            line = l.what + ": " + download->getMessage();
+    }
+    const auto running = download != nullptr && download->isRunning();
+    for (size_t i = 0; i < getFor.size(); ++i)
+        getButtons[(int) i]->setVisible (! running && ! downloads::isInstalled (*getFor[i]));
+    cancelDownload.setVisible (running);
+    if (line != downloadLine)
+    {
+        downloadLine = line;
+        repaint (downloadArea);
+    }
+    if (finished)   // (the new library listed)
+        setFolders (userFolders, false);
+    resized();
 }
 
 LibraryBrowser::~LibraryBrowser() = default;
 
 void LibraryBrowser::setFolders (const juce::Array<juce::File>& list, bool remember)
 {
-    folders = list;
+    userFolders = list;
     if (remember)
         library::setFolders (list);
+    // (0.13.0: and the downloaded libraries, after the user's)
+    folders = list;
+    for (const auto& f : downloads::installedFolders())
+        folders.addIfNotAlreadyThere (f);
     rescan();
 }
 
 void LibraryBrowser::rescan()
 {
     entries = library::scan (folders);
+    for (auto& e : entries)   // (a downloaded library by its name: "VSCO 2 CE", not its folder's)
+        for (const auto& f : folders)
+            if (e.file.isAChildOf (f))
+            {
+                e.library = displayName (f);
+                break;
+            }
     if (libraryIndex >= folders.size())
         libraryIndex = -1;
     rebuild();
@@ -220,7 +299,7 @@ void LibraryBrowser::rebuild()
     for (size_t i = 0; i < entries.size(); ++i)
     {
         const auto& e = entries[i];
-        if (libraryIndex >= 0 && e.library != folders[libraryIndex].getFileName())
+        if (libraryIndex >= 0 && e.library != displayName (folders[libraryIndex]))
             continue;
         if (query.isEmpty() ? e.section != section
                             : ! (e.name.toLowerCase().contains (query) || e.instrument.toLowerCase().contains (query)))
@@ -294,6 +373,12 @@ void LibraryBrowser::paint (juce::Graphics& g)
         g.setColour (ParagonColours::textDim);
         g.drawFittedText (chosenInfo, text.removeFromTop (100), juce::Justification::topLeft, 6, 0.8f);
     }
+    if (downloadLine.isNotEmpty() && ! downloadArea.isEmpty())
+    {
+        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        ParagonColours::setTextFill (g, ParagonColours::accent, downloadArea);
+        g.drawFittedText (downloadLine, downloadArea.reduced (4, 0), juce::Justification::topLeft, 3, 0.8f);
+    }
     if (! sectionFiles.isEmpty())
     {
         auto area = detailsArea.reduced (16, 0).withTrimmedTop (detailsArea.getHeight() - 132).withHeight (60);
@@ -332,7 +417,24 @@ void LibraryBrowser::resized()
     auto libButtons = lib.removeFromBottom (30);
     addFolder.setBounds (libButtons.removeFromLeft (libButtons.getWidth() * 3 / 5).reduced (2, 0));
     removeFolder.setBounds (libButtons.reduced (2, 0));
+    removeFolder.setEnabled (libraryIndex >= 0 && ! isDownloadFolder (libraryIndex));
     lib.removeFromBottom (6);
+    // 0.13.0: the GET buttons (one a library not there yet), or the download's line and CANCEL
+    for (int i = getButtons.size(); --i >= 0;)   // (from the bottom up: the first library on top)
+        if (auto* b = getButtons[i]; b->isVisible())
+        {
+            b->setBounds (lib.removeFromBottom (28).reduced (2, 0));
+            lib.removeFromBottom (4);
+        }
+    downloadArea = {};
+    if (downloadLine.isNotEmpty() || cancelDownload.isVisible())
+    {
+        auto area = lib.removeFromBottom (cancelDownload.isVisible() ? 56 : 40);
+        if (cancelDownload.isVisible())
+            cancelDownload.setBounds (area.removeFromBottom (26).removeFromRight (90).reduced (2, 0));
+        downloadArea = area;
+        lib.removeFromBottom (4);
+    }
     libraries->setBounds (lib);
     sections->setBounds (sectionsArea.reduced (8).withTrimmedTop (32));
     instruments->setBounds (instrumentsArea.reduced (8).withTrimmedTop (32));

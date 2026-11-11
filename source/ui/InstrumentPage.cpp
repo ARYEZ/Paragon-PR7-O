@@ -263,6 +263,8 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
     };
     browser.onOpenFile = [this] { showLibrary (false); chooseFile(); };
     browser.onClose = [this] { showLibrary (false); };
+    browser.setDownload (&processor.getDownload());   // 0.13.0: GET VSCO 2 CE / SONATINA
+    browser.onGet = [this] (const downloads::Library& l) { processor.getLibrary (l); };
 
     // The INSTRUMENT / REGIONS switch over the picture panel.
     for (auto* b : { &showPicture, &showStage, &showRegions })
