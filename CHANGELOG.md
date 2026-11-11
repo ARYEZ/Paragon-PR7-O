@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.16.0
+
+**Articulations switched by a controller or by MIDI channel, not only by keyswitch keys** (you: "Do the articulations",
+the plan's stage 4), and a little less work when nothing plays.
+
+- **SWITCH BY**, on the rack's ARTICULATIONS page (SWITCHES):
+  - **KEYSWITCHES** (as before): the instrument's switch keys.
+  - **CONTROLLER:** a controller's value picks the articulation: 0-127 split evenly between them, in order. The CC
+    knob beside it chooses which controller (CC 20 by default, one MIDI leaves unassigned, so nothing else answers to
+    it). Under each articulation's name: the value that reaches it ("CC 20 = 26"), for a DAW's articulation map.
+  - **MIDI CHANNEL:** a note on channel 1 plays the first articulation, channel 2 the second... so you can play
+    sustains and staccatos at the same time from two tracks. In this mode PR7-O listens on every channel.
+  - The keyswitch keys always switch too, whichever way is chosen. Saved with presets and projects.
+- **The mixer's cost, measured** on VSCO's string section (a 10-note chord, 4 players, on the mod wheel): 5.6% of one
+  core (0.14.0, before the mixer: 5.3%, the same within the noise), with STAGE 4.7% (5.2%), with both octave
+  doublings 9.2% (10.0%); an EQ and a compressor on all five strips adds about 3%. With nothing playing it had gone
+  from 0.1% to 0.4% (every part's buffer cleared each block, used or not): now only the parts in use are cleared.
+- Not checked here: an articulation map in a DAW (Cubase's expression maps, Reaper's...) sending these values.
+
 ## 0.15.0
 
 **THE MIXER: a strip for every part, in the rack's style, on its own tab** (you, on the mock-up: "OMG that Tron style

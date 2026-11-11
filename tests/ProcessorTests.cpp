@@ -187,6 +187,20 @@ TEST_CASE ("MIDI CHANNEL: ANY plays every channel; a channel chosen plays only i
     CHECK (peakOn (0, 9) > 0.1f);
     CHECK (peakOn (3, 3) > 0.1f);
     CHECK (peakOn (3, 4) == 0.0f);
+    // 0.16.0: ARTICULATIONS by MIDI CHANNEL: every channel is heard (each plays its own articulation), whatever's chosen.
+    const auto peakSwitching = [] (int listen, int channel)
+    {
+        auto processor = makeProcessor();
+        testkit::useSample (*processor, testkit::sine (220.0));
+        set (*processor, ParamIDs::midiChannel, (float) listen);
+        set (*processor, ParamIDs::artSwitchBy, 2.0f);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (channel, 60, 1.0f), 0);
+        const auto out = play (*processor, 0.2, midi);
+        return *std::max_element (out[0].begin(), out[0].end());
+    };
+    CHECK (peakSwitching (3, 4) > 0.1f);
+    CHECK (peakSwitching (1, 9) > 0.1f);
 }
 
 TEST_CASE ("OUTPUT, the preset's LEVEL and the instrument's LEVEL apply their dB; BYPASS fades to silence", "[processor]")

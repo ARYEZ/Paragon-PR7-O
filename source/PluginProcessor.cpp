@@ -705,7 +705,8 @@ void ParagonX1AudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, co
     if (partBuffers.getNumSamples() >= numSamples)
     {
         const auto numParts = juce::jlimit (1, stage::maxParts, stagePartCount.load());
-        partBuffers.clear (0, numSamples);
+        for (int c = 0; c < 2 * numParts; ++c)   // (only the parts in use; the stage's pair below, when it runs)
+            partBuffers.clear (c, 0, numSamples);
         sampler::Sampler::PartOutputs outputs;
         std::array<const float*, stage::maxParts> partLeft {}, partRight {};
         outputs.count = numParts;
@@ -726,6 +727,8 @@ void ParagonX1AudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, co
             // crossfades with the parts as they are over 20 ms.
             if (stageMix <= 0.0f)
                 stage.reset();
+            partBuffers.clear (2 * stage::maxParts, 0, numSamples);   // (the stage adds into its pair)
+            partBuffers.clear (2 * stage::maxParts + 1, 0, numSamples);
             auto* stageLeft = partBuffers.getWritePointer (2 * stage::maxParts);
             auto* stageRight = partBuffers.getWritePointer (2 * stage::maxParts + 1);
             stage.process (partLeft, partRight, numParts, stageLeft, stageRight, numSamples, getStageSettings());

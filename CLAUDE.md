@@ -489,6 +489,22 @@ tools, which need the owner's riffs)
   disk and a test playing faster than real time loses frames), UiTests "THE MIXER tab 0.15.0" (controls, editor,
   every pixel in family colours).
 
+## 0.16.0: ARTICULATIONS by controller or channel (the owner: "Do the articulations and run the speed benchmark")
+
+- Parameters (hint 47, `pr7o0160`): `artSwitchBy` (`switchByNames` Keyswitches / Controller / MIDI Channel),
+  `artSwitchCC` (0-127, 20). `Sampler::Settings::switchBy / switchCC`; CONTROLLER: CC `switchCC` sets `keyswitch` to
+  articulation `value * n / 128`; MIDI CHANNEL: `switchFor (program, channel, settings)` per note (playNote,
+  playReleases) = the (channel-1)-th articulation's `lo` while there are that many, else `keyswitch`; the processor
+  passes channel 0 (every channel) in that mode. Keys always switch. Rack: the ARTICULATIONS page has its side column
+  now (`hasSide` always): SWITCH BY menu (`switchByMenu`), CC compact knob (`switchCCKnob`, `sideKnobCell`, shown only
+  for CONTROLLER, `showSwitchCC`), hints under the names (`setArticulationHints`; CONTROLLER's value = ceil (i x 128 /
+  n), the first of its band). Tests: SamplerTests "SAMPLER 0.16.0: ARTICULATIONS switched...", ProcessorTests MIDI
+  CHANNEL (every channel heard by channel).
+- **Benchmark** (probe `/tmp/claude-0/probes/ScratchBench.cpp`, `BENCH_MIXER` adds EQ + COMP on 5 strips; built
+  against a 0.14.0 worktree with `FETCHCONTENT_SOURCE_DIR_JUCE` / `_CATCH2` pointing at this build's `_deps`): idle
+  0.1 -> 0.4%, chord 5.3 -> 5.6, + STAGE 5.2 -> 4.7, + double 10.0 -> 9.2, + mixer effects 12.4. Idle fixed: only
+  `2 x numParts` part channels cleared, the stage's pair only when it runs (`Stage::process` adds into it).
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:
