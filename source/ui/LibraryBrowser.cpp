@@ -58,18 +58,25 @@ LibraryBrowser::LibraryBrowser()
 {
     setOpaque (true);
     libraries->count = [this] { return folders.size() + 1; };
+    // (0.12.1: JUCE's lists also paint the empty rows under their last one, `row` past the count: every list returns
+    // there. The sections list didn't, and read an eighth section's name from a table of seven: on a tall enough window
+    // that read whatever was next in memory as a name's address, and crashed the window: the owner's PR7-S log.)
     libraries->paintRow = [this] (int row, juce::Graphics& g, int w, int h, bool)
     {
+        if (row < 0 || row > folders.size())
+            return;
         int n = 0;
         for (const auto& e : entries)
             n += row == 0 || e.library == folders[row - 1].getFileName();
         paintText (g, (row == 0 ? juce::String ("ALL LIBRARIES") : folders[row - 1].getFileName()) + "  (" + juce::String (n) + ")",
                    w, h, libraryIndex == row - 1, false, row == 0);
     };
-    libraries->clicked = [this] (int row) { chooseLibrary (row - 1); };
+    libraries->clicked = [this] (int row) { if (row <= folders.size()) chooseLibrary (row - 1); };
     sections->count = [] { return library::numSections; };
     sections->paintRow = [this] (int row, juce::Graphics& g, int w, int h, bool)
     {
+        if (row < 0 || row >= library::numSections)
+            return;
         int n = 0;
         juce::StringArray instrumentsHere;
         for (const auto& e : entries)
@@ -77,14 +84,16 @@ LibraryBrowser::LibraryBrowser()
                 ++n;
         paintText (g, library::nameOf ((library::Section) row) + "  (" + juce::String (n) + ")", w, h, (int) section == row, n == 0, true);
     };
-    sections->clicked = [this] (int row) { chooseSection ((library::Section) row); };
+    sections->clicked = [this] (int row) { if (row >= 0 && row < library::numSections) chooseSection ((library::Section) row); };
     instruments->count = [this] { return (int) rows.size(); };
-    instruments->selectable = [this] (int row) { return row < (int) rows.size() && ! rows[(size_t) row].header; };
+    instruments->selectable = [this] (int row) { return row >= 0 && row < (int) rows.size() && ! rows[(size_t) row].header; };
     instruments->paintRow = [this] (int row, juce::Graphics& g, int w, int h, bool)
     {
-        if (row >= (int) rows.size())
+        if (row < 0 || row >= (int) rows.size())
             return;
         const auto& r = rows[(size_t) row];
+        if (! r.header && (r.entry < 0 || r.entry >= (int) entries.size()))
+            return;
         if (r.header)
             paintText (g, r.text.toUpperCase(), w, h, false, false, true, 8);
         else
@@ -101,7 +110,7 @@ LibraryBrowser::LibraryBrowser()
             }
         }
     };
-    instruments->clicked = [this] (int row) { choose (rows[(size_t) row].entry); };
+    instruments->clicked = [this] (int row) { if (row >= 0 && row < (int) rows.size()) choose (rows[(size_t) row].entry); };
     for (auto* l : { libraries.get(), sections.get(), instruments.get() })
         addAndMakeVisible (*l);
 

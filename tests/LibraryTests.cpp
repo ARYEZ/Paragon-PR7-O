@@ -106,3 +106,22 @@ TEST_CASE ("The library browser lists a section's instruments, searches every se
     browser.chooseFile (tuba);
     CHECK (browser.getChosen() == tuba);
 }
+
+TEST_CASE ("0.12.1: a tall browser draws its lists' empty rows safely (the owner's crash)", "[library]")
+{
+    // JUCE's lists paint the rows under their last one too, past the count. The sections list read an eighth name from
+    // a table of seven there: on Windows that crashed the window.
+    CHECK (library::nameOf (library::Section::other) == "OTHER");
+    CHECK (library::nameOf ((library::Section) library::numSections).isEmpty());
+    CHECK (library::nameOf ((library::Section) 40).isEmpty());
+    Libraries l;
+    l.add ("VSCO/ViolinEns-KS.sfz");
+    LibraryBrowser browser;
+    browser.setFolders ({ l.root.getChildFile ("VSCO") }, false);
+    for (const auto height : { 600, 1400, 2400 })
+    {
+        browser.setSize (1600, height);   // (the sections list many rows taller than its seven)
+        const auto image = browser.createComponentSnapshot (browser.getLocalBounds(), true, 1.0f);
+        CHECK (image.getHeight() == height);
+    }
+}

@@ -2,6 +2,8 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <iterator>
+
 namespace library
 {
     namespace
@@ -99,7 +101,9 @@ namespace library
     juce::String nameOf (Section s)
     {
         static const char* names[] = { "STRINGS", "BRASS", "WOODWINDS", "PERCUSSION", "KEYS & HARP", "CHOIR", "OTHER" };
-        return names[(int) s];
+        static_assert (std::size (names) == numSections);
+        const auto i = (int) s;
+        return i >= 0 && i < numSections ? juce::String (names[i]) : juce::String();   // (0.12.1: never past the table)
     }
 
     juce::String instrumentOf (const juce::String& name, const juce::String& folder)
