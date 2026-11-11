@@ -196,8 +196,10 @@ TEST_CASE ("Downloads: a library reference is found in the download, else in the
     CHECK (downloads::resolve (ref, { own }) == downloaded);
     // A file in a download made a reference; anything else left as it is.
     CHECK (downloads::portable (downloaded.getFullPathName()) == ref);
-    CHECK (downloads::portable ("/elsewhere/x.sfz") == "/elsewhere/x.sfz");
-    CHECK (downloads::resolve ("/elsewhere/x.sfz", {}) == juce::File ("/elsewhere/x.sfz"));
+    // (An absolute path on this system: "/elsewhere/x.sfz" isn't one on Windows, with no drive letter.)
+    const auto elsewhere = t.dir.getChildFile ("elsewhere/x.sfz").getFullPathName();
+    CHECK (downloads::portable (elsewhere) == elsewhere);
+    CHECK (downloads::resolve (elsewhere, {}) == juce::File (elsewhere));
 }
 
 TEST_CASE ("Downloads: an instrument or section named by library references plays, and says what's missing", "[downloads][processor]")
