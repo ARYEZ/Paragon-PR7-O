@@ -324,6 +324,14 @@ InstrumentPage::InstrumentPage (ParagonX1AudioProcessor& p) : processor (p), map
                                                              "crossfades between them, soft to loud, as you hold it; shorts still go by velocity");
     doubleMenu = menu (ParamIDs::ensDouble, "DOUBLE", "Every note also an octave up, an octave down, or both, as orchestrators double a line; in a section, played by whichever part has that key");
     roomMenu = menu (ParamIDs::stageRoom, "ROOM", "The room the stage is in: a studio (small, quick), a scoring stage, a concert hall, a cathedral (big, long)");
+    switchByMenu = menu (ParamIDs::artSwitchBy, "SWITCH BY", "How the articulations are switched. KEYSWITCHES: the instrument's switch keys "
+                                                             "(always on). CONTROLLER: a controller's value picks one (0-127 split evenly, in order: "
+                                                             "the values under each name). MIDI CHANNEL: a note on channel 1 plays the first, "
+                                                             "channel 2 the second... (several at once; every channel heard)");
+    switchCCKnob = std::make_unique<ParamControl> (state, ParamIDs::artSwitchCC, "CC", "The controller (CC number) that switches the articulations");
+    switchCCKnob->setCompact (true);
+    switchCCKnob->setRack (true);
+    rack.addAndMakeVisible (*switchCCKnob);
     insertMenu = menu (ParamIDs::instInsert, "INSERT BUS", "Play it through an insert bus's DRIVE, GLITCH, MOD and LO-FI (FX page, INSERTS). "
                                                            "On a bus, the bus's own sends are used instead of these");
     Finish::paintAs (std::nullopt);
@@ -401,6 +409,8 @@ void InstrumentPage::showRackPage()
         c->setVisible (ensemble);
     doubleMenu->setVisible (ensemble);
     const auto switches = page == InstrumentRack::Page::articulations;   // 0.14.0
+    switchByMenu->setVisible (switches);   // 0.16.0
+    updateSwitchHints();
     for (auto& b : articulationButtons)
         b->setVisible (switches);
     for (size_t i = 0; i < splitRows.size(); ++i)
@@ -659,6 +669,7 @@ void InstrumentPage::timerCallback()
     if (editedSection.has_value() && juce::Time::getMillisecondCounterHiRes() - editedAt > 300.0)
         applyPendingSplits();
     updateScreen();
+    updateSwitchHints();   // 0.16.0
     if (processor.isLoadingInstrument() != shownLoading)
         refresh();
     if (notenames::middleCOctave.load() != shownOctave)
@@ -674,6 +685,27 @@ void InstrumentPage::timerCallback()
             articulationButtons[(size_t) i]->setToggleState (i == lit, juce::dontSendNotification);
         updateInfo();
     }
+}
+
+void InstrumentPage::updateSwitchHints()
+{
+    // Under each articulation's name: its key (KEYSWITCHES), its controller's value (CONTROLLER: the first of its
+    // share of 0-127), its channel (MIDI CHANNEL: past 16, none).
+    const auto by = juce::roundToInt (processor.getParameters().getRawParameterValue (ParamIDs::artSwitchBy)->load());
+    const auto cc = juce::roundToInt (processor.getParameters().getRawParameterValue (ParamIDs::artSwitchCC)->load());
+    const auto onPage = rack.getPage() == InstrumentRack::Page::articulations;
+    switchCCKnob->setVisible (onPage && by == 1);
+    rack.showSwitchCC (by == 1);
+    juce::StringArray hints;
+    if (shown != nullptr)
+    {
+        const auto count = (int) shown->articulations.size();
+        for (int i = 0; i < count; ++i)
+            hints.add (by == 1 ? "CC " + juce::String (cc) + " = " + juce::String ((i * 128 + count - 1) / count)
+                     : by == 2 ? (i < 16 ? "CHANNEL " + juce::String (i + 1) : juce::String ("NO CHANNEL"))
+                     : "KEY " + notenames::name (shown->articulations[(size_t) i].lo));
+    }
+    rack.setArticulationHints (hints);
 }
 
 void InstrumentPage::rebuildArticulations()
@@ -867,6 +899,8 @@ void InstrumentPage::resized()
     for (int i = 0; i < (int) ensembleControls.size(); ++i)
         ensembleControls[(size_t) i]->setBounds (rack.routingKnobCell (i));
     doubleMenu->setBounds (rack.menuCell (0).reduced (4, 2));
+    switchByMenu->setBounds (rack.menuCell (0).reduced (4, 2));
+    switchCCKnob->setBounds (rack.sideKnobCell());
     stageOnKey.setBounds (rack.pageKeyCell (0));
     resetSeatsKey.setBounds (rack.pageKeyCell (1));
 }

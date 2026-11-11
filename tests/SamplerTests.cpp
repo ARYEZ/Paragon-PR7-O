@@ -537,6 +537,81 @@ TEST_CASE ("SAMPLER 0.2.0: KEYSWITCHES: the default plays; a switch key chooses 
     CHECK (loudestOf (render (*program, noteOn (60), 0.2, {}, &s)[0], { 220.0, 330.0 }) == 220.0);
 }
 
+TEST_CASE ("SAMPLER 0.16.0: ARTICULATIONS switched by a controller's value or by the MIDI channel; the keys switch too", "[sampler][keyswitch]")
+{
+    // Three articulations: 220 Hz (switch key 36), 330 Hz (37), 440 Hz (38), all on keys 50-70.
+    auto program = std::make_shared<sampler::Program>();
+    const std::array<double, 3> hz { 220.0, 330.0, 440.0 };
+    for (int a = 0; a < 3; ++a)
+    {
+        sampler::Region r;
+        r.sample = testkit::sine (hz[(size_t) a], 1.0);
+        r.loKey = 50;
+        r.hiKey = 70;
+        r.keyCenter = 60;
+        r.velTrack = 0.0f;
+        r.swLoLast = r.swHiLast = 36 + a;
+        program->regions.push_back (r);
+    }
+    program->swLoKey = 36;
+    program->swHiKey = 38;
+    program->swDefault = 36;
+    program->articulations = { { 36, 36, "Sustain" }, { 37, 37, "Tremolo" }, { 38, 38, "Pizzicato" } };
+    sampler::prepareRegions (*program);
+    program->index();
+    const std::initializer_list<double> all { 220.0, 330.0, 440.0 };
+
+    // CONTROLLER: CC 20's value split evenly (0-42 the first, 43-85 the second, 86-127 the third).
+    sampler::Sampler::Settings byCC;
+    byCC.switchBy = 1;
+    byCC.switchCC = 20;
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    for (const auto& [value, expected] : { std::pair { 0, 220.0 }, std::pair { 42, 220.0 }, std::pair { 43, 330.0 },
+                                           std::pair { 85, 330.0 }, std::pair { 86, 440.0 }, std::pair { 127, 440.0 } })
+    {
+        INFO ("CC 20 = " << value);
+        s.reset();
+        juce::MidiBuffer m;
+        m.addEvent (juce::MidiMessage::controllerEvent (1, 20, value), 0);
+        m.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+        CHECK (loudestOf (render (*program, m, 0.2, byCC, &s)[0], all) == expected);
+    }
+    // Another controller does nothing; the keys still switch.
+    {
+        s.reset();
+        s.chooseKeyswitch (36);
+        juce::MidiBuffer m;
+        m.addEvent (juce::MidiMessage::controllerEvent (1, 21, 127), 0);
+        m.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+        CHECK (loudestOf (render (*program, m, 0.2, byCC, &s)[0], all) == 220.0);
+        s.reset();
+        juce::MidiBuffer k;
+        k.addEvent (juce::MidiMessage::noteOn (1, 38, (juce::uint8) 100), 0);
+        k.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+        CHECK (loudestOf (render (*program, k, 0.2, byCC, &s)[0], all) == 440.0);
+    }
+
+    // MIDI CHANNEL: channel n plays the n-th, several at once; past the last, the one chosen.
+    sampler::Sampler::Settings byChannel;
+    byChannel.switchBy = 2;
+    sampler::Sampler c;
+    c.prepare (sampleRate);
+    c.chooseKeyswitch (36);
+    juce::MidiBuffer both;
+    both.addEvent (juce::MidiMessage::noteOn (2, 60, (juce::uint8) 100), 0);   // the second: 330 Hz
+    both.addEvent (juce::MidiMessage::noteOn (3, 60, (juce::uint8) 100), 0);   // the third: 440 Hz
+    const auto out = render (*program, both, 0.3, byChannel, &c)[0];
+    CHECK (levelAt (out, 330.0, 4800, 4800) > 0.1);
+    CHECK (levelAt (out, 440.0, 4800, 4800) > 0.1);
+    CHECK (levelAt (out, 220.0, 4800, 4800) < 1.0e-3);
+    c.reset();
+    CHECK (loudestOf (render (*program, noteOn (60, 100, 0, 9), 0.2, byChannel, &c)[0], all) == 220.0);   // channel 9: the chosen
+    // As keyswitches (the default), the channel doesn't choose.
+    c.reset();
+    CHECK (loudestOf (render (*program, noteOn (60, 100, 0, 3), 0.2, {}, &c)[0], all) == 220.0);
+}
+
 TEST_CASE ("SAMPLER 0.2.0: a loop goes round seamlessly; loop_sustain stops at note-off; its crossfade keeps the level", "[sampler][loop]")
 {
     // A 1 s sine of whole cycles (so a plain loop over whole cycles joins exactly): the loop's frames continue as the

@@ -142,6 +142,8 @@ private:
     bool regionsChosen = false, stageChosen = false;
     std::vector<std::unique_ptr<ParamControl>> playControls, sendControls, stageControls, ensembleControls;   // the rack's knobs
     std::unique_ptr<ParamControl> dynamicsMenu, insertMenu, roomMenu, doubleMenu;                             // the rack's menus
+    std::unique_ptr<ParamControl> switchByMenu, switchCCKnob;   // 0.16.0: ARTICULATIONS' SWITCH BY and its CC
+    void updateSwitchHints();   // how each articulation is reached, under its name
     juce::TextButton stageOnKey, resetSeatsKey;   // 0.8.0: the STAGE page's keys
     std::unique_ptr<juce::ParameterAttachment> stageOnAttachment;
     juce::TextButton autoSustainKey;

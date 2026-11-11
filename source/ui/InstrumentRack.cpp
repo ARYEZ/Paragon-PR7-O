@@ -186,13 +186,27 @@ void InstrumentRack::setNumSplits (int n)
 
 // The ARTICULATIONS page: the articulations' keys across the top (one row with a section's splits under them; else up to
 // ten in a row, two rows past that), the splits' screens across the bottom.
+void InstrumentRack::setArticulationHints (const juce::StringArray& hints)
+{
+    if (hints == articulationHints)
+        return;
+    articulationHints = hints;
+    repaint();
+}
+
+juce::Rectangle<int> InstrumentRack::sideKnobCell() const
+{
+    // Under the menu: a compact knob with its value under it.
+    return sideOfPage().withTrimmedTop (64.0f).withSizeKeepingCentre (70.0f, 70.0f).toNearestInt();
+}
+
 juce::Rectangle<float> InstrumentRack::articulationBand() const
 {
-    auto area = pageArea();
+    auto area = pageArea().withTrimmedRight (sideWidth + sectionGap);   // (0.16.0: beside the side column)
     return numSplits > 0 ? area.removeFromTop (60.0f) : area;
 }
 
-juce::Rectangle<float> InstrumentRack::splitBand() const { return pageArea().withTrimmedTop (66.0f); }
+juce::Rectangle<float> InstrumentRack::splitBand() const { return pageArea().withTrimmedRight (sideWidth + sectionGap).withTrimmedTop (66.0f); }
 
 int InstrumentRack::articulationsPerRow() const noexcept
 {
@@ -303,14 +317,12 @@ void InstrumentRack::paint (juce::Graphics& g)
                 title, juce::Justification::centredLeft, false);
 
     if (page == Page::articulations)
-    {
         paintArticulations (g);
-        return;
-    }
 
     // The page's right-hand column: its menu's name and screen (the menu sits on it); PLAYING's AUTO SUSTAIN key's name.
     const auto menu = menuCell (0).toFloat();
-    stamped (g, page == Page::playing ? "DYNAMICS" : page == Page::routing ? "INSERT BUS" : page == Page::stage ? "ROOM" : "DOUBLE",
+    stamped (g, page == Page::playing ? "DYNAMICS" : page == Page::routing ? "INSERT BUS" : page == Page::stage ? "ROOM"
+              : page == Page::ensemble ? "DOUBLE" : "SWITCH BY",
              menu.withHeight (12.0f).translated (0.0f, -15.0f), 8.0f, juce::Justification::centredLeft);
     LedDisplay::paintScreen (g, menu, screenSize);
     if (page == Page::playing || page == Page::stage)
@@ -339,8 +351,18 @@ void InstrumentRack::paintArticulations (juce::Graphics& g)
         const auto area = juce::Rectangle<float> (key.getCentreX() - w * 0.5f, key.getBottom() + 3.0f, w, 22.0f);
         g.setFont (font (7.5f));
         g.setColour (Finish::ink());
-        g.drawFittedText (articulationNames[i], area.toNearestInt(), juce::Justification::centredTop, 2, 0.85f);
+        g.drawFittedText (articulationNames[i], area.withHeight (articulationHints.isEmpty() ? 22.0f : 18.0f).toNearestInt(),
+                          juce::Justification::centredTop, 2, 0.85f);
+        if (i < articulationHints.size())   // (0.16.0: how it's reached, printed red over the stamped name's line)
+        {
+            g.setColour (Finish::printedRed());
+            g.setFont (font (7.0f));
+            g.drawText (articulationHints[i], area.withY (area.getBottom() - 1.0f).withHeight (9.0f), juce::Justification::centred, false);
+        }
     }
+    // 0.16.0: the CC knob's name (shown while SWITCH BY is CONTROLLER).
+    if (showCC)
+        stamped (g, "CONTROLLER", sideKnobCell().toFloat().withHeight (11.0f).translated (0.0f, -13.0f).expanded (30.0f, 0.0f), 8.0f);
     // The splits: SPLITS printed over their screens, each screen.
     if (numSplits > 0)
     {
@@ -387,9 +409,8 @@ void InstrumentRack::paintScreen (juce::Graphics& g)
 void InstrumentRack::paintOverChildren (juce::Graphics& g)
 {
     // The glass over the menu's screen (its text sits behind it, as on any of the unit's screens); the splits' screens.
-    if (hasSide())
-        LedDisplay::paintGlassOverlay (g, menuCell (0).toFloat().reduced (3.0f), screenSize);
-    else
+    LedDisplay::paintGlassOverlay (g, menuCell (0).toFloat().reduced (3.0f), screenSize);
+    if (page == Page::articulations)
         for (int i = 0; i < numSplits; ++i)
             LedDisplay::paintGlassOverlay (g, splitScreenCell (i).toFloat().reduced (3.0f), screenSize);
     Finish::paintAs (std::nullopt);

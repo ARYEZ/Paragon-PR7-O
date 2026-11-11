@@ -607,7 +607,10 @@ sampler::Sampler::Settings ParagonX1AudioProcessor::getSamplerSettings() const n
     s.tuneCents = param (ParamIDs::instTune);
     s.releaseScale = param (ParamIDs::instRelease);
     s.polyphony = juce::roundToInt (param (ParamIDs::instVoices));
-    s.channel = juce::roundToInt (param (ParamIDs::midiChannel));
+    s.switchBy = juce::roundToInt (param (ParamIDs::artSwitchBy));   // 0.16.0
+    s.switchCC = juce::roundToInt (param (ParamIDs::artSwitchCC));
+    // (by MIDI channel, every channel is heard: each one plays its own articulation)
+    s.channel = s.switchBy == 2 ? 0 : juce::roundToInt (param (ParamIDs::midiChannel));
     s.dynamics = juce::roundToInt (param (ParamIDs::instDynamics)) == 1 ? sampler::Sampler::Dynamics::modWheel
                                                                        : sampler::Sampler::Dynamics::velocity;
     s.autoSustain = isOn (ParamIDs::instAutoSustain);

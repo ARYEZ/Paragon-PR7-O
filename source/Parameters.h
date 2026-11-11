@@ -57,6 +57,12 @@ namespace ParamIDs
     inline constexpr auto ensDouble      = "ensDouble";
     inline constexpr auto ensDoubleLevel = "ensDoubleLevel";
     inline const juce::StringArray doubleNames { "Off", "Octave Up", "Octave Down", "Octaves Up + Down" };   // by index: only append
+    // 0.16.0, ARTICULATIONS: how they're switched (the keyswitch keys always switch too). CONTROLLER: a CC whose value
+    // picks one (0-127 split evenly between them, in order); MIDI CHANNEL: a note on channel n plays the n-th (several
+    // at once; every channel heard).
+    inline constexpr auto artSwitchBy = "artSwitchBy";
+    inline constexpr auto artSwitchCC = "artSwitchCC";
+    inline const juce::StringArray switchByNames { "Keyswitches", "Controller", "MIDI Channel" };   // by index: only append
     inline constexpr auto instGlide  = "instGlide";
     // Global, like OUTPUT: they suit the player's controller, not a sound.
     inline constexpr auto midiChannel = "midiChannel";       // midiChannelNames' index (0: any)

@@ -219,6 +219,12 @@ namespace sampler
                         }
                     }
                 }
+                // 0.16.0: ARTICULATIONS by a controller: its value, 0-127 split evenly between them in order.
+                if (settings.switchBy == 1 && number == settings.switchCC && program != nullptr && ! program->articulations.empty())
+                {
+                    const auto count = (int) program->articulations.size();
+                    keyswitch = program->articulations[(size_t) juce::jmin (count - 1, value * count / 128)].lo;
+                }
                 if (number == 1)
                 {
                     wheel = (float) value / 127.0f;
@@ -330,11 +336,19 @@ namespace sampler
         return best;
     }
 
+    int Sampler::switchFor (const Program& program, int channel, const Settings& settings) const noexcept
+    {
+        if (settings.switchBy == 2 && channel >= 1 && channel <= (int) program.articulations.size())
+            return program.articulations[(size_t) channel - 1].lo;
+        return keyswitch;
+    }
+
     bool Sampler::playNote (const Program& program, int note, int velocity, int channel, const Settings& settings, int joinFrom,
                             const NoteExtras& extras) noexcept
     {
         const auto chance = nextRandom();
         const auto onWheel = settings.dynamics == Dynamics::modWheel;
+        const auto articulation = switchFor (program, channel, settings);   // 0.16.0
         // The regions this note plays: on the wheel, a held recording's every velocity layer.
         std::array<const Region*, maxRegionsANote> chosen {};
         auto numChosen = 0;
@@ -342,7 +356,7 @@ namespace sampler
         {
             const auto& r = program.regions[(size_t) index];
             const auto anyVelocity = onWheel && r.held;
-            if (! r.covers (note, anyVelocity ? r.loVel : velocity, channel) || ! r.playsUnder (keyswitch))
+            if (! r.covers (note, anyVelocity ? r.loVel : velocity, channel) || ! r.playsUnder (articulation))
                 continue;
             // 0.9.0: release samples wait for the key to come up; first only as a phrase starts, legato only within one;
             // only while its controllers are in range.
@@ -900,6 +914,7 @@ namespace sampler
             return;
         const auto velocity = juce::jmax (1, keyVelocity[(size_t) note]);
         const auto heldSeconds = (float) ((double) juce::jmax<juce::int64> (0, now - keyStart[(size_t) note]) / rate);
+        const auto articulation = switchFor (program, channel, settings);   // 0.16.0 (its own note's channel)
         auto started = false;
         std::uint64_t noteId = 0;
         for (const auto index : program.byKey[(size_t) note])
@@ -907,7 +922,7 @@ namespace sampler
             const auto& r = program.regions[(size_t) index];
             const auto wanted = pedalLifted ? r.trigger == Region::Trigger::release
                                             : r.trigger == Region::Trigger::releaseKey || (r.trigger == Region::Trigger::release && ! pedal);
-            if (! wanted || ! r.covers (note, velocity, channel) || ! r.playsUnder (keyswitch) || ! conditionsMet (r))
+            if (! wanted || ! r.covers (note, velocity, channel) || ! r.playsUnder (articulation) || ! conditionsMet (r))
                 continue;
             auto turn = 0;
             if (index < (int) program.sequence.size())

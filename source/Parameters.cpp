@@ -16,6 +16,7 @@ namespace
     constexpr int pr7o070 = 44;   // PR7-O 0.7.0: LEGATO, GLIDE
     constexpr int pr7o080 = 45;   // PR7-O 0.8.0: THE STAGE
     constexpr int pr7o0100 = 46;  // PR7-O 0.10.0: THE ENSEMBLE
+    constexpr int pr7o0160 = 47;  // PR7-O 0.16.0: ARTICULATIONS by controller or channel
 
     const ToText asDb = [] (float value, int) { return juce::String (value, 1) + " dB"; };
     const ToText asPercent = [] (float value, int) { return juce::String (juce::roundToInt (value * 100.0f)) + "%"; };
@@ -106,6 +107,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         add (layout, ensTiming, "Timing", { 0.0f, 40.0f, 0.1f }, 12.0f, [] (float v, int) { return juce::String (juce::roundToInt (v)) + " ms"; }, pr7o0100);
         addChoice (layout, ensDouble, "Double", doubleNames, 0, pr7o0100);
         add (layout, ensDoubleLevel, "Double Level", { -24.0f, 0.0f, 0.1f }, -6.0f, asDb, pr7o0100);
+        addChoice (layout, artSwitchBy, "Switch By", switchByNames, 0, pr7o0160);
+        // (CC 20 by default: a controller MIDI leaves unassigned, so nothing else answers to it)
+        add (layout, artSwitchCC, "Switch CC", { 0.0f, 127.0f, 1.0f }, 20.0f,
+             [] (float v, int) { return "CC " + juce::String (juce::roundToInt (v)); }, pr7o0160);
         addChoice (layout, midiChannel, "MIDI Channel", midiChannelNames, 0, pr7o010);
         addChoice (layout, noteNames, "Note Names", notenames::choiceNames, 0, pr7o010);
     }

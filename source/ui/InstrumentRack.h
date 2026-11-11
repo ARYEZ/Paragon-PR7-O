@@ -59,6 +59,11 @@ public:
     // 0.14.0: the ARTICULATIONS page: a key for each articulation (its name stamped under it) and, for a section, a
     // small screen for each part's keys with - / + keys under it (the page's labels and keys are the page's children).
     void setArticulationNames (const juce::StringArray&);
+    // 0.16.0: how each is reached (its key, its controller's value, its channel), under its name; SWITCH BY's menu and
+    // the CC knob in the page's side column.
+    void setArticulationHints (const juce::StringArray&);
+    juce::Rectangle<int> sideKnobCell() const;
+    void showSwitchCC (bool shown) { if (shown != showCC) { showCC = shown; repaint(); } }
     void setNumSplits (int);
     juce::Rectangle<int> articulationCell (int index) const;
     juce::Rectangle<int> splitScreenCell (int index) const;
@@ -73,14 +78,15 @@ private:
     juce::Rectangle<float> displayColumn() const;
     juce::Rectangle<float> pageArea() const;      // under the page's title
     juce::Rectangle<float> sideOfPage() const;    // the page's right-hand column (menu and key)
-    bool hasSide() const noexcept { return page != Page::articulations; }
+    bool hasSide() const noexcept { return true; }   // (0.16.0: ARTICULATIONS too: SWITCH BY and the CC)
     juce::Rectangle<float> articulationBand() const;
     juce::Rectangle<float> splitBand() const;
     int articulationsPerRow() const noexcept;
     float articulationWidth() const noexcept;
     float splitWidth() const noexcept;
-    juce::StringArray articulationNames;
+    juce::StringArray articulationNames, articulationHints;
     int numSplits = 0;
+    bool showCC = false;
     juce::Rectangle<int> pageSwitchCell (int index) const;
     void paintScreen (juce::Graphics&);
     void paintArticulations (juce::Graphics&);

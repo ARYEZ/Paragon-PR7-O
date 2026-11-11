@@ -74,6 +74,9 @@ namespace sampler
             float releaseScale = 1.0f;  // RELEASE: x the regions' release times
             int polyphony = 128;        // notes
             int channel = 0;            // MIDI channel listened to (0: any)
+            // 0.16.0: ARTICULATIONS switched by the keys (0), a controller (1: `switchCC`'s value, 0-127 split evenly
+            // between them) or the MIDI channel (2: a note on channel n plays the n-th). The keys always switch too.
+            int switchBy = 0, switchCC = 20;
             Dynamics dynamics = Dynamics::velocity;
             bool autoSustain = true;
             bool legato = false;        // 0.7.0
@@ -241,6 +244,9 @@ namespace sampler
         bool phraseGoingOn = false;    // 0.9.0: another key was down as this note began
         bool pedal = false;
         int keyswitch = -1;
+        // 0.16.0: the articulation (its keyswitch key) a note on `channel` plays: by channel (switchBy 2: the n-th on
+        // channel n, while there are that many), else the one chosen.
+        int switchFor (const Program&, int channel, const Settings&) const noexcept;
         // 0.7.0: the keys as they're down (velocity, channel, when: the sample clock), and which key each was joined
         // from (-1: none).
         juce::int64 clock = 0, now = 0;
