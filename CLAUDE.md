@@ -541,6 +541,10 @@ tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE: the owner's riffs asked for)
   - Notes in tests go in as MIDI at a sample position, not through the keyboard state (it spreads presses by the clock).
   - `tests/SamplerTests.cpp`: the SFZ reader and the sampler on invented files; also the kept MixerEffects and
     DiskStreamer.
+- **CI's Linux machine and DNS** (0.15.0): GitHub's Ubuntu runners looked Ubuntu's mirrors up through Azure's name
+  service, which failed for hours ("Temporary failure resolving 'azure.archive.ubuntu.com'", the job stopping in apt
+  before building). The workflow now points systemd-resolved at Cloudflare (1.1.1.1, 1.0.0.1; 8.8.8.8 fallback) and apt
+  retries 5 times. A failure there isn't our code: read the log before "fixing" anything.
 - **pluginval:** `xvfb-run -a <pluginval> --strictness-level 10 --validate-in-process --validate
   "build/ParagonX1_artefacts/Release/VST3/Paragon PR7-O.vst3"`. Check its exit code. Linux pluginval sometimes crashes
   in its own host (its event loop's handler map, `registerEventHandler`, no plugin code on any thread): after SUCCESS,
