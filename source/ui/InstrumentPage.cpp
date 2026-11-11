@@ -3,6 +3,7 @@
 #include "NoteNames.h"
 #include "ui/DockPanels.h"
 #include "ui/Finish.h"
+#include "library/Library.h"
 #include "ui/LedDisplay.h"
 #include "ui/ParagonLookAndFeel.h"
 
@@ -456,7 +457,7 @@ void InstrumentPage::updateScreen()
     juce::StringArray partLabels;   // (0.14.0: a section's parts without their "-KS")
     if (section.has_value())
         for (const auto& part : section->parts)
-            partLabels.add (sampler::section::labelOf (sampler::section::nameOf (part)));
+            partLabels.add (library::partLabel (sampler::section::nameOf (part)));
     screen.name = shown != nullptr && section.has_value() ? partLabels.joinIntoString (" + ").toUpperCase()
                 : shown != nullptr ? shown->name.toUpperCase()
                 : shownFile.isNotEmpty() ? sampler::section::describe (shownFile).toUpperCase()
@@ -585,7 +586,7 @@ void InstrumentPage::showSplits()
     for (size_t i = 0; i < splitRows.size(); ++i)
     {
         const auto& part = section->parts[i];
-        splitRows[i]->name.setText (sampler::section::labelOf (sampler::section::nameOf (part)).toUpperCase(), juce::dontSendNotification);
+        splitRows[i]->name.setText (library::partLabel (sampler::section::nameOf (part)).toUpperCase(), juce::dontSendNotification);
         splitRows[i]->keys.setText (notenames::name (part.low) + " to " + notenames::name (part.high), juce::dontSendNotification);
     }
 }

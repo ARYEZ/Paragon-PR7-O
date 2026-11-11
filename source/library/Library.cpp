@@ -1,5 +1,7 @@
 #include "library/Library.h"
 
+#include "dsp/sampler/Section.h"
+
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <iterator>
@@ -128,6 +130,11 @@ namespace library
             return "Solo " + single;
         }
         return instrument;
+    }
+
+    juce::String partLabel (const juce::String& partName)
+    {
+        return instrumentOf (sampler::section::labelOf (partName));
     }
 
     Section sectionOf (const juce::String& name, const juce::String& folder)

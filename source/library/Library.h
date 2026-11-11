@@ -27,6 +27,10 @@ namespace library
 
     // Where an instrument file belongs, from its name (and its folder's, for what the name alone doesn't say).
     juce::String instrumentOf (const juce::String& name, const juce::String& folder = {});
+    // 0.14.0 (the owner: "show plain section names"): a section part's name as the page shows it, by the same word
+    // table: "ViolinEns-KS" -> "Violins", "Contrabass-KS" -> "Basses", "SViolin" -> "Solo Violin" (a name the table
+    // doesn't know: itself, its "-KS" left off). Only for showing: seats and the rest go by the part's real name.
+    juce::String partLabel (const juce::String& partName);
     Section sectionOf (const juce::String& name, const juce::String& folder = {});
 
     // Every instrument file under these folders, sorted by section, instrument, name.

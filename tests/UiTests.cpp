@@ -6,6 +6,7 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "PluginTestUtils.h"
+#include "library/Library.h"
 #include "NoteNames.h"
 #include "ui/InstrumentPage.h"
 
@@ -473,6 +474,60 @@ TEST_CASE ("THE INSTRUMENT page 0.4.0: a section's SPLITS, a row a part; - / + m
     page.refresh();
     CHECK (page.getInfoText().contains ("REGIONS"));
     CHECK (w.processor.getProgram()->name == "Basses + Cellos + Violins");
+}
+
+TEST_CASE ("THE INSTRUMENT page 0.14.0: articulations and splits on the rack's ARTICULATIONS page, plain part names, the panel the page's width", "[ui][section]")
+{
+    // The owner: "the keyswitch box ... can become a 2nd page in the rack unit ... we can stretch out the tron display of
+    // our stage and use all the space"; then "show plain section names".
+    CHECK (library::partLabel ("ViolinEns-KS") == "Violins");
+    CHECK (library::partLabel ("ViolaEns-KS") == "Violas");
+    CHECK (library::partLabel ("CelloEns-KS") == "Cellos");
+    CHECK (library::partLabel ("Contrabass-KS") == "Basses");
+    CHECK (library::partLabel ("1st Violins KS") == "1st Violins");
+    CHECK (library::partLabel ("Mystery Pad-KS") == "Mystery Pad");   // a name the table doesn't know: itself, no "-KS"
+
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("t.wav"), *testkit::sine (220.0, 0.3), 24);
+    const juce::String switches = "<group> sw_lokey=96 sw_hikey=97 sw_default=96 sw_last=96 sw_label=c7 Sustain\n<region> sample=t.wav lokey=%lo hikey=%hi\n"
+                                  "<group> sw_lokey=96 sw_hikey=97 sw_last=97 sw_label=c#7 Pizzicato\n<region> sample=t.wav lokey=%lo hikey=%hi\n";
+    dir.getChildFile ("Contrabass-KS.sfz").replaceWithText (switches.replace ("%lo", "28").replace ("%hi", "55"));
+    dir.getChildFile ("ViolinEns-KS.sfz").replaceWithText (switches.replace ("%lo", "55").replace ("%hi", "90"));
+    Window w;
+    auto& page = w.view->getInstrumentPage();
+    auto& rack = page.getRack();
+    page.filesDropped ({ dir.getChildFile ("ViolinEns-KS.sfz").getFullPathName(), dir.getChildFile ("Contrabass-KS.sfz").getFullPathName() }, 0, 0);
+    REQUIRE (w.processor.waitForInstrument());
+    page.refresh();
+
+    // The articulations: keys on the rack, shown on its ARTICULATIONS page only (the SWITCHES key), inside the unit.
+    REQUIRE (page.getNumArticulations() == 2);
+    REQUIRE (page.getNumSplitRows() == 2);
+    auto& sustain = page.getArticulationButton (0);
+    CHECK (sustain.getParentComponent() == &rack);
+    rack.setPage (InstrumentRack::Page::playing);
+    CHECK_FALSE (sustain.isVisible());
+    rack.getPageKey (InstrumentRack::Page::articulations).onClick();
+    CHECK (rack.getPage() == InstrumentRack::Page::articulations);
+    CHECK (sustain.isVisible());
+    CHECK (page.getArticulationButton (1).isVisible());
+    CHECK (rack.getLocalBounds().contains (sustain.getBounds()));
+    CHECK (rack.getLocalBounds().contains (page.getArticulationButton (1).getBounds()));
+    CHECK (sustain.getRight() < page.getArticulationButton (1).getX());   // side by side
+
+    // The splits, with plain names (no "-KS", the section's word), on the same page.
+    CHECK (page.getSplitRowText (0).startsWith ("BASSES "));
+    CHECK (page.getSplitRowText (1).startsWith ("VIOLINS "));
+    rack.setPage (InstrumentRack::Page::stage);
+    rack.setPage (InstrumentRack::Page::articulations);
+
+    // No left panel: the picture panel (here the stage) runs the page's width; the info text goes with REGIONS.
+    page.chooseStage();
+    CHECK (page.getStageView().getWidth() > page.getWidth() - 20);
+    page.chooseRegions (true);
+    CHECK (page.getInfoText().contains ("REGIONS"));
 }
 
 TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: which instrument a file is; each note's string, as a player in low position stops it", "[ui][orchestra]")

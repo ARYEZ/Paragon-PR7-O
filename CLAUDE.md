@@ -445,6 +445,22 @@ tools, which need the owner's riffs)
   (the wheel runs over velocities 32-127). `cc[1]` for SFZ opcodes still starts at 0 (SFZ's default; Sonatina sets
   set_cc1=96 itself). **Probes for presets must play without moving the wheel**: mine had sent CC 1 = 100 and missed it.
 
+## 0.14.0: ARTICULATIONS on the rack, the stage the page's width (the owner, on a screenshot: "the keyswitch box ... can become a 2nd page in the rack unit ... stretch out the tron display of our stage and use all the space"; after the mock-up: "Build it and show plain section names")
+
+- `InstrumentRack::Page::articulations` (appended to the enum; its key `articulationsKey`, "SWITCHES", second of five
+  PAGE keys, 32 px wide, names 5.8 pt): no side column (`hasSide`); `setArticulationNames`, `setNumSplits`,
+  `articulationCell` (one row with splits, else up to 10 a row), `splitScreenCell`, `splitKeyCell`; the rack stamps
+  the names and paints the split screens (glass in `paintOverChildren`). `InstrumentPage`: articulation buttons
+  (pedal keys, name in `getName`) and `SplitRow` labels / - + keys are **rack children**, shown by `showRackPage`; no
+  left panel (`mapArea` = the width); `info` beside the region map, visible with it. Snapshot
+  `PARAGON_SNAPSHOT_SWITCHES=1`.
+- `stage3d.py`: a picture wider than 2048 x 842 uses a lower camera further back (`STAGE_CAM` / `STAGE_LOOK` /
+  `STAGE_LENS` override): `stage.jpg` 3200 x 920, orchestra.json's `stage` re-measured (`process_orchestra.py - <out> -
+  <stage>`). Rendered in ~3 min at 64 samples.
+- Names shown: `section::labelOf` (the "-KS" ending off), `library::partLabel` (labelOf, then the library's word
+  table: "ViolinEns-KS" -> "Violins", "Contrabass-KS" -> "Basses"); stage labels, split screens, the rack screen's
+  section name. Seats and everything saved go by `nameOf`. Test: "THE INSTRUMENT page 0.14.0".
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:
