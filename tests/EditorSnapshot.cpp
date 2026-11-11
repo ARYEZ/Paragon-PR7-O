@@ -3,6 +3,7 @@
 #include "Parameters.h"
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
+#include "dsp/mixer/MixerEffects.h"
 #include "dsp/effects/Drive.h"
 #include "dsp/effects/LoFi.h"
 #include "dsp/effects/Reverb.h"
@@ -27,6 +28,7 @@
 //   PARAGON_SNAPSHOT_STAGE=1         the STAGE view and the rack's STAGE page (0.8.0)
 //   PARAGON_SNAPSHOT_ENSEMBLE=1      the rack's ENSEMBLE page (0.10.0)
 //   PARAGON_SNAPSHOT_SWITCHES=1      the rack's ARTICULATIONS page (0.14.0)
+//   PARAGON_SNAPSHOT_PAGE=mixer      THE MIXER (0.15.0; PARAGON_SNAPSHOT_MIXERDEMO=1: strips set; _MIXERFX=<strip>,<slot>: its editor)
 //   PARAGON_SNAPSHOT_LIBRARY=<folder>,<folder>...   the library browser open on these folders (not remembered), its
 //                                    strings, the instrument's file chosen if it's in them (0.11.0)
 //   PARAGON_SNAPSHOT_DOWNLOAD=<0-100>   with LIBRARY: VSCO 2 CE shown downloading that far (nothing fetched)
@@ -173,6 +175,43 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     auto* view = dynamic_cast<MainView*> (editor->getChildComponent (0));
     REQUIRE (view != nullptr);
+    if (page == "mixer")
+    {
+        // THE MIXER (0.15.0). PARAGON_SNAPSHOT_MIXERDEMO=1: strips set as a mix might be (levels, pans, effects, a
+        // solo, a send); PARAGON_SNAPSHOT_MIXERFX=<strip>,<slot>: that slot's editor open.
+        view->showPage (MainView::Page::mixer);
+        auto& mixerPage = view->getMixerPage();
+        mixerPage.refresh();
+        if (env ("PARAGON_SNAPSHOT_MIXERDEMO") == "1")
+        {
+            const auto parts = processor.getStageParts();
+            const float levels[] = { -2.0f, -4.5f, -1.0f, -6.0f, -3.0f, -2.5f, -5.0f, -1.5f };
+            const float pans[] = { -0.35f, -0.1f, 0.2f, 0.4f, -0.5f, 0.5f, 0.0f, 0.1f };
+            for (size_t i = 0; i < parts.size(); ++i)
+            {
+                auto strip = processor.getStrip (parts[i].name);
+                strip.levelDb = levels[i % 8];
+                strip.pan = pans[i % 8];
+                strip.reverbDb = -6.0f - (float) i;
+                strip.delayDb = i == 0 ? -12.0f : mixer::levelOffDb;
+                if (i % 2 == 0)
+                    strip.fx[0] = mixerfx::defaultSlot (mixerfx::eq);
+                if (i == 0)
+                    strip.fx[1] = mixerfx::defaultSlot (mixerfx::compressor);
+                if (i == 2)
+                    strip.fx[1] = mixerfx::defaultSlot (mixerfx::saturation);
+                strip.solo = i == 2;
+                processor.setStrip (parts[i].name, strip);
+            }
+            auto section = processor.getSectionStrip();
+            section.fx[0] = mixerfx::defaultSlot (mixerfx::eq);
+            section.fx[1] = mixerfx::defaultSlot (mixerfx::compressor);
+            processor.setSectionStrip (section);
+            mixerPage.refresh();
+        }
+        if (const auto fx = juce::StringArray::fromTokens (env ("PARAGON_SNAPSHOT_MIXERFX"), ",", ""); fx.size() == 2)
+            mixerPage.openEditor (fx[0].getIntValue(), fx[1].getIntValue());
+    }
     if (page == "fx")
     {
         // THE RACK. PARAGON_SNAPSHOT_RACK=1: all four units at work on the demo instrument's chords (ECHELON's low

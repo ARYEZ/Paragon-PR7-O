@@ -69,6 +69,8 @@ std::unique_ptr<juce::XmlElement> Rig::toXml() const
             e->setAttribute ("width", seat.width);
         }
     }
+    if (! strips.empty() || ! sectionStrip.isPlain())   // 0.15.0
+        xml->addChildElement (mixer::mixerXml (strips, sectionStrip).release());
     return xml;
 }
 
@@ -102,6 +104,8 @@ std::optional<Rig> Rig::fromXml (const juce::XmlElement& xml)
             if (const auto name = e->getStringAttribute ("name"); name.isNotEmpty())
                 rig.seats[name] = stage::clamp ({ (float) e->getDoubleAttribute ("x"), (float) e->getDoubleAttribute ("y"),
                                                   (float) e->getDoubleAttribute ("width", 3.0) });
+    if (const auto* mixerXml = xml.getChildByName ("Mixer"))   // 0.15.0
+        mixer::readMixerXml (*mixerXml, rig.strips, rig.sectionStrip);
 
     return rig;
 }

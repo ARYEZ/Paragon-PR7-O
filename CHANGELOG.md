@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.15.0
+
+**THE MIXER: a strip for every part, in the rack's style, on its own tab** (you, on the mock-up: "OMG that Tron style
+mixer looks amazing!!! Build it in that style and give it its own mixer tab").
+
+- **A MIXER tab** between INSTRUMENT and FX. Each part of the instrument gets a strip (a section's VIOLINS, VIOLAS,
+  CELLOS, BASSES...; a single instrument one strip), then the **SECTION** strip for the whole instrument. Each strip is
+  one of the rack's units standing up: pearl black, LED screens, the rack's knobs and neon keys.
+- **Each strip, top to bottom:**
+  - its name and keys;
+  - **EFFECTS:** four slots. Click an empty one for the list (EQ, compressor, gate, transient, drive, lo-fi, mod,
+    saturation: PR7-D's mixer effects); click a loaded one to edit it; the key beside it switches it on or off, its
+    settings kept. The editor opens over the strips with a knob for each setting, OUTPUT, ON, CHANGE, REMOVE, CLOSE.
+  - **SENDS AND PAN:** DELAY and REVERB (copies into the FX page's DELAY and REVERB, after the fader, while that
+    effect is on) and PAN;
+  - **LEVEL:** the fader (-60 dB, off, to +12 dB; double-click: 0 dB; Shift: finely) beside its meter;
+  - **MUTE, SOLO, PHASE** (a soloed part mutes the others; the section strip has no solo);
+  - **OUTPUT:** where it goes (the parts into the STAGE when it's on, else straight to the section; the section into
+    the FX page, or its insert bus).
+- **Where it sits in the sound:** each part through its strip, then the STAGE (so it seats what the strip gives it),
+  then the SECTION strip, then the FX page as before. Every move is smoothed over 20 ms, so nothing clicks, and a strip
+  left as it starts changes nothing (checked sample for sample).
+- **Saved** with your projects and presets, by part name (as the stage's seats), and **undo** takes changes back.
+- **Fixed:** moving a part's seat on the STAGE alone made no undo step (since 0.8.0); it does now.
+- Not checked here: how the effects sound on real parts by ear.
+
 ## 0.14.0
 
 **The articulations move onto the rack, and the stage gets the whole page** (you: "the keyswitch box ... can become a

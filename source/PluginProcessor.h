@@ -12,6 +12,7 @@
 #include "LevelMeterSource.h"
 #include "Parameters.h"
 #include "Rack.h"
+#include "dsp/mixer/PartMixer.h"
 #include "dsp/sampler/Sampler.h"
 #include "dsp/sampler/Section.h"
 #include "dsp/stage/Seating.h"
@@ -125,6 +126,16 @@ public:
     void resetSeats();
     void seatMoveFinished();   // a drag let go: the preset modified, one undo step
     int getSeatsVersion() const noexcept { return seatsVersion; }   // counts the seats' changes (the stage view follows)
+
+    // THE MIXER (0.15.0): a strip per part (by part name, as the seats; the parts as getStageParts names them), and the
+    // SECTION strip after the stage. `final`: the preset modified and one undo step (a knob let go, a key pressed).
+    mixer::StripSettings getStrip (const juce::String& partName) const;
+    void setStrip (const juce::String& partName, const mixer::StripSettings&, bool final = true);
+    const mixer::StripSettings& getSectionStrip() const noexcept { return sectionStrip; }
+    void setSectionStrip (const mixer::StripSettings&, bool final = true);
+    float takeStripPeak (int strip, int side) noexcept { return partMixer.takePeak (strip, side); }   // meters (0: a part, ...)
+    const mixer::PartMixer& getPartMixer() const noexcept { return partMixer; }
+    int getMixerVersion() const noexcept { return mixerVersion; }   // counts the strips' changes (the page follows)
     stage::Settings getStageSettings() const noexcept;
     const stage::Stage& getStage() const noexcept { return stage; }   // tests
     void clearInstrument();
@@ -278,7 +289,9 @@ private:
 
         bool operator== (const Snapshot& other) const
         {
-            return rig.parameters == other.rig.parameters && rig.instrument == other.rig.instrument && current == other.current;
+            // (0.15.0: the seats and the mixer's strips too: a seat moved or a strip changed alone is a step)
+            return rig.parameters == other.rig.parameters && rig.instrument == other.rig.instrument && current == other.current
+                && rig.seats == other.rig.seats && rig.strips == other.rig.strips && rig.sectionStrip == other.rig.sectionStrip;
         }
     };
     Snapshot takeSnapshot() const;
@@ -350,6 +363,14 @@ private:
     std::array<stage::Seat, stage::maxParts> pushedSeats {};
     int pushedSeatCount = -1, seatsVersion = 0;
     void pushSeats();   // the parts' seats to the stage, by the sampler's part numbers (message thread)
+    // THE MIXER (0.15.0): the strips by part name, the section's, and what the audio thread has (by part number).
+    std::map<juce::String, mixer::StripSettings> partStrips;
+    mixer::StripSettings sectionStrip;
+    mixer::PartMixer partMixer;
+    std::array<mixer::StripSettings, mixer::numMixerStrips> pushedStrips {};
+    int pushedStripCount = -1, mixerVersion = 0;
+    void pushMixer();
+    juce::StringArray partNames() const;   // the parts by the sampler's numbers
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ParagonX1AudioProcessor)
 

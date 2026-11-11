@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dsp/mixer/Strip.h"
 #include "dsp/stage/Seating.h"
 
 #include <juce_core/juce_core.h>
@@ -41,6 +42,10 @@ struct Rig
 
     // THE STAGE (PR7-O 0.8.0): the seats moved off their usual place, by part name (none: every part in its usual seat).
     std::map<juce::String, stage::Seat> seats;
+
+    // THE MIXER (PR7-O 0.15.0): the part strips changed from plain, by part name, and the SECTION strip (XML <Mixer>).
+    std::map<juce::String, mixer::StripSettings> strips;
+    mixer::StripSettings sectionStrip;
 
     // Free text shown with the rig: what it's for.
     juce::String notes;

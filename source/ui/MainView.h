@@ -9,6 +9,7 @@
 #include "ui/Icons.h"
 #include "ui/InstrumentPage.h"
 #include "ui/LevelMeter.h"
+#include "ui/MixerPage.h"
 #include "ui/PaintCache.h"
 #include "ui/ParagonLookAndFeel.h"
 #include "ui/ProgressBox.h"
@@ -56,13 +57,14 @@ public:
     bool isKeyboardShown() const noexcept { return keyboardShown; }
     void setKeyboardShown (bool shown);
 
-    enum class Page { instrument, fx, presets, settings };
+    enum class Page { instrument, fx, presets, settings, mixer };   // (0.15.0: MIXER, shown between INSTRUMENT and FX)
     void showPage (Page);
     Page getPage() const noexcept { return page; }
 
     // For snapshots and tests.
     InstrumentPage& getInstrumentPage() noexcept { return instrumentPage; }
     FxPage& getFxPage() noexcept { return fxPage; }
+    MixerPage& getMixerPage() noexcept { return mixerPage; }
     SettingsPage& getSettingsPage() noexcept { return settingsPage; }
     InstrumentKeyboard& getKeyboard() noexcept { return keyboard; }
     ProgressBox& getProgressBox() noexcept { return progressBox; }
@@ -91,6 +93,7 @@ private:
 
     // Header
     IconButton instrumentTab { "The instrument: load an SFZ, how it plays", Icons::Type::orchestra, "INSTRUMENT" },
+               mixerTab { "THE MIXER: a strip for each part (effects, sends, pan, level, mute, solo), then the section's", Icons::Type::mixer, "MIXER" },
                fxTab { "The effects: an insert bus, DELAY and REVERB sends, MOD / LO-FI and the MASTER rack", Icons::Type::rack, "FX" },
                presetsTab { "Browse, save and organise presets", Icons::Type::presets, "PRESETS" },
                settingsTab { "MIDI, the presets folder, MIDI links and more", Icons::Type::settings, "SETTINGS" };
@@ -108,6 +111,7 @@ private:
     // The pages
     InstrumentPage instrumentPage;
     FxPage fxPage;
+    MixerPage mixerPage;   // 0.15.0
     RigBrowser rigBrowser;
     SettingsPage settingsPage;
     juce::TextButton keyboardButton { "HIDE\nKEYBOARD" };

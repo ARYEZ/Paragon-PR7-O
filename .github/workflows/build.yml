@@ -35,11 +35,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # 0.15.0: GitHub's Linux machines look Ubuntu's mirrors up through Azure's name service, which kept failing
+      # ("Temporary failure resolving 'azure.archive.ubuntu.com'": three runs on 2026-11-11 stopped here, before
+      # building anything). Cloudflare's name service instead (Google's as a fallback), and each download retried.
+      - name: Use Cloudflare's DNS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo mkdir -p /etc/systemd/resolved.conf.d
+          printf '[Resolve]\nDNS=1.1.1.1 1.0.0.1\nFallbackDNS=8.8.8.8\n' | sudo tee /etc/systemd/resolved.conf.d/cloudflare.conf
+          sudo systemctl restart systemd-resolved || true
+          resolvectl status | head -n 20 || true
+          getent hosts azure.archive.ubuntu.com archive.ubuntu.com || true
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build xvfb \
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y ninja-build xvfb \
             libasound2-dev libjack-jackd2-dev ladspa-sdk \
             libfreetype-dev libfontconfig1-dev \
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev \
