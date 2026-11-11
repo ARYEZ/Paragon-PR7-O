@@ -177,7 +177,8 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   centred (cropped, never stretched; the geometry through the same transform). Notes: the sounding part of the string
   lit (three widths + a pearl core) and a dot (radius ≥ 6.5 px); keyswitch keys left out; + TRANSPOSE. Lit areas are
   prepared once: widened and their edges feathered over 70 px (no seams). Pictures' hues pulled into 322-38 again on
-  load (JPEG; exactly 318 / 42 rounds past the range).
+  load (JPEG; exactly 318 / 42 rounds past the range; 0.14.0: to 6 degrees inside, 36 / 324: one pale 43-degree pixel on
+  Windows with the section picture drawn bigger).
 - **`ui/InstrumentRack.*`** (PR7-I's `GuitarRack`, same parts): badge "ORCHESTRA INSTRUMENT", PAGE keys PLAYING /
   ROUTING, the screen (`Screen` caption / name / corner / line1 / line2), the INSTRUMENT keys `loadKey`, `sectionKey`,
   `clearKey`, `knobCell` (6), `menuCell` (DYNAMICS / INSERT BUS on a painted screen), `pageKeyCell` (AUTO SUSTAIN),
