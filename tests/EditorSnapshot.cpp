@@ -26,6 +26,7 @@
 //   PARAGON_SNAPSHOT_REGIONS=1       the region map instead of the instrument's picture (0.5.0)
 //   PARAGON_SNAPSHOT_STAGE=1         the STAGE view and the rack's STAGE page (0.8.0)
 //   PARAGON_SNAPSHOT_ENSEMBLE=1      the rack's ENSEMBLE page (0.10.0)
+//   PARAGON_SNAPSHOT_SWITCHES=1      the rack's ARTICULATIONS page (0.14.0)
 //   PARAGON_SNAPSHOT_LIBRARY=<folder>,<folder>...   the library browser open on these folders (not remembered), its
 //                                    strings, the instrument's file chosen if it's in them (0.11.0)
 //   PARAGON_SNAPSHOT_DOWNLOAD=<0-100>   with LIBRARY: VSCO 2 CE shown downloading that far (nothing fetched)
@@ -348,6 +349,8 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
         view->getInstrumentPage().getRack().setPage (InstrumentRack::Page::stage);
         view->getInstrumentPage().chooseStage();
     }
+    if (env ("PARAGON_SNAPSHOT_SWITCHES") == "1")   // (0.14.0: after STAGE, so the stage picture shows with it)
+        view->getInstrumentPage().getRack().setPage (InstrumentRack::Page::articulations);
 
     // PARAGON_SNAPSHOT_LOADING=1: an instrument loading, the progress box over the page.
     if (env ("PARAGON_SNAPSHOT_LOADING") == "1")

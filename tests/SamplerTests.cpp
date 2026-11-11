@@ -659,8 +659,9 @@ TEST_CASE ("SAMPLER 0.2.0: DYNAMICS ON THE MOD WHEEL: a held note's layers cross
         return render (*program, midi, 1.0, wheel)[0];
     };
     // The layers' middles are 32 and 95.5 (in velocity): the wheel at the bottom plays pp alone, at the top ff alone,
-    // half way between the middles both at equal power (each 3 dB down).
-    const auto low = withWheel (0), high = withWheel (127), middle = withWheel (63);
+    // half way between the middles both at equal power (each 3 dB down). (0.13.1: the wheel runs over velocities 32 to
+    // 127, so half way between the middles, 63.75, is the wheel at 42.)
+    const auto low = withWheel (0), high = withWheel (127), middle = withWheel (42);
     CHECK (levelOver (low, 220.0, 0.6) > 0.35);
     CHECK (levelOver (low, 330.0, 0.6) < 1.0e-3);
     CHECK (levelOver (high, 330.0, 0.6) > 0.35);
@@ -691,8 +692,38 @@ TEST_CASE ("SAMPLER 0.2.0: DYNAMICS ON THE MOD WHEEL: a held note's layers cross
     // The wheel's own level curve: amp_veltrack 100 on the held layers, the wheel half way down about 12 dB down.
     program->regions[0].velTrack = program->regions[1].velTrack = 1.0f;
     const auto top = levelOver (withWheel (127), 330.0, 0.6);
-    const auto half = withWheel (95);   // the ff layer's middle: it alone, at velocity 95.5
+    const auto half = withWheel (85);   // the ff layer's middle: it alone, at velocity 95.5 (32 + 85 x 95 / 127 = 95.6)
     CHECK_THAT (db (levelOver (half, 330.0, 0.6) / top), WithinAbs (20.0 * std::log10 (std::pow (95.5 / 127.0, 2.0)), 0.5));
+}
+
+TEST_CASE ("SAMPLER 0.13.1: on the mod wheel, a note plays before the wheel is touched, and the wheel at 0 is soft, not silent", "[sampler][modwheel]")
+{
+    // The owner: "whenever I load a preset I get no volume whatsoever". The presets play DYNAMICS on the mod wheel; the
+    // wheel started at 0 and 0 played like velocity 1 (about -84 dB): silence until the wheel was pushed up.
+    auto program = std::make_shared<sampler::Program>();
+    sampler::Region r;
+    r.sample = bowed (220.0, 4.0);
+    r.loKey = r.hiKey = r.keyCenter = 60;
+    r.velTrack = 1.0f;   // full velocity tracking, as VSCO's files
+    program->regions.push_back (r);
+    sampler::prepareRegions (*program);
+    program->index();
+    sampler::Sampler::Settings wheel;
+    wheel.dynamics = sampler::Sampler::Dynamics::modWheel;
+    const auto play = [&] (int cc)
+    {
+        auto midi = juce::MidiBuffer();
+        if (cc >= 0)
+            midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, cc), 0);
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+        return levelOver (render (*program, midi, 1.0, wheel)[0], 220.0, 0.6);
+    };
+    const auto top = play (127);
+    REQUIRE (top > 0.1);
+    // Untouched: the wheel at 100, velocity 32 + 100 x 95 / 127 = 106.8: about 3 dB under the top.
+    CHECK_THAT (db (play (-1) / top), WithinAbs (20.0 * std::log10 (std::pow (106.8 / 127.0, 2.0)), 0.3));
+    // At 0: velocity 32, about 24 dB under the top: soft, but there.
+    CHECK_THAT (db (play (0) / top), WithinAbs (20.0 * std::log10 (std::pow (32.0 / 127.0, 2.0)), 0.3));
 }
 
 TEST_CASE ("SAMPLER 0.2.0: CC 11 EXPRESSION scales everything (its squared curve)", "[sampler]")

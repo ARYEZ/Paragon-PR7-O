@@ -32,13 +32,16 @@ public:
     void setScreen (const Screen&);
     const Screen& getScreen() const noexcept { return screen; }
 
-    enum class Page { playing, routing, stage, ensemble };   // (0.8.0: STAGE; 0.10.0: ENSEMBLE)
+    // (0.8.0: STAGE; 0.10.0: ENSEMBLE; 0.14.0: ARTICULATIONS, the owner: "the keyswitch box ... can become a 2nd page in
+    // the rack unit": shown second, after PLAYING)
+    enum class Page { playing, routing, stage, ensemble, articulations };
     void setPage (Page);
     Page getPage() const noexcept { return page; }
     std::function<void()> onPageChanged;
     juce::TextButton& getPageKey (Page p) noexcept
     {
-        return p == Page::playing ? playingKey : p == Page::routing ? routingKey : p == Page::stage ? stageKey : ensembleKey;
+        return p == Page::playing ? playingKey : p == Page::routing ? routingKey : p == Page::stage ? stageKey
+             : p == Page::ensemble ? ensembleKey : articulationsKey;
     }
 
     // The INSTRUMENT keys under the screen.
@@ -53,6 +56,14 @@ public:
     juce::Rectangle<int> screenArea() const;
     juce::Rectangle<int> instrumentKeyCell (int index) const; // LOAD, SECTION, CLEAR
 
+    // 0.14.0: the ARTICULATIONS page: a key for each articulation (its name stamped under it) and, for a section, a
+    // small screen for each part's keys with - / + keys under it (the page's labels and keys are the page's children).
+    void setArticulationNames (const juce::StringArray&);
+    void setNumSplits (int);
+    juce::Rectangle<int> articulationCell (int index) const;
+    juce::Rectangle<int> splitScreenCell (int index) const;
+    juce::Rectangle<int> splitKeyCell (int index, bool up) const;
+
     static constexpr int preferredHeight = 236;
 
 private:
@@ -62,11 +73,20 @@ private:
     juce::Rectangle<float> displayColumn() const;
     juce::Rectangle<float> pageArea() const;      // under the page's title
     juce::Rectangle<float> sideOfPage() const;    // the page's right-hand column (menu and key)
+    bool hasSide() const noexcept { return page != Page::articulations; }
+    juce::Rectangle<float> articulationBand() const;
+    juce::Rectangle<float> splitBand() const;
+    int articulationsPerRow() const noexcept;
+    float articulationWidth() const noexcept;
+    float splitWidth() const noexcept;
+    juce::StringArray articulationNames;
+    int numSplits = 0;
     juce::Rectangle<int> pageSwitchCell (int index) const;
     void paintScreen (juce::Graphics&);
+    void paintArticulations (juce::Graphics&);
 
     juce::Image satin;
     Screen screen;
     Page page = Page::playing;
-    juce::TextButton playingKey, routingKey, stageKey, ensembleKey;
+    juce::TextButton playingKey, routingKey, stageKey, ensembleKey, articulationsKey;
 };

@@ -3,6 +3,8 @@
 #include "NoteNames.h"
 #include "ui/DockPanels.h"
 #include "ui/Finish.h"
+#include "library/Library.h"
+#include "ui/LedDisplay.h"
 #include "ui/ParagonLookAndFeel.h"
 
 //==============================================================================
@@ -398,6 +400,17 @@ void InstrumentPage::showRackPage()
     for (auto& c : ensembleControls)
         c->setVisible (ensemble);
     doubleMenu->setVisible (ensemble);
+    const auto switches = page == InstrumentRack::Page::articulations;   // 0.14.0
+    for (auto& b : articulationButtons)
+        b->setVisible (switches);
+    for (size_t i = 0; i < splitRows.size(); ++i)
+    {
+        auto& row = *splitRows[i];
+        row.name.setVisible (switches);
+        row.keys.setVisible (switches);
+        row.down.setVisible (switches && i > 0);
+        row.up.setVisible (switches && i > 0);
+    }
 }
 
 void InstrumentPage::chooseRegions (bool regions)
@@ -423,6 +436,7 @@ void InstrumentPage::showView()
     picture.setVisible (showing);
     stageView.setVisible (onStage);
     map.setVisible (! showing && ! onStage);
+    info.setVisible (map.isVisible());   // 0.14.0: what the instrument holds, beside its regions
     showPicture.setVisible (hasPicture);
     showStage.setVisible (hasStage);
     showRegions.setVisible (hasPicture || hasStage);
@@ -440,7 +454,12 @@ void InstrumentPage::updateScreen()
         screen.caption = "LOADING  " + juce::String (juce::roundToInt (processor.getLoadProgress() * 100.0)) + "%";
     else
         screen.caption = section.has_value() ? "THE SECTION" : "THE INSTRUMENT";
-    screen.name = shown != nullptr ? shown->name.toUpperCase()
+    juce::StringArray partLabels;   // (0.14.0: a section's parts without their "-KS")
+    if (section.has_value())
+        for (const auto& part : section->parts)
+            partLabels.add (library::partLabel (sampler::section::nameOf (part)));
+    screen.name = shown != nullptr && section.has_value() ? partLabels.joinIntoString (" + ").toUpperCase()
+                : shown != nullptr ? shown->name.toUpperCase()
                 : shownFile.isNotEmpty() ? sampler::section::describe (shownFile).toUpperCase()
                 : juce::String ("NO INSTRUMENT");
     if (shown != nullptr)
@@ -523,21 +542,26 @@ void InstrumentPage::rebuildSplits()
     if (section.has_value())
         for (int i = 0; i < (int) section->parts.size(); ++i)
         {
+            // 0.14.0: on the rack's ARTICULATIONS page: the part's name and keys on a small screen, - / + keys under it.
             auto row = std::make_unique<SplitRow>();
-            row->name.setFont (juce::FontOptions (13.0f));
-            row->name.setColour (juce::Label::textColourId, ParagonColours::text);
-            row->keys.setFont (juce::FontOptions (13.0f));
-            row->keys.setColour (juce::Label::textColourId, ParagonColours::textDim);
-            row->keys.setJustificationType (juce::Justification::centredRight);
-            addAndMakeVisible (row->name);
-            addAndMakeVisible (row->keys);
+            row->name.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            row->name.setColour (juce::Label::textColourId, LedDisplay::ledOrange.withAlpha (0.7f));
+            row->keys.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            row->keys.setColour (juce::Label::textColourId, LedDisplay::ledOrange);
+            for (auto* l : { &row->name, &row->keys })
+            {
+                l->setJustificationType (juce::Justification::centred);
+                l->setBorderSize ({});
+                l->setMinimumHorizontalScale (0.6f);
+                l->setInterceptsMouseClicks (false, false);
+                rack.addChildComponent (*l);
+            }
             if (i > 0)
             {
                 for (auto* b : { &row->down, &row->up })
                 {
-                    b->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff0d0a0e));
-                    b->setColour (juce::TextButton::textColourOffId, ParagonColours::text);
-                    addAndMakeVisible (*b);
+                    b->getProperties().set (ParagonLookAndFeel::pedalButtonProperty, true);
+                    rack.addChildComponent (*b);
                 }
                 const auto below = sampler::section::nameOf (section->parts[(size_t) i - 1]);
                 const auto above = sampler::section::nameOf (section->parts[(size_t) i]);
@@ -548,7 +572,9 @@ void InstrumentPage::rebuildSplits()
             }
             splitRows.push_back (std::move (row));
         }
+    rack.setNumSplits ((int) splitRows.size());
     showSplits();
+    showRackPage();
     resized();
 }
 
@@ -560,7 +586,7 @@ void InstrumentPage::showSplits()
     for (size_t i = 0; i < splitRows.size(); ++i)
     {
         const auto& part = section->parts[i];
-        splitRows[i]->name.setText (sampler::section::nameOf (part).toUpperCase(), juce::dontSendNotification);
+        splitRows[i]->name.setText (library::partLabel (sampler::section::nameOf (part)).toUpperCase(), juce::dontSendNotification);
         splitRows[i]->keys.setText (notenames::name (part.low) + " to " + notenames::name (part.high), juce::dontSendNotification);
     }
 }
@@ -653,23 +679,28 @@ void InstrumentPage::timerCallback()
 void InstrumentPage::rebuildArticulations()
 {
     articulationButtons.clear();
+    rack.setArticulationNames ({});
     shownSwitch = -2;   // lit again by the timer
     if (shown == nullptr)
         return;
+    // 0.14.0: a key on the rack's ARTICULATIONS page each (the owner: "the keyswitch box ... can become a 2nd page in
+    // the rack unit"), its stripe lit when chosen, its name stamped under it by the rack.
+    juce::StringArray names;
     for (const auto& a : shown->articulations)
     {
-        auto button = std::make_unique<juce::TextButton> (articulationName (a).toUpperCase());
+        auto button = std::make_unique<juce::TextButton>();
+        button->setName (articulationName (a).toUpperCase());
+        button->getProperties().set (ParagonLookAndFeel::pedalButtonProperty, true);
         button->setClickingTogglesState (false);
-        button->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff0d0a0e));
-        button->setColour (juce::TextButton::buttonOnColourId, ParagonColours::accentDim.withAlpha (0.6f));
-        button->setColour (juce::TextButton::textColourOffId, ParagonColours::textDim);
-        button->setColour (juce::TextButton::textColourOnId, ParagonColours::accent);
-        button->setTooltip ("Switch to it (as its keyswitch key, " + notenames::name (a.lo) + ", does)");
+        button->setTooltip (articulationName (a) + ": switch to it (as its keyswitch key, " + notenames::name (a.lo) + ", does)");
         const auto key = a.lo;
         button->onClick = [this, key] { processor.chooseKeyswitch (key); };
-        addAndMakeVisible (*button);
+        rack.addChildComponent (*button);
+        names.add (button->getName());
         articulationButtons.push_back (std::move (button));
     }
+    rack.setArticulationNames (names);
+    showRackPage();
     resized();
     timerCallback();
 }
@@ -766,15 +797,9 @@ void InstrumentPage::updateInfo()
 
 void InstrumentPage::paint (juce::Graphics& g)
 {
-    for (const auto& area : { infoArea, mapArea })
-        DockStyle::drawPanel (g, area.toFloat());
-    DockStyle::drawTitle (g, infoArea.reduced (16, 0).withHeight (32), "THE INSTRUMENT");
-    if (! splitRows.empty())
-    {
-        g.setColour (ParagonColours::textDim);
-        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-        g.drawText ("SPLITS (LOW TO HIGH)", splitArea.withHeight (22), juce::Justification::bottomLeft);
-    }
+    // 0.14.0: one panel the page's width (the owner: "with [the keyswitch box] gone from the main screen we can stretch
+    // out the tron display of our stage and use all the space").
+    DockStyle::drawPanel (g, mapArea.toFloat());
 }
 
 void InstrumentPage::paintOverChildren (juce::Graphics& g)
@@ -800,35 +825,24 @@ void InstrumentPage::resized()
     rack.setBounds (area.removeFromTop (InstrumentRack::preferredHeight));
     area.removeFromTop (4);
     browser.setBounds (area);   // (0.11.0: over the panels below the rack)
-    infoArea = area.removeFromLeft (440);
-    {
-        auto inside = infoArea.reduced (14, 0).withTrimmedTop (36);
-        articulationArea = inside.removeFromTop (articulationButtons.empty() ? 0 : 30 * (int) articulationButtons.size() + 12);
-        auto rows = articulationArea;
-        for (auto& b : articulationButtons)
-            b->setBounds (rows.removeFromTop (30).reduced (0, 2));
-        splitArea = inside.removeFromTop (splitRows.empty() ? 0 : 24 + 28 * (int) splitRows.size() + 10);
-        auto splits = splitArea.withTrimmedTop (24);
-        for (auto& row : splitRows)
-        {
-            auto line = splits.removeFromTop (28);
-            auto buttons = line.removeFromRight (64);
-            if (row->down.isVisible())
-            {
-                row->down.setBounds (buttons.removeFromLeft (30).reduced (0, 3));
-                buttons.removeFromLeft (4);
-                row->up.setBounds (buttons.removeFromLeft (30).reduced (0, 3));
-            }
-            line.removeFromRight (6);
-            row->keys.setBounds (line.removeFromRight (110));
-            row->name.setBounds (line);
-        }
-    }
-    area.removeFromLeft (10);
     mapArea = area;
 
-    info.setBounds (infoArea.reduced (14, 0).withTrimmedTop (36 + articulationArea.getHeight() + splitArea.getHeight()).withTrimmedBottom (12));
-    map.setBounds (mapArea.withTrimmedTop (30).reduced (6, 4));
+    // 0.14.0: the articulations' keys and the splits' screens on the rack's ARTICULATIONS page.
+    for (size_t i = 0; i < articulationButtons.size(); ++i)
+        articulationButtons[i]->setBounds (rack.articulationCell ((int) i));
+    for (size_t i = 0; i < splitRows.size(); ++i)
+    {
+        auto screen = rack.splitScreenCell ((int) i).reduced (6, 3);
+        splitRows[i]->name.setBounds (screen.removeFromTop (13));
+        splitRows[i]->keys.setBounds (screen);
+        splitRows[i]->down.setBounds (rack.splitKeyCell ((int) i, false));
+        splitRows[i]->up.setBounds (rack.splitKeyCell ((int) i, true));
+    }
+
+    // REGIONS: what the instrument holds in a column at the left, its regions beside it.
+    auto regions = mapArea.withTrimmedTop (30).reduced (6, 4);
+    info.setBounds (regions.removeFromLeft (juce::jmin (420, regions.getWidth() / 3)).reduced (8, 4));
+    map.setBounds (regions);
     picture.setBounds (mapArea.reduced (2));
     stageView.setBounds (mapArea.reduced (2));
     auto switches = mapArea.reduced (14, 0).withHeight (32).withSizeKeepingCentre (mapArea.getWidth() - 28, 22);

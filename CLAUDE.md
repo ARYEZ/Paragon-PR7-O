@@ -177,7 +177,8 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   centred (cropped, never stretched; the geometry through the same transform). Notes: the sounding part of the string
   lit (three widths + a pearl core) and a dot (radius ≥ 6.5 px); keyswitch keys left out; + TRANSPOSE. Lit areas are
   prepared once: widened and their edges feathered over 70 px (no seams). Pictures' hues pulled into 322-38 again on
-  load (JPEG; exactly 318 / 42 rounds past the range).
+  load (JPEG; exactly 318 / 42 rounds past the range; 0.14.0: to 6 degrees inside, 36 / 324: one pale 43-degree pixel on
+  Windows with the section picture drawn bigger).
 - **`ui/InstrumentRack.*`** (PR7-I's `GuitarRack`, same parts): badge "ORCHESTRA INSTRUMENT", PAGE keys PLAYING /
   ROUTING, the screen (`Screen` caption / name / corner / line1 / line2), the INSTRUMENT keys `loadKey`, `sectionKey`,
   `clearKey`, `knobCell` (6), `menuCell` (DYNAMICS / INSERT BUS on a painted screen), `pageKeyCell` (AUTO SUSTAIN),
@@ -436,6 +437,30 @@ tools, which need the owner's riffs)
   row, EXPANSIONS heading (`expansionsHeading`), bankBox lists the expansions disabled, the details add the bank's
   description and, when a part's library isn't found (`resolve`), "PLAYS X: NOT DOWNLOADED YET" + `getButton` (GET,
   progress through a 4 Hz timer). Tests `[expansions]` in `RigTests.cpp`; the ordering tests now end at SO06.
+
+## 0.13.1: the expansion presets were silent (the owner: "whenever I load a preset I get no volume whatsoever")
+
+- DYNAMICS on the mod wheel: `wheel` started at 0 and `wheelGainOf` read it as velocity 1-127 (0 = -84 dB with full
+  velocity tracking): every VO preset silent until the wheel moved (a probe loading the factory preset reproduced it).
+  Now `Sampler::wheelStart` 100 / 127 (until a CC 1 or the file's set_cc1; `shownWheel` too) and `wheelFloor` 32
+  (the wheel runs over velocities 32-127). `cc[1]` for SFZ opcodes still starts at 0 (SFZ's default; Sonatina sets
+  set_cc1=96 itself). **Probes for presets must play without moving the wheel**: mine had sent CC 1 = 100 and missed it.
+
+## 0.14.0: ARTICULATIONS on the rack, the stage the page's width (the owner, on a screenshot: "the keyswitch box ... can become a 2nd page in the rack unit ... stretch out the tron display of our stage and use all the space"; after the mock-up: "Build it and show plain section names")
+
+- `InstrumentRack::Page::articulations` (appended to the enum; its key `articulationsKey`, "SWITCHES", second of five
+  PAGE keys, 32 px wide, names 5.8 pt): no side column (`hasSide`); `setArticulationNames`, `setNumSplits`,
+  `articulationCell` (one row with splits, else up to 10 a row), `splitScreenCell`, `splitKeyCell`; the rack stamps
+  the names and paints the split screens (glass in `paintOverChildren`). `InstrumentPage`: articulation buttons
+  (pedal keys, name in `getName`) and `SplitRow` labels / - + keys are **rack children**, shown by `showRackPage`; no
+  left panel (`mapArea` = the width); `info` beside the region map, visible with it. Snapshot
+  `PARAGON_SNAPSHOT_SWITCHES=1`.
+- `stage3d.py`: a picture wider than 2048 x 842 uses a lower camera further back (`STAGE_CAM` / `STAGE_LOOK` /
+  `STAGE_LENS` override): `stage.jpg` 3200 x 920, orchestra.json's `stage` re-measured (`process_orchestra.py - <out> -
+  <stage>`). Rendered in ~3 min at 64 samples.
+- Names shown: `section::labelOf` (the "-KS" ending off), `library::partLabel` (labelOf, then the library's word
+  table: "ViolinEns-KS" -> "Violins", "Contrabass-KS" -> "Basses"); stage labels, split screens, the rack screen's
+  section name. Seats and everything saved go by `nameOf`. Test: "THE INSTRUMENT page 0.14.0".
 
 ## The plan (`PR7-O PLAN.md`), next
 

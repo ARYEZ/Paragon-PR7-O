@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.14.0
+
+**The articulations move onto the rack, and the stage gets the whole page** (you: "the keyswitch box ... can become a
+2nd page in the rack unit since we don't need to see that at all times ... stretch out the tron display of our stage
+and use all the space"; after the mock-up: "Build it and show plain section names").
+
+- **ARTICULATIONS, a new rack page:** the rack has a fifth PAGE key, **SWITCHES** (second, after PLAYING). Its page
+  has a key for each articulation, its name stamped under it and the chosen one lit: click one to switch, as before.
+  For a section, the same page shows the **SPLITS**: each part's keys on a small screen, - / + under it.
+- **The picture panel runs the page's width:** the left panel is gone. The **stage was rendered again** for the wider
+  shape, from a lower camera a little further back, so it spreads across the panel (stretching the old picture would
+  only have cropped its back rows). The INSTRUMENT and REGIONS views use the width too.
+- **What the instrument holds** (regions, keys, memory, held notes...) now sits beside the region map in the REGIONS
+  view. If an instrument can't load, the rack's screen still says why.
+- **Plain section names:** a section's parts show as VIOLINS, VIOLAS, CELLOS, BASSES (Sonatina's as 1ST VIOLINS,
+  HORNS...) on the stage, the splits and the rack's screen, not VSCO's file names ("ViolinEns-KS"). Only the names
+  shown change: seats you've moved and saved still find their parts.
+
+## 0.13.1
+
+**The expansion presets play straight away** (you: "whenever I load a preset I get no volume whatsoever").
+
+- **What was wrong:** the expansion presets set DYNAMICS to the mod wheel, so the wheel sets how loud each note is.
+  The plugin treated the wheel as being at the bottom until your keyboard sent it, and at the bottom it played like
+  velocity 1, which is silence. So a preset made no sound until you pushed the wheel up. The single instruments you
+  load from the browser play by velocity, which is why they worked.
+- **What changed:**
+  - Until your keyboard sends a wheel message, the plugin takes the wheel as at 100 (a strong mf): a preset plays as
+    soon as it's loaded.
+  - The wheel at the bottom now plays the softest layer about 24 dB under full (like velocity 32): soft, but there.
+  - Both numbers are our own choice. An SFZ file that sets its own starting wheel value (Sonatina's do) still wins.
+- Measured on VSCO's String Section: wheel untouched about 3 dB under full; at the bottom 19-28 dB under full
+  (was: no sound at all). Not checked here: how that range feels to play.
+
 ## 0.13.0
 
 **GET the two free orchestras from inside the plugin, and ready-made sections in two expansion banks** (you: "do both

@@ -1,6 +1,7 @@
 #include "StageView.h"
 
 #include "OrchestraImages.h"
+#include "library/Library.h"
 #include "ui/OrchestraView.h"
 #include "ui/ParagonLookAndFeel.h"
 
@@ -243,9 +244,10 @@ void StageView::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         const auto nameArea = juce::Rectangle<float> (260.0f, 16.0f).withCentre ({ c.x, bounds.getY() - 10.0f });
         g.setColour (juce::Colour (0xff060407).withAlpha (0.7f));
-        g.fillRoundedRectangle (nameArea.withSizeKeepingCentre (juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), part.name.toUpperCase()) + 14.0f, 17.0f), 4.0f);
+        const auto label = library::partLabel (part.name).toUpperCase();   // (0.14.0: plain section names)
+        g.fillRoundedRectangle (nameArea.withSizeKeepingCentre (juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), label) + 14.0f, 17.0f), 4.0f);
         g.setColour (pearl);
-        g.drawText (part.name.toUpperCase(), nameArea, juce::Justification::centred, false);
+        g.drawText (label, nameArea, juce::Justification::centred, false);
         // Its distances while it's pointed at or dragged.
         if (i == hovering || i == dragging)
         {

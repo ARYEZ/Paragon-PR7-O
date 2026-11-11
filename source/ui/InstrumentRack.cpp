@@ -45,7 +45,7 @@ namespace
 InstrumentRack::InstrumentRack()
 {
     setOpaque (false);
-    for (auto* key : { &playingKey, &routingKey, &stageKey, &ensembleKey, &loadKey, &sectionKey, &clearKey })
+    for (auto* key : { &playingKey, &routingKey, &stageKey, &ensembleKey, &articulationsKey, &loadKey, &sectionKey, &clearKey })
     {
         key->getProperties().set (ParagonLookAndFeel::pedalButtonProperty, true);   // a small key, its stripe lit when on
         addAndMakeVisible (*key);
@@ -62,6 +62,9 @@ InstrumentRack::InstrumentRack()
     ensembleKey.setComponentID ("rackEnsemble");
     ensembleKey.setTooltip ("ENSEMBLE: a bigger section and doubled lines (PLAYERS, DETUNE, TIMING, DOUBLE, DOUBLE LEVEL)");
     ensembleKey.onClick = [this] { setPage (Page::ensemble); };
+    articulationsKey.setComponentID ("rackArticulations");
+    articulationsKey.setTooltip ("ARTICULATIONS: the instrument's keyswitches (click one to switch) and a section's SPLITS");
+    articulationsKey.onClick = [this] { setPage (Page::articulations); };
     setPage (Page::playing);
 }
 
@@ -69,9 +72,10 @@ void InstrumentRack::resized()
 {
     satin = Finish::makeSatinGrain (juce::jmax (1, getWidth() * 2), juce::jmax (1, getHeight() * 2), 1234);
     playingKey.setBounds (pageSwitchCell (0));
-    routingKey.setBounds (pageSwitchCell (1));
-    stageKey.setBounds (pageSwitchCell (2));
-    ensembleKey.setBounds (pageSwitchCell (3));
+    articulationsKey.setBounds (pageSwitchCell (1));
+    routingKey.setBounds (pageSwitchCell (2));
+    stageKey.setBounds (pageSwitchCell (3));
+    ensembleKey.setBounds (pageSwitchCell (4));
     loadKey.setBounds (instrumentKeyCell (0));
     sectionKey.setBounds (instrumentKeyCell (1));
     clearKey.setBounds (instrumentKeyCell (2));
@@ -91,6 +95,7 @@ void InstrumentRack::setPage (Page newPage)
     routingKey.setToggleState (newPage == Page::routing, juce::dontSendNotification);
     stageKey.setToggleState (newPage == Page::stage, juce::dontSendNotification);
     ensembleKey.setToggleState (newPage == Page::ensemble, juce::dontSendNotification);
+    articulationsKey.setToggleState (newPage == Page::articulations, juce::dontSendNotification);
     if (newPage == page)
         return;
     page = newPage;
@@ -123,8 +128,8 @@ juce::Rectangle<int> InstrumentRack::pageSwitchCell (int index) const
 {
     auto area = badgeColumn();
     area = area.removeFromBottom (58.0f).withTrimmedBottom (14.0f);   // names stamped under them
-    const auto width = area.getWidth() / 4.0f;   // (0.8.0: three; 0.10.0: four)
-    return area.withX (area.getX() + width * (float) index).withWidth (width).withSizeKeepingCentre (40.0f, 26.0f).toNearestInt();
+    const auto width = area.getWidth() / 5.0f;   // (0.8.0: three; 0.10.0: four; 0.14.0: five)
+    return area.withX (area.getX() + width * (float) index).withWidth (width).withSizeKeepingCentre (32.0f, 26.0f).toNearestInt();
 }
 
 juce::Rectangle<int> InstrumentRack::screenArea() const { return displayColumn().withHeight (screenHeight).toNearestInt(); }
@@ -163,6 +168,73 @@ juce::Rectangle<int> InstrumentRack::menuCell (int) const
     return juce::Rectangle<float> (area.getX(), area.getY() + 18.0f, area.getWidth(), 30.0f).toNearestInt();
 }
 
+void InstrumentRack::setArticulationNames (const juce::StringArray& names)
+{
+    if (names == articulationNames)
+        return;
+    articulationNames = names;
+    repaint();
+}
+
+void InstrumentRack::setNumSplits (int n)
+{
+    if (n == numSplits)
+        return;
+    numSplits = n;
+    repaint();
+}
+
+// The ARTICULATIONS page: the articulations' keys across the top (one row with a section's splits under them; else up to
+// ten in a row, two rows past that), the splits' screens across the bottom.
+juce::Rectangle<float> InstrumentRack::articulationBand() const
+{
+    auto area = pageArea();
+    return numSplits > 0 ? area.removeFromTop (60.0f) : area;
+}
+
+juce::Rectangle<float> InstrumentRack::splitBand() const { return pageArea().withTrimmedTop (66.0f); }
+
+int InstrumentRack::articulationsPerRow() const noexcept
+{
+    const auto n = juce::jmax (1, articulationNames.size());
+    return numSplits > 0 || n <= 10 ? n : (n + 1) / 2;
+}
+
+float InstrumentRack::articulationWidth() const noexcept
+{
+    return juce::jmin (articulationBand().getWidth() / (float) articulationsPerRow(), 150.0f);
+}
+
+float InstrumentRack::splitWidth() const noexcept
+{
+    return juce::jmin (splitBand().getWidth() / (float) juce::jmax (1, numSplits), 170.0f);
+}
+
+juce::Rectangle<int> InstrumentRack::articulationCell (int index) const
+{
+    const auto band = articulationBand();
+    const auto perRow = articulationsPerRow();
+    const auto rows = (articulationNames.size() + perRow - 1) / juce::jmax (1, perRow);
+    const auto top = band.getY() + juce::jmax (0.0f, (band.getHeight() - 56.0f * (float) rows) * 0.5f);
+    const auto w = articulationWidth();
+    return juce::Rectangle<float> (band.getX() + w * (float) (index % perRow), top + 56.0f * (float) (index / perRow) + 2.0f, w, 26.0f)
+        .withSizeKeepingCentre (54.0f, 26.0f).toNearestInt();
+}
+
+juce::Rectangle<int> InstrumentRack::splitScreenCell (int index) const
+{
+    const auto band = splitBand();
+    const auto w = splitWidth();
+    return juce::Rectangle<float> (band.getX() + w * (float) index + 4.0f, band.getY() + 14.0f, w - 8.0f, 36.0f).toNearestInt();
+}
+
+juce::Rectangle<int> InstrumentRack::splitKeyCell (int index, bool up) const
+{
+    const auto screen = splitScreenCell (index).toFloat();
+    const auto row = juce::Rectangle<float> (screen.getX(), screen.getBottom() + 5.0f, screen.getWidth(), 22.0f);
+    return row.withSizeKeepingCentre (30.0f, 22.0f).translated (up ? 18.0f : -18.0f, 0.0f).toNearestInt();
+}
+
 juce::Rectangle<int> InstrumentRack::pageKeyCell (int index) const
 {
     // Two keys side by side under the menu (0.7.0: AUTO SUSTAIN, LEGATO).
@@ -184,13 +256,13 @@ void InstrumentRack::paint (juce::Graphics& g)
     // The badge: PARAGON over the PR7-O mark, what it is printed in red; the PAGE keys under it.
     PedalBody::paintBadge (g, badgeColumn().withHeight (82.0f).translated (2.0f, 2.0f), "ORCHESTRA INSTRUMENT");
     {
-        const auto a = pageSwitchCell (0).toFloat(), d = pageSwitchCell (3).toFloat();
+        const auto a = pageSwitchCell (0).toFloat(), d = pageSwitchCell (4).toFloat();
         bracket (g, a, d, "PAGE");
-        const char* names[] = { "PLAYING", "ROUTING", "STAGE", "ENSEMBLE" };
-        for (int i = 0; i < 4; ++i)
+        const char* names[] = { "PLAYING", "SWITCHES", "ROUTING", "STAGE", "ENSEMBLE" };
+        for (int i = 0; i < 5; ++i)
         {
             const auto key = pageSwitchCell (i).toFloat();
-            stamped (g, names[i], key.translated (0.0f, key.getHeight() + 2.0f).withHeight (12.0f).expanded (6.0f, 0.0f), 6.5f);
+            stamped (g, names[i], key.translated (0.0f, key.getHeight() + 2.0f).withHeight (12.0f).expanded (4.0f, 0.0f), 5.8f);
         }
     }
 
@@ -202,7 +274,8 @@ void InstrumentRack::paint (juce::Graphics& g)
     };
     printedLine (displayColumn().getX() - sectionGap * 0.5f);
     printedLine (displayColumn().getRight() + sectionGap * 0.5f);
-    printedLine (sideOfPage().getX() - sectionGap * 0.5f);
+    if (hasSide())
+        printedLine (sideOfPage().getX() - sectionGap * 0.5f);
 
     paintScreen (g);
 
@@ -218,13 +291,22 @@ void InstrumentRack::paint (juce::Graphics& g)
     // The page's name, over it.
     auto title = pageArea().withY (content().getY()).withHeight (titleHeight);
     g.setFont (font (15.0f, juce::Font::bold | juce::Font::italic));
-    ParagonLookAndFeel::drawStampedText (g, page == Page::playing ? "PLAYING" : page == Page::routing ? "ROUTING" : page == Page::stage ? "STAGE" : "ENSEMBLE",
-                                         title.removeFromLeft (124.0f), juce::Justification::centredLeft, Finish::ink());
+    ParagonLookAndFeel::drawStampedText (g, page == Page::playing ? "PLAYING" : page == Page::routing ? "ROUTING" : page == Page::stage ? "STAGE"
+                                          : page == Page::ensemble ? "ENSEMBLE" : "ARTICULATIONS",
+                                         title.removeFromLeft (page == Page::articulations ? 150.0f : 124.0f), juce::Justification::centredLeft, Finish::ink());
     g.setColour (Finish::printedRed());
     g.setFont (font (8.0f));
     g.drawText (page == Page::playing ? "HOW THE INSTRUMENT PLAYS" : page == Page::routing ? "WHERE IT GOES: THE SENDS AND AN INSERT BUS"
-              : page == Page::stage ? "WHERE IT SITS: ITS SEATS, THE MICS AND THE ROOM" : "HOW BIG IT IS: MORE PLAYERS, LINES DOUBLED IN OCTAVES",
+              : page == Page::stage ? "WHERE IT SITS: ITS SEATS, THE MICS AND THE ROOM"
+              : page == Page::ensemble ? "HOW BIG IT IS: MORE PLAYERS, LINES DOUBLED IN OCTAVES"
+              : "ITS KEYSWITCHES (CLICK ONE TO SWITCH), AND A SECTION'S SPLITS",
                 title, juce::Justification::centredLeft, false);
+
+    if (page == Page::articulations)
+    {
+        paintArticulations (g);
+        return;
+    }
 
     // The page's right-hand column: its menu's name and screen (the menu sits on it); PLAYING's AUTO SUSTAIN key's name.
     const auto menu = menuCell (0).toFloat();
@@ -239,6 +321,36 @@ void InstrumentRack::paint (juce::Graphics& g)
             const auto* name = page == Page::playing ? (i == 0 ? "AUTO SUSTAIN" : "LEGATO") : (i == 0 ? "STAGE" : "RESET SEATS");
             stamped (g, name, key.translated (0.0f, key.getHeight() + 2.0f).withHeight (12.0f).expanded (22.0f, 0.0f), 8.0f);
         }
+    }
+}
+
+void InstrumentRack::paintArticulations (juce::Graphics& g)
+{
+    // Each articulation's name stamped under its key (two lines at most); with none, what that means.
+    if (articulationNames.isEmpty())
+    {
+        if (numSplits == 0)
+            stamped (g, "THIS INSTRUMENT HAS NO KEYSWITCHES: IT PLAYS ONE WAY", articulationBand(), 9.0f);
+    }
+    for (int i = 0; i < articulationNames.size(); ++i)
+    {
+        const auto key = articulationCell (i).toFloat();
+        const auto w = articulationWidth() - 6.0f;
+        const auto area = juce::Rectangle<float> (key.getCentreX() - w * 0.5f, key.getBottom() + 3.0f, w, 22.0f);
+        g.setFont (font (7.5f));
+        g.setColour (Finish::ink());
+        g.drawFittedText (articulationNames[i], area.toNearestInt(), juce::Justification::centredTop, 2, 0.85f);
+    }
+    // The splits: SPLITS printed over their screens, each screen.
+    if (numSplits > 0)
+    {
+        const auto band = splitBand();
+        g.setColour (Finish::printedRed());
+        g.setFont (font (8.0f));
+        g.drawText ("SPLITS, LOW TO HIGH: - / + MOVE THE SPLIT UNDER A PART A SEMITONE", band.withHeight (11.0f).translated (4.0f, 0.0f),
+                    juce::Justification::centredLeft, false);
+        for (int i = 0; i < numSplits; ++i)
+            LedDisplay::paintScreen (g, splitScreenCell (i).toFloat(), screenSize);
     }
 }
 
@@ -274,7 +386,11 @@ void InstrumentRack::paintScreen (juce::Graphics& g)
 
 void InstrumentRack::paintOverChildren (juce::Graphics& g)
 {
-    // The glass over the menu's screen (its text sits behind it, as on any of the unit's screens).
-    LedDisplay::paintGlassOverlay (g, menuCell (0).toFloat().reduced (3.0f), screenSize);
+    // The glass over the menu's screen (its text sits behind it, as on any of the unit's screens); the splits' screens.
+    if (hasSide())
+        LedDisplay::paintGlassOverlay (g, menuCell (0).toFloat().reduced (3.0f), screenSize);
+    else
+        for (int i = 0; i < numSplits; ++i)
+            LedDisplay::paintGlassOverlay (g, splitScreenCell (i).toFloat().reduced (3.0f), screenSize);
     Finish::paintAs (std::nullopt);
 }

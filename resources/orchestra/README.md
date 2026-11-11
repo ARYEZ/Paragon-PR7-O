@@ -18,7 +18,7 @@ proportions; the bass with sloping shoulders); no maker's instrument traced.
 | `flute.jpg`, `piccolo.jpg`, `oboe.jpg`, `englishhorn.jpg`, `clarinet.jpg`, `bassclarinet.jpg`, `bassoon.jpg`, `contrabassoon.jpg` | 0.12.0, THE WOODWINDS (`woodwinds3d.py`): one lying across, mouthpiece left; 2200 x 900 |
 | `woodwind-section.jpg` | Flute and piccolo on top, oboe and clarinet under them, the bassoon across the bottom; 2200 x 900 |
 | `woodwind-section-lit.jpg` | The same, the neon brighter (faded in per part) |
-| `stage.jpg` | 0.8.0, THE STAGE (`stage3d.py`): our concert stage seen from above and behind the conductor; 2048 x 842 |
+| `stage.jpg` | 0.8.0, THE STAGE (`stage3d.py`): our concert stage seen from above and behind the conductor; 0.14.0: 3200 x 920, from a lower camera further back so it spreads across the page's full-width panel |
 | `orchestra.json` | Where each string's bridge and nut ends land (px), each brass instrument's valves (`valves`, valve 1 first; the horn's thumb valve last) and the trombone's hand at 1st and 7th position (`slide`), and each instrument's area: `single.<kind>`, `section.<kind>`, `brassSection.<kind>`; 0.12.0: each woodwind's `keys` (thumb, L1-L3, R1-R3, then its octave / register / whisper / E-flat key) in `single.<kind>` and `woodwindSection.<kind>`; `stage`: a grid of picture points every 0.5 m of the stage (x from -9, y from -2; 37 x 29) and the podium |
 
 ## Making them again
@@ -60,7 +60,7 @@ geometry is mapped the same way.
 The stage (0.8.0), in a third scratch folder:
 
 ```bash
-blender -b -P stage3d.py -- $PWD/stage.png 64 2048 842 stage none $PWD/stage.json
+blender -b -P stage3d.py -- $PWD/stage.png 64 3200 920 stage none $PWD/stage.json   # (0.14.0; 0.8.0's: 2048 842)
 python3 process_orchestra.py <the strings' folder> <the repo>/resources/orchestra - <the stage's folder>
 ```
 

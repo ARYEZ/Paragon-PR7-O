@@ -154,13 +154,11 @@ private:
     void paintOverChildren (juce::Graphics&) override;
     std::vector<std::unique_ptr<juce::TextButton>> articulationButtons;
     int shownSwitch = -1, shownOctave = -1;
-    juce::Rectangle<int> articulationArea;
     void rebuildArticulations();
     struct SplitRow { juce::Label name, keys; juce::TextButton down { "-" }, up { "+" }; };
     std::vector<std::unique_ptr<SplitRow>> splitRows;
     std::optional<sampler::section::Section> editedSection;   // splits moved, not yet applied
     double editedAt = 0.0;
-    juce::Rectangle<int> splitArea;
     void rebuildSplits();
     void showSplits();   // the rows' text, from the section shown (or the one being edited)
     void updateInfo();   // the text, for the articulation chosen
@@ -168,5 +166,5 @@ private:
     std::shared_ptr<const sampler::Program> shown;
     juce::String shownFile;
     bool shownLoading = false;
-    juce::Rectangle<int> infoArea, mapArea;
+    juce::Rectangle<int> mapArea;   // (0.14.0: the whole width; the left panel's parts moved to the rack)
 };

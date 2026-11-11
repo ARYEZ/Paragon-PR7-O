@@ -230,7 +230,11 @@ namespace sampler
         bool waitForDisk = false;       // 0.11.0: Settings::waitForDisk, for the piece being played
         double rate = 48000.0;
         float bend = 0.0f;              // the pitch wheel, -1 to 1
-        float wheel = 0.0f;             // the mod wheel, 0 to 1
+        // The mod wheel, 0 to 1. 0.13.1: it starts at 100 (a strong mf) until the keyboard sends one (or the file's
+        // set_cc1 says otherwise): at 0, DYNAMICS on the mod wheel was silent before the wheel had been touched.
+        static constexpr float wheelStart = 100.0f / 127.0f;
+        static constexpr float wheelFloor = 32.0f;   // the wheel at 0 plays like this velocity
+        float wheel = wheelStart;
         float expression = 1.0f;        // CC 11, 0 to 1
         std::array<float, 128> cc {};   // 0.9.0: every controller's value (0-127), the file's set_ccN at the start
         std::array<bool, 128> releaseDue {};   // 0.9.0: keys let go under the pedal (their release samples come with it)
@@ -250,7 +254,7 @@ namespace sampler
         std::array<std::array<float, scratchSize>, maxParts> scratchLeft {}, scratchRight {};   // a part each
         std::array<float, scratchSize> rampLeft {}, rampRight {};
         std::atomic<int> activeVoices { 0 }, activeNotes { 0 }, lastNote { -1 }, shownSwitch { -1 }, pendingSwitch { -1 };
-        std::atomic<float> shownWheel { 0.0f }, shownExpression { 1.0f };
+        std::atomic<float> shownWheel { wheelStart }, shownExpression { 1.0f };
         std::array<std::atomic<bool>, 128> held {};
     };
 }
