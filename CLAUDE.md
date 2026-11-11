@@ -437,6 +437,14 @@ tools, which need the owner's riffs)
   description and, when a part's library isn't found (`resolve`), "PLAYS X: NOT DOWNLOADED YET" + `getButton` (GET,
   progress through a 4 Hz timer). Tests `[expansions]` in `RigTests.cpp`; the ordering tests now end at SO06.
 
+## 0.13.1: the expansion presets were silent (the owner: "whenever I load a preset I get no volume whatsoever")
+
+- DYNAMICS on the mod wheel: `wheel` started at 0 and `wheelGainOf` read it as velocity 1-127 (0 = -84 dB with full
+  velocity tracking): every VO preset silent until the wheel moved (a probe loading the factory preset reproduced it).
+  Now `Sampler::wheelStart` 100 / 127 (until a CC 1 or the file's set_cc1; `shownWheel` too) and `wheelFloor` 32
+  (the wheel runs over velocities 32-127). `cc[1]` for SFZ opcodes still starts at 0 (SFZ's default; Sonatina sets
+  set_cc1=96 itself). **Probes for presets must play without moving the wheel**: mine had sent CC 1 = 100 and missed it.
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:

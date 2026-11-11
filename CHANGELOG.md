@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.1
+
+**The expansion presets play straight away** (you: "whenever I load a preset I get no volume whatsoever").
+
+- **What was wrong:** the expansion presets set DYNAMICS to the mod wheel, so the wheel sets how loud each note is.
+  The plugin treated the wheel as being at the bottom until your keyboard sent it, and at the bottom it played like
+  velocity 1, which is silence. So a preset made no sound until you pushed the wheel up. The single instruments you
+  load from the browser play by velocity, which is why they worked.
+- **What changed:**
+  - Until your keyboard sends a wheel message, the plugin takes the wheel as at 100 (a strong mf): a preset plays as
+    soon as it's loaded.
+  - The wheel at the bottom now plays the softest layer about 24 dB under full (like velocity 32): soft, but there.
+  - Both numbers are our own choice. An SFZ file that sets its own starting wheel value (Sonatina's do) still wins.
+- Measured on VSCO's String Section: wheel untouched about 3 dB under full; at the bottom 19-28 dB under full
+  (was: no sound at all). Not checked here: how that range feels to play.
+
 ## 0.13.0
 
 **GET the two free orchestras from inside the plugin, and ready-made sections in two expansion banks** (you: "do both

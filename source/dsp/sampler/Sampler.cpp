@@ -787,9 +787,11 @@ namespace sampler
 
     float Sampler::wheelGainOf (const Voice& v) const noexcept
     {
-        // The wheel as a velocity (1 to 127): this layer's share (equal power between neighbouring layers' middles, all
-        // of it beyond the outermost), and the level that velocity gives.
-        const auto at = 1.0f + wheel * 126.0f;
+        // The wheel as a velocity (wheelFloor to 127): this layer's share (equal power between neighbouring layers'
+        // middles, all of it beyond the outermost), and the level that velocity gives. 0.13.1: the wheel at the bottom
+        // plays like velocity 32 (about -24 dB with full velocity tracking), not 1 (about -84 dB: silence, so a preset
+        // on the mod wheel played nothing until the wheel was pushed up).
+        const auto at = wheelFloor + wheel * (127.0f - wheelFloor);
         auto share = 1.0f;
         if (at < v.layerMiddle && v.lowerMiddle >= 0.0f)
             share = std::sqrt (juce::jlimit (0.0f, 1.0f, (at - v.lowerMiddle) / (v.layerMiddle - v.lowerMiddle)));
