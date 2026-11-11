@@ -89,7 +89,8 @@ target_sources(ParagonX1
         source/dsp/stage/Stage.cpp
         source/dsp/sampler/Sampler.cpp
         source/dsp/sampler/DiskStreamer.cpp    # PR7-D's disk streaming, kept for the libraries (plan stage 3)
-        source/dsp/mixer/MixerEffects.cpp      # PR7-D's mixer effects, kept for the stage (plan stage 6)
+        source/dsp/mixer/MixerEffects.cpp      # PR7-D's mixer effects: THE MIXER's slots (0.15.0)
+        source/dsp/mixer/PartMixer.cpp         # 0.15.0: THE MIXER, a strip per part and the section's
         # The effects: PR7-E's rack (ECHELON, DOMINION, CONSTRICTOR, the LIMITER) and PR7-G's sends and inserts.
         source/dsp/dominion/Dominion.cpp
         source/dsp/effects/Compressor.cpp
