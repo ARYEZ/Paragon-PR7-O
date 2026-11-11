@@ -108,6 +108,15 @@ namespace sampler::section
         }
     }
 
+    juce::String labelOf (const juce::String& name)
+    {
+        auto label = name.trim();
+        for (const auto* end : { "-KS", "_KS", " KS" })
+            if (label.endsWithIgnoreCase (end))
+                return label.dropLastCharacters (3).trim();
+        return label;
+    }
+
     juce::String nameOf (const Part& p)
     {
         return bareName (p.file);

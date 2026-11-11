@@ -261,9 +261,15 @@ for n in ("key", "rim pink", "rim orange"):
 cam_data = bpy.data.cameras.new("camera")
 cam_data.lens = 22
 cam_data.sensor_width = 36
+# 0.14.0 (the owner: "stretch out the tron display ... use all the space"): a wide picture (wider than 0.8.0's 2048 x
+# 842) is seen from a lower camera further back, so the stage spreads across it instead of sitting in the middle.
+WIDE = WIDTH / HEIGHT > 2048 / 842 + 0.01
+CAM_AT = tuple(float(v) for v in os.environ.get("STAGE_CAM", "0,-9.5,8.2" if WIDE else "0,-6.5,12.5").split(","))
+CAM_LOOK = tuple(float(v) for v in os.environ.get("STAGE_LOOK", "0,3.6,0.0" if WIDE else "0,4.5,-0.4").split(","))
+cam_data.lens = float(os.environ.get("STAGE_LENS", "22"))
 cam = link(bpy.data.objects.new("camera", cam_data))
-cam.location = Vector((0.0, -6.5, 12.5))
-direction = Vector((0.0, 4.5, -0.4)) - cam.location
+cam.location = Vector(CAM_AT)
+direction = Vector(CAM_LOOK) - cam.location
 cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 cam_data.clip_end = 100
 scene.camera = cam

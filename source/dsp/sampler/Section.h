@@ -48,6 +48,9 @@ namespace sampler::section
     // A part's name as shown: its file's name. An instrument's (a file's path or a section's text): its file's name,
     // or its parts' joined with " + ". Where its files are: the file's folder, or the first part's.
     juce::String nameOf (const Part&);
+    // 0.14.0: a part's name as the page shows it: a keyswitch file's "KS" ending left off ("ViolinEns-KS" -> "ViolinEns").
+    // Only for showing: seats and the rest go by nameOf.
+    juce::String labelOf (const juce::String& name);
     juce::String describe (const juce::String& instrument);
     juce::File folderOf (const juce::String& instrument);
 
