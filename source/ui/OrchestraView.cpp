@@ -13,6 +13,28 @@ namespace orchestra
         // From a file's or an instrument's name (VSCO 2 CE's: ViolinEns, SViolin, ViolaEns, CelloEns, Contrabass...;
         // 0.6.0, its brass: TrumpetSus, FHornSus, TromboneSus, Tuba-KS...).
         const auto n = name.toLowerCase();
+        // 0.12.0, the woodwinds first (a contrabassoon isn't a double bass, an English horn isn't a horn): VSCO's
+        // FluteSusVib, PiccoloSus, OboeSusVib, ClarinetSus, BassoonSus; Sonatina's "English Horn", "Bass Clarinet",
+        // "Contrabassoon".
+        if (n.contains ("piccolo"))
+            return Kind::piccolo;
+        if (n.contains ("alto flute") || n.contains ("altoflute") || n.contains ("alto_flute"))
+            return Kind::altoFlute;
+        if (n.contains ("flute"))
+            return Kind::flute;
+        if (n.contains ("english horn") || n.contains ("englishhorn") || n.contains ("english_horn") || n.contains ("cor anglais")
+            || n.contains ("coranglais"))
+            return Kind::englishHorn;
+        if (n.contains ("oboe"))
+            return Kind::oboe;
+        if (n.contains ("bass clarinet") || n.contains ("bassclarinet") || n.contains ("bass_clarinet") || n.contains ("bass clar"))
+            return Kind::bassClarinet;
+        if (n.contains ("clarinet") || n.contains ("clar "))
+            return Kind::clarinet;
+        if (n.contains ("contrabassoon") || n.contains ("contra bassoon") || n.contains ("contrafagott"))
+            return Kind::contrabassoon;
+        if (n.contains ("bassoon") || n.contains ("fagott"))
+            return Kind::bassoon;
         if (n.contains ("trombone") || n.contains ("tbn"))
             return Kind::trombone;
         if (n.contains ("tuba"))
@@ -44,8 +66,7 @@ namespace orchestra
             case Kind::viola:  return { 48, 55, 62, 69 };   // C3 G3 D4 A4
             case Kind::cello:  return { 36, 43, 50, 57 };   // C2 G2 D3 A3
             case Kind::bass:   return { 28, 33, 38, 43 };   // E1 A1 D2 G2
-            case Kind::trumpet: case Kind::horn: case Kind::trombone: case Kind::tuba:
-            case Kind::none:   break;
+            default:           break;
         }
         return { -1, -1, -1, -1 };
     }
@@ -62,9 +83,23 @@ namespace orchestra
             case Kind::horn:     return "horn";
             case Kind::trombone: return "trombone";
             case Kind::tuba:     return "tuba";
+            case Kind::flute: case Kind::altoFlute: return "flute";   // (its picture)
+            case Kind::piccolo:       return "piccolo";
+            case Kind::oboe:          return "oboe";
+            case Kind::englishHorn:   return "englishhorn";
+            case Kind::clarinet:      return "clarinet";
+            case Kind::bassClarinet:  return "bassclarinet";
+            case Kind::bassoon:       return "bassoon";
+            case Kind::contrabassoon: return "contrabassoon";
             case Kind::none:   break;
         }
         return {};
+    }
+
+    juce::String displayNameOf (Kind k)
+    {
+        return k == Kind::englishHorn ? "english horn" : k == Kind::bassClarinet ? "bass clarinet"
+             : k == Kind::altoFlute ? "alto flute" : nameOf (k);
     }
 
     float alongString (int semitones, float nutX, float bridgeX, float edge)
@@ -80,6 +115,81 @@ namespace orchestra
     bool isBrass (Kind k)
     {
         return k == Kind::trumpet || k == Kind::horn || k == Kind::trombone || k == Kind::tuba;
+    }
+
+    bool isWoodwind (Kind k)
+    {
+        return k == Kind::flute || k == Kind::altoFlute || k == Kind::piccolo || k == Kind::oboe || k == Kind::englishHorn || k == Kind::clarinet
+            || k == Kind::bassClarinet || k == Kind::bassoon || k == Kind::contrabassoon;
+    }
+
+    Kind sectionKindOf (Kind k)
+    {
+        return k == Kind::englishHorn ? Kind::oboe : k == Kind::bassClarinet ? Kind::clarinet : k == Kind::altoFlute ? Kind::flute
+             : k == Kind::contrabassoon ? Kind::bassoon : k;
+    }
+
+    Family familyOf (Kind k)
+    {
+        return isBrass (k) ? Family::brass : isWoodwind (k) ? Family::woodwinds : Family::strings;
+    }
+
+    WindFingering windFingeringFor (Kind k, int note)
+    {
+        // Each chart: from its lowest note (written), a pattern a semitone: thumb, L1 L2 L3, R1 R2 R3, then the octave /
+        // register / whisper / E-flat key ('1' closed). "-": not charted.
+        struct Chart { int lowest; std::vector<const char*> patterns; };
+        static const Chart flute { 60, {
+            "11111110", "11111110", "11111111", "11111111", "11111101", "11111001", "11110011", "11110001",   // C4-G4
+            "11110001", "11100001", "11001001", "11000001", "01000001", "00000001",                           // G#4-C#5
+            "10111110", "10111111",                                                                           // D5 D#5
+            "11111101", "11111001", "11110011", "11110001", "11110001", "11100001", "11001001", "11000001",   // E5-B5
+            "01000001", "00000001",                                                                           // C6 C#6
+            "11100001", "11111111", "11101101", "11011001", "11010011", "01110001", "00110001", "10101001" } };   // D6-A6
+        static const Chart oboe { 58, {
+            "01111110", "01111110", "01111110", "01111110", "01111110", "01111110",                           // Bb3-D#4
+            "01111100", "01111000", "01110010", "01110000", "01110000", "01100000", "01000000", "01000000",   // E4-B4
+            "00100000", "00000000",                                                                           // C5 C#5
+            "01111110", "01111110",                                                                           // D5 D#5 (half hole)
+            "01111101", "01111001", "01110011", "01110001", "01110001", "01100001", "01000001", "01000001",   // E5-B5
+            "00100001" } };                                                                                   // C6
+        static const Chart clarinet { 52, {
+            "11111110", "11111110", "11111110", "11111110", "11111110", "11111100", "11111010", "11111000",   // E3-B3
+            "11110000", "11110000", "11100000", "11010000", "11000000", "10000000", "01000000", "00000000",   // C4-G4
+            "00000000", "00000000", "00000001",                                                               // G#4 A4 A#4
+            "11111111", "11111111", "11111111", "11111111", "11111111", "11111101", "11111011", "11111001",   // B4-F#5
+            "11110001", "11110001", "11100001", "11010001", "11000001", "10000001" } };                       // G5-C6
+        static const Chart bassoon { 34, {
+            "01111111", "01111111", "01111111", "01111111", "01111111", "01111111", "01111111", "01111111",   // Bb1-F2
+            "01111111", "01111101", "01111101", "01111001", "01111001", "01110001", "01100001", "01100001",   // F#2-C#3
+            "01000001", "-", "-", "-", "-", "01111100", "01111100", "01111000" } };                           // D3; G3-A3 (half hole)
+        const Chart* chart = nullptr;
+        auto written = note;
+        switch (k)
+        {
+            case Kind::flute:         chart = &flute; break;
+            case Kind::piccolo:       chart = &flute; written = note - 12; break;
+            case Kind::altoFlute:     chart = &flute; written = note + 5; break;
+            case Kind::oboe:          chart = &oboe; break;
+            case Kind::englishHorn:   chart = &oboe; written = note + 7; break;
+            case Kind::clarinet:      chart = &clarinet; written = note + 2; break;
+            case Kind::bassClarinet:  chart = &clarinet; written = note + 14; break;
+            case Kind::bassoon:       chart = &bassoon; break;
+            case Kind::contrabassoon: chart = &bassoon; written = note + 12; break;
+            default: return {};
+        }
+        // (the clarinets' low extension, under written E3: every finger down)
+        if ((k == Kind::clarinet || k == Kind::bassClarinet) && written < chart->lowest && written >= chart->lowest - 4)
+            return { true, 0b01111111 };
+        const auto i = written - chart->lowest;
+        if (i < 0 || i >= (int) chart->patterns.size() || chart->patterns[(size_t) i][0] == '-')
+            return {};
+        WindFingering f;
+        f.charted = true;
+        for (int b = 0; b < 8; ++b)
+            if (chart->patterns[(size_t) i][b] == '1')
+                f.keys |= 1 << b;
+        return f;
     }
 
     Fingering fingeringFor (Kind k, int note)
@@ -124,7 +234,7 @@ namespace orchestra
     std::vector<Stop> stopsFor (Kind k, std::vector<int> notes)
     {
         std::vector<Stop> stops;
-        if (k == Kind::none || isBrass (k))
+        if (k == Kind::none || isBrass (k) || isWoodwind (k))
             return stops;
         const auto open = openStrings (k);
         std::sort (notes.begin(), notes.end(), std::greater<int>());
@@ -174,6 +284,9 @@ namespace
         if (const auto* valves = g["valves"].getArray())
             for (const auto& v : *valves)
                 s.valves.push_back (pointOf (v));
+        if (const auto* keys = g["keys"].getArray())   // 0.12.0
+            for (const auto& v : *keys)
+                s.keys.push_back (pointOf (v));
         if (const auto* slide = g["slide"].getArray(); slide != nullptr && slide->size() == 2)
             s.slide = std::pair { pointOf ((*slide)[0]), pointOf ((*slide)[1]) };
         const auto a = g["area"];
@@ -226,22 +339,27 @@ const OrchestraView::Picture& OrchestraView::single (orchestra::Kind k)
     return p;
 }
 
-const OrchestraView::Picture& OrchestraView::section (bool lit, bool brass)
+const OrchestraView::Picture& OrchestraView::section (bool lit, orchestra::Family family)
 {
-    static Picture pictures[4];
-    auto& p = pictures[(lit ? 1 : 0) + (brass ? 2 : 0)];
+    using orchestra::Family;
+    static Picture pictures[6];
+    auto& p = pictures[(lit ? 1 : 0) + 2 * (int) family];
     if (p.image.isNull())
     {
         using orchestra::Kind;
         int size = 0;
-        const char* name = brass ? (lit ? "brasssectionlit_jpg" : "brasssection_jpg") : (lit ? "sectionlit_jpg" : "section_jpg");
+        const char* name = family == Family::brass ? (lit ? "brasssectionlit_jpg" : "brasssection_jpg")
+                         : family == Family::woodwinds ? (lit ? "woodwindsectionlit_jpg" : "woodwindsection_jpg")
+                                                       : (lit ? "sectionlit_jpg" : "section_jpg");
         if (const auto* data = OrchestraImages::getNamedResource (name, size))
             p.image = orchestra::inFamily (juce::ImageFileFormat::loadFrom (data, (size_t) size));
-        const auto kinds = brass ? std::vector { Kind::tuba, Kind::trombone, Kind::horn, Kind::trumpet }
-                                 : std::vector { Kind::bass, Kind::cello, Kind::viola, Kind::violin };
+        const auto kinds = family == Family::brass ? std::vector { Kind::tuba, Kind::trombone, Kind::horn, Kind::trumpet }
+                         : family == Family::woodwinds ? std::vector { Kind::flute, Kind::piccolo, Kind::oboe, Kind::clarinet, Kind::bassoon }
+                                                       : std::vector { Kind::bass, Kind::cello, Kind::viola, Kind::violin };
+        const char* group = family == Family::brass ? "brassSection" : family == Family::woodwinds ? "woodwindSection" : "section";
         for (const auto k : kinds)
         {
-            const auto s = geometryOf<Strings> (orchestra::geometry()[brass ? "brassSection" : "section"][juce::Identifier (orchestra::nameOf (k))]);
+            const auto s = geometryOf<Strings> (orchestra::geometry()[group][juce::Identifier (orchestra::nameOf (k))]);
             p.instruments[k] = s;
             if (lit && p.image.isValid())
             {
@@ -285,20 +403,30 @@ void OrchestraView::refresh()
     mode = Mode::none;
     kind = orchestra::Kind::none;
     partKeys.clear();
-    brassSection = false;
+    partKinds.clear();
+    sectionFamily = orchestra::Family::strings;
     if (const auto s = processor.getSection())
     {
-        // The family with more pictured parts (0.6.0: strings or brass; the strings when even); the other's parts play
-        // unpictured.
-        auto strings = 0, brass = 0;
+        // The family with the most pictured parts (0.6.0: strings or brass; 0.12.0: or woodwinds; on a tie strings,
+        // then brass); the others' parts play unpictured. A woodwind part is shown as its section picture's instrument
+        // (an English horn as the oboe...), the first part to take each.
+        std::array<int, 3> counts {};
         for (const auto& part : s->parts)
             if (const auto k = orchestra::kindOf (sampler::section::nameOf (part)); k != orchestra::Kind::none)
-                ++(orchestra::isBrass (k) ? brass : strings);
-        brassSection = brass > strings;
-        for (const auto& part : s->parts)
-            if (const auto k = orchestra::kindOf (sampler::section::nameOf (part));
-                k != orchestra::Kind::none && orchestra::isBrass (k) == brassSection && partKeys.count (k) == 0)
-                partKeys[k] = { part.low, part.high };
+                ++counts[(size_t) orchestra::familyOf (k)];
+        for (const auto f : { orchestra::Family::brass, orchestra::Family::woodwinds })
+            if (counts[(size_t) f] > counts[(size_t) sectionFamily])
+                sectionFamily = f;
+        // (an instrument's own part first, then a relative's: a section of oboe and English horn shows the oboe's)
+        for (const auto relatives : { false, true })
+            for (const auto& part : s->parts)
+                if (const auto k = orchestra::kindOf (sampler::section::nameOf (part));
+                    k != orchestra::Kind::none && orchestra::familyOf (k) == sectionFamily && (orchestra::sectionKindOf (k) != k) == relatives)
+                    if (const auto shown = orchestra::sectionKindOf (k); partKeys.count (shown) == 0)
+                    {
+                        partKeys[shown] = { part.low, part.high };
+                        partKinds[shown] = k;
+                    }
         if (! partKeys.empty())
             mode = Mode::section;
     }
@@ -339,19 +467,31 @@ std::vector<orchestra::Stop> OrchestraView::getStops (orchestra::Kind k) const
 
 std::vector<juce::Point<float>> OrchestraView::getValves (orchestra::Kind k, bool inSection)
 {
-    const auto& p = inSection ? section (false, true) : single (k);
+    const auto& p = inSection ? section (false, orchestra::Family::brass) : single (k);
     const auto it = p.instruments.find (k);
     return it != p.instruments.end() ? it->second.valves : std::vector<juce::Point<float>> {};
 }
 
+std::vector<juce::Point<float>> OrchestraView::getKeys (orchestra::Kind k, bool inSection)
+{
+    const auto& p = inSection ? section (false, orchestra::Family::woodwinds) : single (k);
+    const auto it = p.instruments.find (inSection ? orchestra::sectionKindOf (k) : k);
+    return it != p.instruments.end() ? it->second.keys : std::vector<juce::Point<float>> {};
+}
+
 bool OrchestraView::hasSlide (orchestra::Kind k, bool inSection)
 {
-    const auto& p = inSection ? section (false, true) : single (k);
+    const auto& p = inSection ? section (false, orchestra::Family::brass) : single (k);
     const auto it = p.instruments.find (k);
     return it != p.instruments.end() && it->second.slide.has_value();
 }
 
 int OrchestraView::getBrassNote (orchestra::Kind k) const
+{
+    return heldNote (k);
+}
+
+int OrchestraView::heldNote (orchestra::Kind k) const
 {
     // One note at a time: the highest held in its keys.
     std::vector<int> notes;
@@ -420,7 +560,7 @@ void OrchestraView::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (0xff060407));
     if (mode == Mode::none)
         return;
-    const auto& base = mode == Mode::single ? single (kind) : section (false, brassSection);
+    const auto& base = mode == Mode::single ? single (kind) : section (false, sectionFamily);
     if (base.image.isNull())
         return;
     const auto area = pictureArea (base.image);
@@ -433,12 +573,14 @@ void OrchestraView::paint (juce::Graphics& g)
     {
         if (orchestra::isBrass (kind))
             paintFingering (g, base.instruments.at (kind), kind, getBrassNote (kind), toView);
+        else if (orchestra::isWoodwind (kind))
+            paintKeys (g, base.instruments.at (kind), kind, heldNote (kind), toView);
         else
             paintStops (g, base.instruments.at (kind), getStops (kind), toView);
         return;
     }
     // A section: each part's lit picture over the dim one while it plays, then its notes.
-    const auto& lit = section (true, brassSection);
+    const auto& lit = section (true, sectionFamily);
     for (const auto& [k, keys] : partKeys)
     {
         juce::ignoreUnused (keys);
@@ -455,9 +597,35 @@ void OrchestraView::paint (juce::Graphics& g)
         }
         if (orchestra::isBrass (k))
             paintFingering (g, it->second, k, getBrassNote (k), toView);
+        else if (orchestra::isWoodwind (k))
+            paintKeys (g, it->second, partKind (k), heldNote (k), toView);
         else
             paintStops (g, it->second, getStops (k), toView);
     }
+}
+
+void OrchestraView::paintKeys (juce::Graphics& g, const Strings& geometry, orchestra::Kind k, int note, juce::AffineTransform toView) const
+{
+    // 0.12.0: a woodwind note's closed keys lit (a halo, orange, a pearl core, as the brass's valves).
+    if (note < 0)
+        return;
+    const auto fingering = orchestra::windFingeringFor (k, note);
+    if (! fingering.charted)
+        return;
+    const juce::Colour orange (0xffff6a24), pearl (0xfff4eef1);
+    const auto scale = std::sqrt (std::abs (toView.getDeterminant()));
+    const auto r = juce::jmax (5.5f, 9.0f * scale);
+    for (size_t i = 0; i < geometry.keys.size() && i < 8; ++i)
+        if ((fingering.keys >> i) & 1)
+        {
+            const auto at = geometry.keys[i].transformedBy (toView);
+            g.setColour (orange.withAlpha (0.25f));
+            g.fillEllipse (juce::Rectangle<float> (r * 4.0f, r * 4.0f).withCentre (at));
+            g.setColour (orange);
+            g.fillEllipse (juce::Rectangle<float> (r * 2.2f, r * 2.2f).withCentre (at));
+            g.setColour (pearl);
+            g.fillEllipse (juce::Rectangle<float> (r * 1.1f, r * 1.1f).withCentre (at));
+        }
 }
 
 void OrchestraView::paintFingering (juce::Graphics& g, const Strings& geometry, orchestra::Kind k, int note,

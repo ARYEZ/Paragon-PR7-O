@@ -1,4 +1,6 @@
 #include "PluginProcessor.h"
+#include "library/Downloads.h"
+#include "library/Library.h"
 
 #include "NoteNames.h"
 #include "Parameters.h"
@@ -610,6 +612,12 @@ sampler::Sampler::Settings ParagonX1AudioProcessor::getSamplerSettings() const n
     s.autoSustain = isOn (ParamIDs::instAutoSustain);
     s.legato = isOn (ParamIDs::instLegato);
     s.glideSeconds = param (ParamIDs::instGlide);
+    s.players = juce::roundToInt (param (ParamIDs::ensPlayers));
+    s.detuneCents = param (ParamIDs::ensDetune);
+    s.timingMs = param (ParamIDs::ensTiming);
+    s.doubleMode = juce::roundToInt (param (ParamIDs::ensDouble));
+    s.doubleGain = juce::Decibels::decibelsToGain (param (ParamIDs::ensDoubleLevel));
+    s.waitForDisk = isNonRealtime();   // 0.11.0: a bounce reads what the disk hasn't yet
     return s;
 }
 
@@ -827,13 +835,19 @@ void ParagonX1AudioProcessor::retireOldData()
 // THE INSTRUMENT
 void ParagonX1AudioProcessor::loadInstrument (const juce::File& file)
 {
-    startLoading (file.getFullPathName(), true);
+    // (0.13.0: a file in a downloaded library kept as its library reference, so a preset saved with it plays on any
+    // computer that has the library)
+    startLoading (downloads::portable (file.getFullPathName()), true);
 }
 
 void ParagonX1AudioProcessor::loadSection (const sampler::section::Section& section)
 {
-    if (! section.parts.empty())
-        startLoading (section.toText(), true);
+    if (section.parts.empty())
+        return;
+    auto portable = section;
+    for (auto& part : portable.parts)
+        part.file = downloads::portable (part.file);
+    startLoading (portable.toText(), true);
 }
 
 std::optional<sampler::section::Section> ParagonX1AudioProcessor::getSection() const
@@ -864,6 +878,12 @@ void ParagonX1AudioProcessor::installProgram (std::shared_ptr<const sampler::Pro
     if (program != nullptr && program != newProgram)
         retiredPrograms.emplace_back (program, juce::Time::getMillisecondCounterHiRes());
     program = std::move (newProgram);
+    // 0.11.0: the disk streamer starts with the first instrument that streams (its rings: 64 MB).
+    if (streamer == nullptr && program != nullptr && program->wholeBytes > program->bytes)
+    {
+        streamer = std::make_unique<sampler::Streamer>();
+        sampler.setStreamer (streamer.get());
+    }
     programForAudio = program.get();
     instrumentFile = file;
     // The project's articulation, once its instrument is in (the sampler takes it after it sees the new program).
@@ -905,13 +925,30 @@ void ParagonX1AudioProcessor::startLoading (const juce::String& file, bool undoS
                 loadProgress = done;
                 return ! alive.expired() && loadGeneration.load() == generation;
             };
-            const auto section = sampler::section::fromText (file);
-            const juce::File source (section.has_value() ? juce::String() : file);
+            // 0.13.0: library references ("{sfz:<library>}/<file>": factory presets) made files: in the downloaded
+            // library, else in a library folder the user added.
+            auto section = sampler::section::fromText (file);
+            const auto userFolders = library::folders();
+            juce::StringArray needed;
+            const auto find = [&] (const juce::String& name)
+            {
+                const auto found = downloads::resolve (name, userFolders);
+                if (downloads::isRef (name) && ! found.existsAsFile())
+                    if (const auto* l = downloads::libraryFor (name))
+                        needed.addIfNotAlreadyThere (l->what);
+                return found;
+            };
+            if (section.has_value())
+                for (auto& part : section->parts)
+                    part.file = find (part.file).getFullPathName();
+            const auto source = section.has_value() ? juce::File() : find (file);
             std::shared_ptr<sampler::Program> made;
             if (section.has_value())
                 made = sampler::section::load (*section, keepGoing, reuse);   // 0.4.0: several SFZ split over the keys
             else if (sampler::section::isSection (file))
                 problem = "couldn't read the section";
+            else if (! needed.isEmpty())
+                problem = "needs " + needed.joinIntoString (" and ") + ": GET it in the library (LOAD)";
             else if (! source.existsAsFile())
                 problem = "not found: " + file;
             else if (source.hasFileExtension ("sfz"))
@@ -928,8 +965,14 @@ void ParagonX1AudioProcessor::startLoading (const juce::String& file, bool undoS
                         + (made->problems.isEmpty() ? juce::String() : " (" + made->problems[0] + ")");
             else if (made == nullptr && problem.isEmpty())
                 problem = "couldn't read " + what;
+            if (! needed.isEmpty())   // (a section with a part's library missing: that's what to say, whatever plays)
+                problem = "needs " + needed.joinIntoString (" and ") + ": GET it in the library (LOAD)";
             if (made != nullptr && ! made->regions.empty())
+            {
+                if (streamFromDisk)
+                    sampler::streamSamples (*made);   // 0.11.0: long recordings read from disk as they play
                 result.program = std::move (made);
+            }
         }
         {
             const std::scoped_lock lock (loadedLock);
@@ -1213,7 +1256,8 @@ bool ParagonX1AudioProcessor::saveCurrentRigAs (const juce::String& name)
     // made from the blank page isn't "a blank page").
     if (const auto* entry = findCurrentRigEntry(); entry != nullptr && ! (entry->isFactory && entry->rig.name == "Init"))
     {
-        rig.bank = entry->rig.bank;
+        // (An expansion's bank holds its own presets only: a copy of one goes to bank A.)
+        rig.bank = Rig::isExpansionBank (entry->rig.bank) ? 0 : entry->rig.bank;
         rig.tags = entry->rig.tags;
         rig.notes = entry->rig.notes;
     }

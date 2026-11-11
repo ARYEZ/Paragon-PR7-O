@@ -1,5 +1,6 @@
 #pragma once
 
+#include "library/Downloads.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
@@ -238,6 +239,14 @@ public:
     }
     int mainLatencySamples() const noexcept;
 
+    // 0.11.0, DISK STREAMING: whether instruments loaded from here on stream their long recordings (tests turn it
+    // off to compare), and the streamer (null until an instrument streams).
+    void setStreamFromDisk (bool on) noexcept { streamFromDisk = on; }
+    const sampler::Streamer* getStreamer() const noexcept { return streamer.get(); }
+    // 0.13.0, the libraries to download (library/Downloads.h): one at a time, kept going while the window's closed.
+    downloads::Download& getDownload() noexcept { return download; }
+    void getLibrary (const downloads::Library& l, const juce::String& url = {}) { download.start (l, downloads::folder(), url); }
+
 private:
     void processChunk (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, int start, int numSamples);
     void processSends (juce::dsp::AudioBlock<float> block);
@@ -343,4 +352,9 @@ private:
     void pushSeats();   // the parts' seats to the stage, by the sampler's part numbers (message thread)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ParagonX1AudioProcessor)
+
+    // 0.11.0: last, so it stops (and lets go of every recording) before the programs it reads go.
+    std::atomic<bool> streamFromDisk { true };
+    downloads::Download download;   // 0.13.0
+    std::unique_ptr<sampler::Streamer> streamer;
 };

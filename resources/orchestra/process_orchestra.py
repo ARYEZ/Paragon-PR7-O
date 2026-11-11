@@ -8,13 +8,18 @@
 #   python3 process_orchestra.py <the strings' renders> <resources/orchestra> <the brass's renders>
 # Without it ("-"), the brass's pictures and geometry already in <resources/orchestra> are kept.
 # 0.8.0, the stage (stage3d.py): a fourth folder with stage.png / stage.json (without it, the stage's kept).
+# 0.12.0, the woodwinds (woodwinds3d.py): a fifth folder with single-<kind>.png/.json for the eight, section.png/.json and
+# section-lit.png; "-" for the strings' folder (or the brass's, or the stage's) keeps theirs as they are:
+#   python3 process_orchestra.py - <resources/orchestra> - - <the woodwinds' renders>
 import json, os, sys
 import numpy as np
 from PIL import Image
 
 raw, out = sys.argv[1], sys.argv[2]
 brass = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "-" else None
-stage = sys.argv[4] if len(sys.argv) > 4 else None   # 0.8.0: stage3d.py's stage.png / stage.json
+stage = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] != "-" else None   # 0.8.0: stage3d.py's stage.png / stage.json
+winds = sys.argv[5] if len(sys.argv) > 5 else None   # 0.12.0: woodwinds3d.py's renders
+kept = json.load(open(os.path.join(out, "orchestra.json")))
 
 def family_hues(path):
     rgb = np.asarray(Image.open(path).convert("RGB")).astype(np.float32) / 255.0
@@ -54,16 +59,22 @@ def family_hues(path):
     return Image.fromarray((np.clip(out_rgb, 0, 1) * 255 + 0.5).astype(np.uint8))
 
 geometry = {"single": {}, "section": {}}
-for kind in ("violin", "viola", "cello", "bass"):
+STRINGS = ("violin", "viola", "cello", "bass")
+if raw == "-":
+    for kind in STRINGS:
+        geometry["single"][kind] = kept["single"][kind]
+    geometry["section"], geometry["sectionSize"] = kept["section"], kept["sectionSize"]
+for kind in STRINGS if raw != "-" else ():
     family_hues(os.path.join(raw, "single-%s.png" % kind)).save(os.path.join(out, "%s.jpg" % kind), quality=88, optimize=True)
     g = json.load(open(os.path.join(raw, "single-%s.json" % kind)))
     geometry["single"][kind] = g["instruments"][kind]
     geometry["single"][kind]["size"] = [g["width"], g["height"]]
-family_hues(os.path.join(raw, "section.png")).save(os.path.join(out, "section.jpg"), quality=88, optimize=True)
-family_hues(os.path.join(raw, "section-lit.png")).save(os.path.join(out, "section-lit.jpg"), quality=88, optimize=True)
-g = json.load(open(os.path.join(raw, "section.json")))
-geometry["section"] = g["instruments"]
-geometry["sectionSize"] = [g["width"], g["height"]]
+if raw != "-":
+    family_hues(os.path.join(raw, "section.png")).save(os.path.join(out, "section.jpg"), quality=88, optimize=True)
+    family_hues(os.path.join(raw, "section-lit.png")).save(os.path.join(out, "section-lit.jpg"), quality=88, optimize=True)
+    g = json.load(open(os.path.join(raw, "section.json")))
+    geometry["section"] = g["instruments"]
+    geometry["sectionSize"] = [g["width"], g["height"]]
 
 def brass_geometry(g):
     # the valves (valve 1 first; the horn's thumb valve last) and the trombone's hand at 1st and 7th position: the
@@ -89,7 +100,6 @@ if brass:
     g = json.load(open(os.path.join(brass, "section.json")))
     geometry["brassSection"] = {k: brass_geometry(v) for k, v in g["instruments"].items()}
 else:
-    kept = json.load(open(os.path.join(out, "orchestra.json")))
     for kind in ("trumpet", "trombone", "horn", "tuba"):
         if kind in kept["single"]:
             geometry["single"][kind] = kept["single"][kind]
@@ -103,9 +113,32 @@ if stage:
                          "points": [g["grid"]["%d,%d" % (i, j)] for j in range(29) for i in range(37)],
                          "podium": g["podium"]}
 else:
-    kept = json.load(open(os.path.join(out, "orchestra.json")))
     if "stage" in kept:
         geometry["stage"] = kept["stage"]
+
+# 0.12.0: each woodwind's keys in one order: the left thumb's, the left hand's three, the right hand's three, then its
+# octave / register / whisper key (the flute and piccolo: the right little finger's E-flat key)
+WINDS = ("flute", "piccolo", "oboe", "englishhorn", "clarinet", "bassclarinet", "bassoon", "contrabassoon")
+def wind_geometry(g):
+    p = g["points"]
+    extra = next(n for n in ("Eb", "octave", "register", "whisper") if n in p)
+    return {"area": g["area"], "keys": [p[n] for n in ("thumb", "L1", "L2", "L3", "R1", "R2", "R3", extra)]}
+if winds:
+    for kind in WINDS:
+        family_hues(os.path.join(winds, "single-%s.png" % kind)).save(os.path.join(out, "%s.jpg" % kind), quality=88, optimize=True)
+        g = json.load(open(os.path.join(winds, "single-%s.json" % kind)))
+        geometry["single"][kind] = wind_geometry(g["instruments"][kind])
+        geometry["single"][kind]["size"] = [g["width"], g["height"]]
+    family_hues(os.path.join(winds, "section.png")).save(os.path.join(out, "woodwind-section.jpg"), quality=88, optimize=True)
+    family_hues(os.path.join(winds, "section-lit.png")).save(os.path.join(out, "woodwind-section-lit.jpg"), quality=88, optimize=True)
+    g = json.load(open(os.path.join(winds, "section.json")))
+    geometry["woodwindSection"] = {k: wind_geometry(v) for k, v in g["instruments"].items()}
+else:
+    for kind in WINDS:
+        if kind in kept["single"]:
+            geometry["single"][kind] = kept["single"][kind]
+    if "woodwindSection" in kept:
+        geometry["woodwindSection"] = kept["woodwindSection"]
 with open(os.path.join(out, "orchestra.json"), "w") as f:
     json.dump(geometry, f, indent=1)
 print("wrote", out)

@@ -3,9 +3,18 @@
 #include <array>
 #include <mutex>
 #include <set>
+#include <tuple>
 
 namespace sampler
 {
+    bool Region::usesController (int cc) const noexcept
+    {
+        for (const auto& f : ccFades) if (f.cc == cc) return true;
+        for (const auto& g : gainCC) if (g.first == cc) return true;
+        for (const auto& a : amplitudeCC) if (a.first == cc) return true;
+        return false;
+    }
+
     juce::int64 Region::lastFrame() const noexcept
     {
         const auto length = sample != nullptr ? (juce::int64) sample->length() : 0;
@@ -324,7 +333,11 @@ namespace sampler
         // 0.4.0: each recording's shape and AUTO SUSTAIN points, kept while the recording is in memory, so a program
         // made again from the same samples (a section's split moved) doesn't work them out again. Keyed by the sample
         // (its weak pointer tells a live one from a new one at the same address).
-        struct Analysis { bool sustained = false; bool pointsKnown = false; SustainPoints points; juce::int64 settled = 0; };
+        struct Analysis
+        {
+            bool sustained = false; bool pointsKnown = false; SustainPoints points; juce::int64 settled = 0;
+            std::map<std::tuple<juce::int64, juce::int64, int>, float> likeness;   // 0.11.0: each file loop's
+        };
         std::mutex analysesLock;
         std::map<const Sample*, std::pair<std::weak_ptr<const Sample>, Analysis>> analyses;
 
@@ -337,8 +350,11 @@ namespace sampler
                 for (auto old = analyses.begin(); old != analyses.end();)   // forget samples gone from memory
                     old = old->second.first.expired() ? analyses.erase (old) : std::next (old);
                 Analysis a;
-                a.sustained = isSustained (*sample);
+                // 0.11.0: a streamed recording (its analysis gone with the program that streamed it) can't be looked
+                // at whole again: taken as a short.
+                a.sustained = ! sample->streamed() && isSustained (*sample);
                 a.settled = a.sustained ? settledFrame (*sample) : 0;
+                a.pointsKnown = sample->streamed();
                 it = analyses.insert_or_assign (sample.get(), std::make_pair (std::weak_ptr<const Sample> (sample), a)).first;
             }
             return it->second.second;
@@ -360,7 +376,12 @@ namespace sampler
             if (r.loop != Region::Loop::none)
             {
                 // The file's own loop: its crossfade's curve from how alike its two sides are.
-                r.loopLikeness = loopLikeness (*r.sample, r.loopStart, r.loopEnd, r.loopCrossfade);
+                const auto key = std::make_tuple (r.loopStart, r.loopEnd, r.loopCrossfade);
+                if (const auto known = analysis.likeness.find (key); known != analysis.likeness.end())
+                    r.loopLikeness = known->second;
+                else
+                    r.loopLikeness = analysis.likeness[key] = r.sample->streamed() ? 0.0f
+                                   : loopLikeness (*r.sample, r.loopStart, r.loopEnd, r.loopCrossfade);
                 if (r.legatoStart >= 0)
                     r.legatoStart = juce::jmin (r.legatoStart, juce::jmax (r.offset, r.loopStart));   // (before its loop)
                 continue;
@@ -385,6 +406,76 @@ namespace sampler
             if (r.legatoStart >= 0 && (r.loop != Region::Loop::none || r.autoLoop))
                 r.legatoStart = juce::jmin (r.legatoStart, juce::jmax (r.offset, r.loopStart));   // (before its loop)
         }
+    }
+
+    std::vector<std::pair<juce::int64, juce::int64>> keptInMemory (const Region& r, double headSeconds)
+    {
+        // Where a voice can start or jump to without warning, a head each: the note's start (its random offset and
+        // an ensemble player's 8 ms included), a legato join's start, the tail past its loop (let go: it plays on from
+        // the loop's end); and a few frames round the loop points (the interpolation reads either side of them).
+        const auto rate = r.sample != nullptr ? r.sample->sampleRate : 48000.0;
+        const auto head = (juce::int64) (headSeconds * rate);
+        std::vector<std::pair<juce::int64, juce::int64>> keep;
+        keep.emplace_back (r.offset - 4, r.offset + r.offsetRandom + (juce::int64) (0.008 * rate) + head);
+        if (r.legatoStart >= 0)
+            keep.emplace_back (r.legatoStart - 4, r.legatoStart + (juce::int64) (0.008 * rate) + head);
+        if ((r.loop != Region::Loop::none || r.autoLoop) && r.loopEnd > r.loopStart)
+        {
+            keep.emplace_back (r.loopStart - 4, r.loopStart + 4);
+            keep.emplace_back (r.loopEnd - 4, r.loopEnd + head);
+        }
+        return keep;
+    }
+
+    void streamSamples (Program& program, double headSeconds)
+    {
+        // Each recording once: what all its regions need kept, then made streamed if that's under 70% of it (a short
+        // one stays whole). Its analysis goes with it (a section's split moved uses it again).
+        std::map<const Sample*, std::vector<std::pair<juce::int64, juce::int64>>> needs;
+        for (const auto& r : program.regions)
+            if (r.sample != nullptr && ! r.sample->streamed())
+            {
+                auto& keep = needs[r.sample.get()];
+                const auto more = keptInMemory (r, headSeconds);
+                keep.insert (keep.end(), more.begin(), more.end());
+            }
+        std::map<const Sample*, std::shared_ptr<const Sample>> made;
+        {
+            const std::scoped_lock lock (analysesLock);
+            for (auto& r : program.regions)
+            {
+                if (r.sample == nullptr || r.sample->streamed())
+                    continue;
+                auto it = made.find (r.sample.get());
+                if (it == made.end())
+                {
+                    std::shared_ptr<const Sample> streamed;
+                    // (under 2 s it stays whole: small, and streaming shorts only adds disk reads to fast playing)
+                    const auto longEnough = (double) r.sample->length() >= shortestStreamedSeconds * r.sample->sampleRate;
+                    if (auto trimmed = longEnough ? sampleFiles::streamedFrom (*r.sample, needs[r.sample.get()]) : nullptr;
+                        trimmed != nullptr && (double) trimmed->bytes() < 0.7 * (double) r.sample->wholeBytes())
+                    {
+                        streamed = trimmed;
+                        const auto known = analyses.find (r.sample.get());
+                        if (known != analyses.end() && known->second.first.lock() == r.sample)
+                            analyses.insert_or_assign (streamed.get(), std::make_pair (std::weak_ptr<const Sample> (streamed), known->second.second));
+                    }
+                    it = made.emplace (r.sample.get(), streamed).first;
+                }
+                if (it->second != nullptr)
+                    r.sample = it->second;
+            }
+        }
+        // What it holds in memory now, and would whole.
+        std::set<const Sample*> counted;
+        program.bytes = 0;
+        program.wholeBytes = 0;
+        for (const auto& r : program.regions)
+            if (r.sample != nullptr && counted.insert (r.sample.get()).second)
+            {
+                program.bytes += r.sample->bytes();
+                program.wholeBytes += r.sample->wholeBytes();
+            }
     }
 
     std::shared_ptr<Program> programFrom (std::shared_ptr<const Sample> sample, int keyCenter)
@@ -567,13 +658,182 @@ namespace sampler
                     "ampeg_delay", "ampeg_attack", "ampeg_hold", "ampeg_decay", "ampeg_sustain", "ampeg_release",
                     "bend_up", "bend_down", "trigger", "default_path", "note_offset", "octave_offset",
                     "sw_lokey", "sw_hikey", "sw_last", "sw_lolast", "sw_hilast", "sw_default", "sw_label",
-                    "loop_mode", "loopmode", "loop_start", "loopstart", "loop_end", "loopend", "loop_crossfade", "ampeg_dynamic" };
+                    "loop_mode", "loopmode", "loop_start", "loopstart", "loop_end", "loopend", "loop_crossfade", "ampeg_dynamic",
+                    // 0.9.0
+                    "rt_decay", "fil_type", "filtype", "cutoff", "resonance", "fil_keytrack", "fil_keycenter", "fil_veltrack",
+                    "fil2_type", "cutoff2", "resonance2", "fil2_keytrack", "fil2_keycenter", "fil2_veltrack",
+                    "xf_cccurve", "xf_velcurve", "xf_keycurve", "xfin_lovel", "xfin_hivel", "xfout_lovel", "xfout_hivel",
+                    "xfin_lokey", "xfin_hikey", "xfout_lokey", "xfout_hikey",
+                    "ampeg_vel2delay", "ampeg_vel2attack", "ampeg_vel2hold", "ampeg_vel2decay", "ampeg_vel2sustain", "ampeg_vel2release",
+                    "amp_keytrack", "amp_keycenter", "pitch_veltrack", "delay", "delay_random", "offset_random",
+                    "group_volume", "master_volume", "global_volume", "group_tune", "master_tune", "global_tune",
+                    "group_amplitude", "master_amplitude", "global_amplitude", "width", "group", "off_by", "off_mode", "off_time",
+                    "amplfo_depth", "amplfo_freq", "amplfo_delay", "amplfo_fade", "sustain_cc" };
                 return names;
+            }
+            // 0.9.0: the opcodes with a controller's number in their name (gain_cc1, xfin_locc1, amp_velcurve_64...).
+            bool isNumbered (const juce::String& opcode)
+            {
+                static const juce::StringArray prefixes { "gain_cc", "gain_oncc", "volume_oncc", "amplitude_cc", "amplitude_oncc",
+                                                          "cutoff_cc", "cutoff_oncc", "cutoff2_cc", "cutoff2_oncc",
+                                                          "xfin_locc", "xfin_hicc", "xfout_locc", "xfout_hicc", "amp_velcurve_",
+                                                          "locc", "hicc", "on_locc", "on_hicc", "set_cc",
+                                                          "ampeg_delaycc", "ampeg_attackcc", "ampeg_holdcc", "ampeg_decaycc",
+                                                          "ampeg_sustaincc", "ampeg_releasecc", "ampeg_delay_oncc", "ampeg_attack_oncc",
+                                                          "ampeg_hold_oncc", "ampeg_decay_oncc", "ampeg_sustain_oncc", "ampeg_release_oncc" };
+                for (const auto& prefix : prefixes)
+                    if (opcode.startsWith (prefix) && opcode.length() > prefix.length()
+                        && opcode.substring (prefix.length()).containsOnly ("0123456789"))
+                        return true;
+                return false;
             }
             bool doesNothingToSound (const juce::String& opcode)
             {
                 return opcode.startsWith ("control.") || opcode.endsWith ("_label") || opcode.startsWith ("label_cc") || opcode.startsWith ("hint_")
-                    || opcode == "group" || opcode == "output" || opcode == "polyphony" || opcode == "note_polyphony";
+                    || opcode == "output" || opcode == "polyphony" || opcode == "note_polyphony";
+            }
+        }
+
+        namespace
+        {
+            // 0.9.0: the opcodes Sfz.h lists under 0.9.0, into a region (and the program's controllers).
+            void readMore (const Opcodes& op, Region& r, const std::function<int (const juce::String&)>& keyOf, Program& program)
+            {
+                if (const auto* t = find (op, "trigger"))
+                {
+                    const auto name = t->toLowerCase();
+                    r.trigger = name == "release" ? Region::Trigger::release : name == "release_key" ? Region::Trigger::releaseKey
+                              : name == "first" ? Region::Trigger::first : name == "legato" ? Region::Trigger::legato : Region::Trigger::attack;
+                }
+                r.rtDecay = juce::jmax (0.0f, number (op, "rt_decay", 0.0f));
+                const auto filterType = [] (const juce::String& name)
+                {
+                    using T = Region::Filter::Type;
+                    const auto n = name.toLowerCase();
+                    if (n.startsWith ("lpf_1p")) return T::lowpass1;
+                    if (n.startsWith ("lpf")) return T::lowpass2;
+                    if (n.startsWith ("hpf_1p")) return T::highpass1;
+                    if (n.startsWith ("hpf")) return T::highpass2;
+                    if (n.startsWith ("bpf")) return T::bandpass2;
+                    if (n.startsWith ("brf") || n.startsWith ("notch")) return T::notch2;
+                    return T::none;
+                };
+                for (int f = 0; f < 2; ++f)
+                {
+                    auto& filter = r.filters[(size_t) f];
+                    const juce::String fil (f == 0 ? "fil_" : "fil2_"), suffix (f == 0 ? "" : "2");
+                    const auto* cutoff = find (op, ("cutoff" + suffix).toRawUTF8());
+                    if (cutoff == nullptr)
+                        continue;
+                    const auto* type = find (op, (fil + "type").toRawUTF8());
+                    if (type == nullptr && f == 0)
+                        type = find (op, "filtype");
+                    filter.type = type != nullptr ? filterType (*type) : Region::Filter::Type::lowpass2;   // (SFZ's default: lpf_2p)
+                    filter.cutoff = juce::jmax (1.0f, cutoff->getFloatValue());
+                    filter.resonance = juce::jlimit (0.0f, 40.0f, number (op, ("resonance" + suffix).toRawUTF8(), 0.0f));
+                    filter.keytrack = number (op, (fil + "keytrack").toRawUTF8(), 0.0f);
+                    filter.veltrack = number (op, (fil + "veltrack").toRawUTF8(), 0.0f);
+                    if (const auto* centre = find (op, (fil + "keycenter").toRawUTF8()); centre != nullptr && keyOf (*centre) >= 0)
+                        filter.keycenter = keyOf (*centre);
+                }
+                const auto power = [] (const juce::String* curve) { return curve == nullptr || curve->toLowerCase() != "gain"; };
+                r.ccFadePower = power (find (op, "xf_cccurve"));
+                r.velFadePower = power (find (op, "xf_velcurve"));
+                r.keyFadePower = power (find (op, "xf_keycurve"));
+                const auto whole = [&op] (const char* key) { const auto* v = find (op, key); return v != nullptr ? juce::jlimit (0, 127, v->getIntValue()) : -1; };
+                r.xfinLoVel = whole ("xfin_lovel");   r.xfinHiVel = whole ("xfin_hivel");
+                r.xfoutLoVel = whole ("xfout_lovel"); r.xfoutHiVel = whole ("xfout_hivel");
+                const auto key = [&op, &keyOf] (const char* name) { const auto* v = find (op, name); return v != nullptr ? keyOf (*v) : -1; };
+                r.xfinLoKey = key ("xfin_lokey");   r.xfinHiKey = key ("xfin_hikey");
+                r.xfoutLoKey = key ("xfout_lokey"); r.xfoutHiKey = key ("xfout_hikey");
+                static const char* stageNames[] = { "delay", "attack", "hold", "decay", "sustain", "release" };
+                for (int i = 0; i < 6; ++i)
+                    r.velToEnvelope[(size_t) i] = number (op, (juce::String ("ampeg_vel2") + stageNames[i]).toRawUTF8(), 0.0f) * (i == 4 ? 0.01f : 1.0f);
+                r.ampKeytrack = number (op, "amp_keytrack", 0.0f);
+                if (const auto* centre = find (op, "amp_keycenter"); centre != nullptr && keyOf (*centre) >= 0)
+                    r.ampKeycenter = keyOf (*centre);
+                r.pitchVeltrack = number (op, "pitch_veltrack", 0.0f);
+                r.startDelay = juce::jmax (0.0f, number (op, "delay", 0.0f));
+                r.startDelayRandom = juce::jmax (0.0f, number (op, "delay_random", 0.0f));
+                r.offsetRandom = juce::jmax<juce::int64> (0, (juce::int64) number (op, "offset_random", 0.0f));
+                r.width = juce::jlimit (-1.0f, 1.0f, number (op, "width", 100.0f) / 100.0f);
+                r.group = (int) number (op, "group", 0.0f);
+                r.offBy = (int) number (op, "off_by", 0.0f);
+                if (const auto* mode = find (op, "off_mode"))
+                    r.offMode = mode->toLowerCase() == "normal" ? Region::OffMode::normal : mode->toLowerCase() == "time" ? Region::OffMode::time : Region::OffMode::fast;
+                if (r.offMode == Region::OffMode::time)
+                    r.offTime = juce::jmax (0.001f, number (op, "off_time", 0.006f));
+                r.lfoDepth = number (op, "amplfo_depth", 0.0f);
+                r.lfoFreq = juce::jmax (0.0f, number (op, "amplfo_freq", 0.0f));
+                r.lfoDelay = juce::jmax (0.0f, number (op, "amplfo_delay", 0.0f));
+                r.lfoFade = juce::jmax (0.0f, number (op, "amplfo_fade", 0.0f));
+                if (const auto* pedal = find (op, "sustain_cc"))
+                    program.sustainCC = juce::jlimit (0, 127, pedal->getIntValue());
+
+                // The numbered ones.
+                std::map<int, int> loCC, hiCC, xfinLo, xfinHi, xfoutLo, xfoutHi;
+                for (const auto& [k, v] : op)
+                {
+                    const auto opcode = k.startsWith ("control.") ? k.fromFirstOccurrenceOf ("control.", false, false) : k;
+                    const auto tail = [&opcode] (const char* prefix) -> int
+                    {
+                        const juce::String p (prefix);
+                        if (! opcode.startsWith (p) || opcode.length() == p.length() || ! opcode.substring (p.length()).containsOnly ("0123456789"))
+                            return -1;
+                        return opcode.substring (p.length()).getIntValue();
+                    };
+                    const auto value = v.getFloatValue();
+                    int n;
+                    if ((n = tail ("set_cc")) >= 0 && n < 128)
+                        program.initialCC[(size_t) n] = juce::jlimit (0, 127, (int) value);
+                    else if ((n = tail ("label_cc")) >= 0 && n < 128)
+                        program.ccLabels[n] = v.trim();
+                    if (k.startsWith ("control."))
+                        continue;
+                    if ((n = tail ("gain_cc")) >= 0 || (n = tail ("gain_oncc")) >= 0 || (n = tail ("volume_oncc")) >= 0)
+                        r.gainCC.push_back ({ n, value });
+                    else if ((n = tail ("amplitude_cc")) >= 0 || (n = tail ("amplitude_oncc")) >= 0)
+                        r.amplitudeCC.push_back ({ n, value });
+                    else if ((n = tail ("cutoff_cc")) >= 0 || (n = tail ("cutoff_oncc")) >= 0)
+                        r.filters[0].cc.push_back ({ n, value });
+                    else if ((n = tail ("cutoff2_cc")) >= 0 || (n = tail ("cutoff2_oncc")) >= 0)
+                        r.filters[1].cc.push_back ({ n, value });
+                    else if ((n = tail ("xfin_locc")) >= 0) xfinLo[n] = (int) value;
+                    else if ((n = tail ("xfin_hicc")) >= 0) xfinHi[n] = (int) value;
+                    else if ((n = tail ("xfout_locc")) >= 0) xfoutLo[n] = (int) value;
+                    else if ((n = tail ("xfout_hicc")) >= 0) xfoutHi[n] = (int) value;
+                    else if ((n = tail ("amp_velcurve_")) >= 0 && n < 128)
+                        r.velCurve.push_back ({ n, juce::jlimit (0.0f, 1.0f, value) });
+                    else if ((n = tail ("locc")) >= 0 || (n = tail ("on_locc")) >= 0) loCC[n] = (int) value;
+                    else if ((n = tail ("hicc")) >= 0 || (n = tail ("on_hicc")) >= 0) hiCC[n] = (int) value;
+                    else
+                        for (int i = 0; i < 6; ++i)
+                        {
+                            const auto base = juce::String ("ampeg_") + stageNames[i];
+                            if ((n = tail ((base + "cc").toRawUTF8())) >= 0 || (n = tail ((base + "_oncc").toRawUTF8())) >= 0)
+                            {
+                                r.ccToEnvelope[(size_t) i].push_back ({ n, value * (i == 4 ? 0.01f : 1.0f) });
+                                break;
+                            }
+                        }
+                }
+                for (const auto& [cc, lo] : loCC)
+                    r.ccConditions.push_back ({ cc, juce::jlimit (0, 127, lo), hiCC.count (cc) ? juce::jlimit (0, 127, hiCC[cc]) : 127 });
+                for (const auto& [cc, hi] : hiCC)
+                    if (! loCC.count (cc))
+                        r.ccConditions.push_back ({ cc, 0, juce::jlimit (0, 127, hi) });
+                for (const auto& [cc, lo] : xfinLo)
+                    r.ccFades.push_back ({ cc, lo, xfinHi.count (cc) ? xfinHi[cc] : 127, true });
+                for (const auto& [cc, lo] : xfoutLo)
+                    r.ccFades.push_back ({ cc, lo, xfoutHi.count (cc) ? xfoutHi[cc] : 127, false });
+                if (! r.velCurve.empty())
+                {
+                    std::sort (r.velCurve.begin(), r.velCurve.end());
+                    if (r.velCurve.front().first > 0) r.velCurve.insert (r.velCurve.begin(), { 0, 0.0f });
+                    if (r.velCurve.back().first < 127) r.velCurve.push_back ({ 127, 1.0f });
+                }
+                if (r.usesController (1))
+                    program.ownWheel = true;
             }
         }
 
@@ -622,7 +882,7 @@ namespace sampler
                         if (mode != "one_shot" && mode != "no_loop" && mode != "loop_continuous" && mode != "loop_sustain")
                             ++unread[k + "=" + v];
                     }
-                    else if (! readOpcodes().count (k) && ! doesNothingToSound (k))
+                    else if (! readOpcodes().count (k) && ! isNumbered (k) && ! doesNothingToSound (k))
                         ++unread[k];
                 // The <control> in force here.
                 const auto controlValue = [&op] (const char* name, const juce::String& otherwise = {})
@@ -645,11 +905,7 @@ namespace sampler
                     ++skippedGenerators;   // *sine, *silence...: SFZ's built-in sounds, not read
                     continue;
                 }
-                if (const auto* trigger = find (op, "trigger"); trigger != nullptr && trigger->toLowerCase() != "attack")
-                {
-                    ++skippedRelease;      // release / first / legato samples (plan stage 2)
-                    continue;
-                }
+                // 0.9.0: release / first / legato samples are read (their trigger below).
 
                 Region r;
                 if (const auto* key = find (op, "key"); key != nullptr && keyOf (*key) >= 0)
@@ -668,9 +924,14 @@ namespace sampler
                 r.seqLength = juce::jmax (1, (int) number (op, "seq_length", 1.0f));
                 r.seqPosition = juce::jlimit (1, r.seqLength, (int) number (op, "seq_position", 1.0f));
                 r.keytrack = number (op, "pitch_keytrack", 100.0f);
-                r.tuneCents = number (op, "tune", number (op, "pitch", 0.0f)) + 100.0f * number (op, "transpose", 0.0f);
-                r.gain = juce::Decibels::decibelsToGain (number (op, "volume", number (op, "gain", 0.0f)), -144.0f)
-                       * juce::jlimit (0.0f, 1.0f, number (op, "amplitude", 100.0f) / 100.0f);
+                r.tuneCents = number (op, "tune", number (op, "pitch", 0.0f)) + 100.0f * number (op, "transpose", 0.0f)
+                            + number (op, "group_tune", 0.0f) + number (op, "master_tune", 0.0f) + number (op, "global_tune", 0.0f);
+                r.gain = juce::Decibels::decibelsToGain (number (op, "volume", number (op, "gain", 0.0f)) + number (op, "group_volume", 0.0f)
+                                                          + number (op, "master_volume", 0.0f) + number (op, "global_volume", 0.0f), -144.0f)
+                       * juce::jlimit (0.0f, 1.0f, number (op, "amplitude", 100.0f) / 100.0f)
+                       * juce::jlimit (0.0f, 1.0f, number (op, "group_amplitude", 100.0f) / 100.0f)
+                       * juce::jlimit (0.0f, 1.0f, number (op, "master_amplitude", 100.0f) / 100.0f)
+                       * juce::jlimit (0.0f, 1.0f, number (op, "global_amplitude", 100.0f) / 100.0f);
                 r.pan = juce::jlimit (-1.0f, 1.0f, number (op, "pan", 0.0f) / 100.0f);
                 r.velTrack = juce::jlimit (0.0f, 1.0f, number (op, "amp_veltrack", 100.0f) / 100.0f);
                 r.offset = juce::jmax<juce::int64> (0, (juce::int64) number (op, "offset", 0.0f));
@@ -727,6 +988,8 @@ namespace sampler
                                                                 : "Keyswitch " + juce::MidiMessage::getMidiNoteName (r.swLoLast, true, true, 4) });
                     }
                 }
+                // 0.9.0: the rest (see Sfz.h).
+                readMore (op, r, keyOf, *program);
                 const auto crossfadeSeconds = juce::jmax (0.0f, number (op, "loop_crossfade", 0.0f));
                 r.bendUp = number (op, "bend_up", 200.0f);
                 r.bendDown = number (op, "bend_down", -200.0f);

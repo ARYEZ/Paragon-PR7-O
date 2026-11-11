@@ -1,5 +1,156 @@
 # Changelog
 
+## 0.13.0
+
+**GET the two free orchestras from inside the plugin, and ready-made sections in two expansion banks** (you: "do both
+libraries with GET buttons"; then, after the preset mock-up: "Build it").
+
+- **GET buttons** in the library browser (LOAD): one click downloads and unpacks **VSCO 2 Community Edition** (about
+  2.4 GB) or the **Sonatina Symphonic Orchestra** (about 1.4 GB) into a "Libraries" folder beside your presets, with
+  progress and CANCEL. A downloaded library is listed by its name ("VSCO 2 CE", "SONATINA") with your own folders.
+  Both libraries are credited on SETTINGS > THE SOUNDS. (The downloads themselves couldn't be tried here: this
+  machine's network won't fetch those archives. The tests download and unpack a small stand-in archive the same way.)
+- **Presets that work on any computer:** an instrument from a downloaded library is saved by its place in the library,
+  not by your disk's path, so a preset or project opened on another computer finds it there too (or in a copy of the
+  library you added yourself). If the library isn't there, the INSTRUMENT page says which one to GET.
+- **Two expansion banks** on the PRESETS page, after banks A-E (A-E now sit side by side on one row, the expansions
+  under their own heading):
+  - **VSCO ORCHESTRA** (VO01-VO08): String Section, String Section Wide (three players a part, spread wide),
+    Pizzicato Strings, Tremolo Strings, Brass Section, Epic Brass (doubled an octave down), Woodwind Section, Chamber
+    Woodwinds (LEGATO on, a Studio's sound).
+  - **SONATINA** (SO01-SO06): Sonatina Strings (five parts: 1st and 2nd violins), Sonatina Pizzicato, Sonatina
+    Brass, Sonatina Woodwinds, Sonatina Full Woodwinds (all eight, contrabassoon to piccolo, split by register),
+    Sonatina Choir.
+  - Each is a whole section across the keyboard, every instrument on its own stretch, with dynamics on the mod wheel
+    and STAGE on (each part where an orchestra seats it). The panel shows each part's keys (THE LAYOUT), what the bank
+    is, and, when its library isn't downloaded yet, says so with a GET button right there.
+  - Sonatina's presets carry its name ("Sonatina Strings") because PR7-O finds a factory preset by its name (in your
+    projects and THE DEFAULT), so two can't share one.
+  - Saving a copy of an expansion preset (SAVE CURRENT SOUND AS NEW) files it in bank A: the expansion banks hold their
+    own presets only.
+  - The splits are the plugin's own rule worked out on the real files, except Sonatina's eight woodwinds (set by hand:
+    the rule put the bass clarinet above the bassoons). Not checked here: how they sound to your ears.
+
+## 0.12.1
+
+**A crash fixed, and the orchestra takes about a third less of your computer** (your PR7-S log; you: "run another round
+of optimization").
+
+- **The crash:** the window could crash a few seconds after you opened the library browser (LOAD), on a window tall
+  enough for its SECTIONS list to show empty rows under the seven sections. Those empty rows asked for an eighth
+  section's name from a list of seven, which read whatever was next in memory and crashed. Found by matching your log's
+  crash addresses against the released 0.12.0 Windows build. Every list in the browser now ignores rows past its
+  contents. (PR7-S shows PR7-O as "0.2.0": that's the version it remembers from its first scan, not what you have; a
+  plugin rescan in PR7-S should update it.)
+- **Faster, sounding exactly the same:** measured on VSCO's string section, a dense ten-note chord with four players
+  on the mod wheel went from 8.9% to about 5.7% of one CPU core; with STAGE from 10% to about 6.3%; with both octave
+  doublings from 21% to about 13%. A long test passage (strings with every feature on, a Sonatina organ with release
+  samples, a flute) came out identical to 0.12.0, sample for sample.
+  - Each recording's two sides are now read together, straight from memory or the disk stream's buffer, instead of
+    one frame at a time through a safety check each.
+  - With DYNAMICS on the mod wheel, every velocity layer of a held note plays and the wheel fades between them; the
+    layers the wheel has at nothing are no longer read and mixed, only kept moving, so they're in the right place when
+    the wheel brings them in.
+
+## 0.12.0
+
+**THE WOODWINDS: pictures, and each note's fingering lit** (you: "Build it, and add the three Sonatina ones too" after
+the mock-up). Load a woodwind and the INSTRUMENT page shows it, in the same neon look as the strings and brass: our own
+**flute, piccolo, oboe, English horn, clarinet, bass clarinet, bassoon and contrabassoon**, each lying across.
+- **The keys a player closes for the note glow** (the highest note held: they play one at a time): the six main
+  fingers, the left thumb's key, and the octave key (oboe, English horn), register key (clarinets), whisper key
+  (bassoons) or the little finger's E-flat key (flute, piccolo). The clarinets, piccolo, English horn and contrabassoon
+  read their written notes, as their players do.
+- **A woodwind section** shows flute and piccolo on top, oboe and clarinet under them and the bassoon across the
+  bottom, each part glowing while it plays. An English horn, bass clarinet or contrabassoon part lights its family's
+  instrument there (the oboe, clarinet, bassoon) unless that one has its own part.
+- On the stage, a contrabassoon now sits with the bassoons (it was put with the double basses: "contrabass" is in its
+  name).
+
+Worth knowing: the fingering chart is our own simplified one, from the usual published charts: only those eight keys,
+so notes that differ only by a side, trill or little-finger key look the same (B-flat and B, for example). Where we
+weren't sure, or the note needs keys we don't show, nothing lights: the flute from B-flat6 up, the oboe from C#6, the
+clarinet above its C6 (written), and the bassoon between E-flat3 and F#3 and from B-flat3 up (its tenor notes use
+half-holing and flicking). Real players also use other fingerings for some notes. The mock-up's clarinet showed the
+wrong keys for its note (written D: it's thumb and the first two fingers); the built one follows the chart.
+
+## 0.11.0
+
+**THE LIBRARY, and instruments that stream from disk** (the plan's stage 3; you: "Build it" after the browser
+mock-up, then "Release it as 0.11.0").
+
+**The library browser.** LOAD now opens a browser over the INSTRUMENT page instead of a file box. Add the folders your
+libraries are in once (ADD FOLDER...: VSCO 2 CE, Sonatina, any plain WAV + SFZ library); PR7-O remembers them for every
+project. It sorts every instrument file into a **section** (strings, brass, woodwinds, percussion, keys & harp, choir)
+and an **instrument** (Violins, Solo Violin, Horns...) by its name: our own rule, made from the names VSCO and Sonatina
+use. Click a file to see its keys and articulations, LOAD it, or ADD TO SECTION to build a section file by file (LOAD
+SECTION). A search box looks through every section ("pizz", "horn"). OPEN FILE... is still there for anything else.
+
+**Disk streaming.** Until now every recording was loaded whole into memory: VSCO's string section took 450 MB, all of
+VSCO 5.6 GB. Now a long recording keeps only a few short stretches in memory (its first half second, where a legato
+join starts it, the start of its tail after its loop) and the rest is read from disk just ahead of where it's playing,
+loops included. Measured on VSCO: the string section is 73 MB in memory, all 75 VSCO instruments 811 MB.
+- **It sounds the same.** A test passage (a 10-note chord on the string section with four players on the mod wheel and
+  a legato line over it: 92 recordings streaming at once) came out identical, sample for sample, to the same passage
+  played from memory, both bounced and played live at real speed from a cold disk; the same for Sonatina's violins,
+  horn and organ (its release samples too).
+- **Bouncing** (offline export) always waits for the disk, so a bounce is always complete.
+- **Playing live**, if a disk ever couldn't keep up, the missing moments would be silent rather than stall your DAW.
+  It never happened in our tests, but they ran on a fast SSD: a slow hard disk with a very big chord is the case we
+  couldn't check here.
+- The INSTRUMENT page's info shows the split ("MEMORY 72.8 MB in memory, 376.7 MB streamed from disk as it plays").
+- Recordings under 2 s (staccatos, pizzicatos) stay whole in memory: streaming them would save little.
+
+Nothing changes in your projects or presets.
+
+## 0.10.0
+
+**THE ENSEMBLE: a bigger section, and lines doubled in octaves** (the plan's next step; you: "Build it" after the
+mock-up, then "Release it as 0.10.0" after the demos). A fourth page on the rack, **ENSEMBLE**:
+- **PLAYERS** (x1 to x4): each note played by more players. Each extra one is a little out of tune (**DETUNE**, up to 8
+  cents to start), comes in a little later (**TIMING**, up to 12 ms: never earlier, so what you play stays on time),
+  starts a moment further into its recording and sits either side of the first. The level holds: a solo violin with
+  four players is as loud as with one, just bigger.
+- **DOUBLE** (off, octave up, octave down, both) at **DOUBLE LEVEL** (-6 dB to start): every note doubled as
+  orchestrators do. In a section, the doubled note is played by whichever part has that key (a violin line doubled an
+  octave down comes out of the violas and cellos). The doubled notes end with the key you played, count as the same note
+  for POLYPHONY, and follow a LEGATO join.
+
+Both start off (x1, no doubling): your projects and presets sound as before.
+
+Worth knowing: extra players are copies of the same recording made to differ, not new players: pushed hard (big DETUNE
+and TIMING) they can sound like a chorus effect; the starting values are small for that reason.
+
+Not checked: listening beyond the demos you heard.
+
+## 0.9.0
+
+**More of the SFZ format: other open libraries now play as their makers wrote them** (you: "Let's implement what's
+left on the plan"; this is its first step). VSCO 2 CE used little of SFZ; **Sonatina Symphonic Orchestra**, the plan's
+second library (free, Creative Commons Sampling Plus), uses much more, and PR7-O skipped it. Counted over Sonatina's 762
+files, PR7-O now reads and plays:
+- **Release samples:** sounds that play when you let a key go (Sonatina's organ: the pipes stopping), after the sustain
+  pedal too, quieter the longer the key was held; and **first / legato samples**, Sonatina's own legato: a different
+  recording for the first note of a phrase and for notes played over a held one.
+- **Filters:** the files' own tone shaping (low-pass, high-pass, band-pass, notch), following the key, the velocity and
+  the mod wheel. Sonatina's mod wheel brightens as well as swells.
+- **The files' own mod wheel crossfades** between soft and loud recordings, and level from controllers. When a file
+  does this itself, PR7-O's own MOD WHEEL dynamics leaves it alone.
+- **Crossfades on velocity and keys**, velocity curves, level by key, pitch by velocity, the envelope moved by velocity
+  and controllers.
+- **Groups** (a new note cutting off an old one), a start held back, a random start point, stereo width, a slow level
+  wobble, controller starting values (Sonatina's violins start their mod wheel at 96).
+
+Checked on five Sonatina instruments (violins sustain and legato, solo horn legato, trumpets marcato, an organ stop):
+all load with no problems, and the files' own controls work (the violins swell 17 dB and brighten on the mod wheel; the
+organ's release samples sound as each chord is let go). VSCO 2 CE plays exactly as before.
+
+Not read yet: the newer numbered LFOs and envelopes some files use (Sonatina's strings add vibrato with them on CC 21,
+which the files themselves start at 0: at their defaults you hear no difference), equalisers, and custom curves. They're
+listed in the instrument's info as before.
+
+Not checked: listening.
+
 ## 0.8.0
 
 **THE STAGE** (you: "Let's do the stage", then "Build it" after the mock-up). Each part of what you load now has a

@@ -48,6 +48,15 @@ namespace ParamIDs
     inline constexpr auto stageDecay     = "stageDecay";
     inline constexpr auto stageSpread    = "stageSpread";
     inline const juce::StringArray stageRoomNames { "Studio", "Scoring Stage", "Concert Hall", "Cathedral" };   // by index: only append
+    // 0.10.0 (version hint 46): THE ENSEMBLE. PLAYERS (1-4: each note played by that many copies, each a little out of
+    // tune by up to DETUNE cents, later by up to TIMING ms (never earlier), across the width), DOUBLE (doubleNames: every note
+    // also an octave up / down / both) at DOUBLE LEVEL (dB). In presets; 1 player and no doubling by default.
+    inline constexpr auto ensPlayers     = "ensPlayers";
+    inline constexpr auto ensDetune      = "ensDetune";
+    inline constexpr auto ensTiming      = "ensTiming";
+    inline constexpr auto ensDouble      = "ensDouble";
+    inline constexpr auto ensDoubleLevel = "ensDoubleLevel";
+    inline const juce::StringArray doubleNames { "Off", "Octave Up", "Octave Down", "Octaves Up + Down" };   // by index: only append
     inline constexpr auto instGlide  = "instGlide";
     // Global, like OUTPUT: they suit the player's controller, not a sound.
     inline constexpr auto midiChannel = "midiChannel";       // midiChannelNames' index (0: any)

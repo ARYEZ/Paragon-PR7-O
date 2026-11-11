@@ -64,6 +64,7 @@ namespace stage
         if (has ({ "trumpet", "tpt", "cornet" }))                            return place ("TRUMPETS");
         if (has ({ "english horn", "englishhorn", "cor anglais", "oboe" }))  return place ("OBOES");
         if (has ({ "horn" }))                                                return place ("HORNS");
+        if (has ({ "contrabassoon", "contra bassoon", "contrafagott" }))     return place ("BASSOONS");   // (0.12.0: not a double bass)
         if (has ({ "contrabass", "double bass", "doublebass", "string bass" }) || (n.contains ("bass") && ! has ({ "bassoon", "clarinet", "drum", "flute" })))
             return place ("BASSES");
         if (has ({ "flute", "piccolo", "fl " }))                             return place ("FLUTES");

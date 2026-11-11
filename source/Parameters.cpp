@@ -15,6 +15,7 @@ namespace
     constexpr int pr7o020 = 43;   // PR7-O 0.2.0: DYNAMICS, AUTO SUSTAIN
     constexpr int pr7o070 = 44;   // PR7-O 0.7.0: LEGATO, GLIDE
     constexpr int pr7o080 = 45;   // PR7-O 0.8.0: THE STAGE
+    constexpr int pr7o0100 = 46;  // PR7-O 0.10.0: THE ENSEMBLE
 
     const ToText asDb = [] (float value, int) { return juce::String (value, 1) + " dB"; };
     const ToText asPercent = [] (float value, int) { return juce::String (juce::roundToInt (value * 100.0f)) + "%"; };
@@ -100,6 +101,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         add (layout, stageDecay, "Decay", logRange (0.5, 2.0), 1.0f,
              [] (float v, int) { return "x" + juce::String (v, 2); }, pr7o080);
         add (layout, stageSpread, "Spread", { 0.0f, 1.5f, 0.01f }, 1.0f, asPercent, pr7o080);
+        add (layout, ensPlayers, "Players", { 1.0f, 4.0f, 1.0f }, 1.0f, [] (float v, int) { return "x" + juce::String (juce::roundToInt (v)); }, pr7o0100);
+        add (layout, ensDetune, "Detune", { 0.0f, 30.0f, 0.1f }, 8.0f, [] (float v, int) { return juce::String (v, 1) + " ct"; }, pr7o0100);
+        add (layout, ensTiming, "Timing", { 0.0f, 40.0f, 0.1f }, 12.0f, [] (float v, int) { return juce::String (juce::roundToInt (v)) + " ms"; }, pr7o0100);
+        addChoice (layout, ensDouble, "Double", doubleNames, 0, pr7o0100);
+        add (layout, ensDoubleLevel, "Double Level", { -24.0f, 0.0f, 0.1f }, -6.0f, asDb, pr7o0100);
         addChoice (layout, midiChannel, "MIDI Channel", midiChannelNames, 0, pr7o010);
         addChoice (layout, noteNames, "Note Names", notenames::choiceNames, 0, pr7o010);
     }

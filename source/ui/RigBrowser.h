@@ -1,5 +1,7 @@
 #pragma once
 
+#include "library/Downloads.h"
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "PluginProcessor.h"
@@ -12,7 +14,8 @@
 //           tags, what it uses, and the buttons to act on it
 class RigBrowser final : public juce::Component,
                          private juce::ListBoxModel,
-                         private juce::ChangeListener
+                         private juce::ChangeListener,
+                         private juce::Timer
 {
 public:
     explicit RigBrowser (ParagonX1AudioProcessor&);
@@ -39,6 +42,7 @@ private:
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void timerCallback() override;   // 0.13.0: a library downloading for the chosen preset
 
     void refreshList();
     void showDetails();
@@ -79,6 +83,16 @@ public:
     juce::TextButton& getDefaultButton() noexcept { return defaultButton; }   // tests
 private:
 
-    juce::Rectangle<int> sidebarArea, detailsArea;
+    juce::Rectangle<int> sidebarArea, detailsArea, expansionsHeading;
+    // 0.13.0: the library the chosen preset plays when it isn't downloaded (null: none needed), its GET button.
+    const downloads::Library* neededLibrary = nullptr;
+    juce::TextButton getButton;
+public:
+    juce::TextButton& getGetButton() noexcept { return getButton; }   // tests
+    const downloads::Library* getNeededLibrary() const noexcept { return neededLibrary; }
+    void selectForTest (const RigLibrary::Entry* e) { selectEntry (e); refreshList(); }
+    juce::String getInfoText() const { return info.getText(); }
+    juce::Rectangle<int> getExpansionsHeading() const noexcept { return expansionsHeading; }
+private:
     std::unique_ptr<juce::AlertWindow> dialog;
 };

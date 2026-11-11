@@ -59,7 +59,10 @@ namespace sampler
     void Sampler::reset() noexcept
     {
         for (auto& v : voices)
+        {
+            endStream (v);
             v = Voice {};
+        }
         for (auto& h : held)
             h = false;
         pedal = false;
@@ -89,6 +92,16 @@ namespace sampler
                     fadeOut (v, 0.02);
             current = program;
             cameFrom.fill (-1);
+            releaseDue.fill (false);
+            // 0.9.0: the controllers start where the file sets them (set_ccN); the mod wheel and EXPRESSION follow.
+            if (program != nullptr)
+                for (int c = 0; c < 128; ++c)
+                    if (program->initialCC[(size_t) c] >= 0)
+                    {
+                        cc[(size_t) c] = (float) program->initialCC[(size_t) c];
+                        if (c == 1) wheel = cc[1] / 127.0f;
+                        if (c == 11) expression = cc[11] / 127.0f;
+                    }
             keyswitch = -1;
             if (program != nullptr)
                 keyswitch = program->swDefault >= 0 ? program->swDefault
@@ -98,6 +111,8 @@ namespace sampler
             keyswitch = chosen;
         updatePitch (settings);
         updateWheel();
+        waitForDisk = settings.waitForDisk;
+        streamer = streamerToUse.load (std::memory_order_acquire);
 
         auto done = 0;
         const auto playTo = [&] (int to)
@@ -175,27 +190,44 @@ namespace sampler
             }
             else if (message.isNoteOff())
                 noteOff (program, message.getNoteNumber(), channel, settings);
-            else if (message.isSustainPedalOn())
-                pedal = true;
-            else if (message.isSustainPedalOff())
-            {
-                pedal = false;
-                for (auto& v : voices)
-                    if (v.active && v.pedalHeld)
-                        release (v);
-            }
             else if (message.isPitchWheel())
             {
                 bend = juce::jlimit (-1.0f, 1.0f, (float) (message.getPitchWheelValue() - 8192) / 8192.0f);
                 updatePitch (settings);
             }
-            else if (message.isControllerOfType (1))
+            else if (message.isController() && ! message.isAllNotesOff() && ! message.isAllSoundOff())
             {
-                wheel = (float) message.getControllerValue() / 127.0f;
-                updateWheel();
+                const auto number = message.getControllerNumber(), value = message.getControllerValue();
+                cc[(size_t) number] = (float) value;
+                // The sustain pedal: CC 64, or the file's sustain_cc (0.9.0).
+                if (number == (program != nullptr ? program->sustainCC : 64))
+                {
+                    const auto down = value >= 64;
+                    if (down != pedal)
+                    {
+                        pedal = down;
+                        if (! pedal)
+                        {
+                            for (auto& v : voices)
+                                if (v.active && v.pedalHeld)
+                                    release (v);
+                            // 0.9.0: the release samples of keys let go under the pedal, now.
+                            if (program != nullptr)
+                                for (int k = 0; k < 128; ++k)
+                                    if (std::exchange (releaseDue[(size_t) k], false))
+                                        playReleases (*program, k, keyChannel[(size_t) k], settings, true);
+                        }
+                    }
+                }
+                if (number == 1)
+                {
+                    wheel = (float) value / 127.0f;
+                    updateWheel();
+                }
+                else if (number == 11)
+                    expression = (float) value / 127.0f;
+                controllersChanged();
             }
-            else if (message.isControllerOfType (11))
-                expression = (float) message.getControllerValue() / 127.0f;
             else if (message.isAllNotesOff())
             {
                 keyDown.fill (false);
@@ -243,11 +275,34 @@ namespace sampler
             return;
         lastNote = note;
         const auto from = settings.legato ? joinableFrom (note) : -1;
+        auto othersDown = false;   // 0.9.0: for first / legato samples
+        for (int k = 0; k < 128 && ! othersDown; ++k)
+            othersDown = k != note && keyDown[(size_t) k];
+        phraseGoingOn = othersDown;
         keyDown[(size_t) note] = true;
         keyVelocity[(size_t) note] = velocity;
         keyChannel[(size_t) note] = channel;
         keyStart[(size_t) note] = now;
-        cameFrom[(size_t) note] = playNote (program, note, velocity, channel, settings, from) ? from : -1;
+        lastNoteId = 0;
+        const auto joined = playNote (program, note, velocity, channel, settings, from, NoteExtras {});
+        cameFrom[(size_t) note] = joined ? from : -1;
+        // 0.10.0, DOUBLE: the octaves too, as the same note (ended by this key), joined along with it.
+        const auto mainId = lastNoteId;
+        for (const auto offset : { 12, -12 })
+        {
+            const auto wanted = (offset > 0 && (settings.doubleMode == 1 || settings.doubleMode == 3))
+                             || (offset < 0 && (settings.doubleMode == 2 || settings.doubleMode == 3));
+            const auto key = note + offset;
+            if (! wanted || key < 0 || key > 127 || ! program.plays (key) || program.isKeyswitch (key))
+                continue;
+            NoteExtras extras;
+            extras.owner = note;
+            extras.gain = settings.doubleGain;
+            extras.isDouble = true;
+            extras.noteId = mainId;
+            extras.joinTimeKey = from;
+            playNote (program, key, velocity, channel, settings, joined && from + offset >= 0 && from + offset < 128 ? from + offset : -1, extras);
+        }
     }
 
     int Sampler::joinableFrom (int note) const noexcept
@@ -259,7 +314,7 @@ namespace sampler
         juce::int64 bestStart = 0;
         for (const auto& v : voices)
         {
-            if (! v.active || v.released || v.fading || v.region == nullptr || ! v.region->held || v.note == note)
+            if (! v.active || v.released || v.fading || v.region == nullptr || ! v.region->held || v.note == note || v.isDouble)
                 continue;
             const auto start = keyStart[(size_t) v.note];
             const auto distance = std::abs (v.note - note);
@@ -275,7 +330,8 @@ namespace sampler
         return best;
     }
 
-    bool Sampler::playNote (const Program& program, int note, int velocity, int channel, const Settings& settings, int joinFrom) noexcept
+    bool Sampler::playNote (const Program& program, int note, int velocity, int channel, const Settings& settings, int joinFrom,
+                            const NoteExtras& extras) noexcept
     {
         const auto chance = nextRandom();
         const auto onWheel = settings.dynamics == Dynamics::modWheel;
@@ -287,6 +343,12 @@ namespace sampler
             const auto& r = program.regions[(size_t) index];
             const auto anyVelocity = onWheel && r.held;
             if (! r.covers (note, anyVelocity ? r.loVel : velocity, channel) || ! r.playsUnder (keyswitch))
+                continue;
+            // 0.9.0: release samples wait for the key to come up; first only as a phrase starts, legato only within one;
+            // only while its controllers are in range.
+            if (r.trigger == Region::Trigger::release || r.trigger == Region::Trigger::releaseKey
+                || (r.trigger == Region::Trigger::first && phraseGoingOn) || (r.trigger == Region::Trigger::legato && ! phraseGoingOn)
+                || ! conditionsMet (r))
                 continue;
             // Its round robin: it counts every note it could have played.
             auto turn = 0;
@@ -309,7 +371,8 @@ namespace sampler
                     join.from = joinFrom;
         if (join.from >= 0)
         {
-            join.seconds = joinSeconds ((double) (now - keyStart[(size_t) join.from]) / rate);
+            const auto timeKey = extras.joinTimeKey >= 0 ? extras.joinTimeKey : join.from;   // (a doubled octave: the played key's)
+            join.seconds = joinSeconds ((double) (now - keyStart[(size_t) timeKey]) / rate);
             join.glide = juce::jmax (0.0, (double) settings.glideSeconds);
             // The note joined fades out (equal power) as this one fades in, its pitch gliding with it.
             const auto count = (int) std::lround (join.glide * rate);
@@ -327,8 +390,11 @@ namespace sampler
                     }
                 }
         }
-        makeRoom (settings);
-        const auto noteId = ++notes;
+        // (a doubled octave is the same note as the key played: no room made for it, its number shared)
+        if (extras.noteId == 0)
+            makeRoom (settings);
+        const auto noteId = extras.noteId != 0 ? extras.noteId : ++notes;
+        lastNoteId = noteId;
         // On the wheel: each held layer's neighbours, by the middles of the velocity ranges started.
         std::array<int, maxRegionsANote> middles {};   // twice each middle (lovel + hivel), whole numbers
         auto numMiddles = 0;
@@ -356,7 +422,36 @@ namespace sampler
                         upper = 0.5f * (float) middles[(size_t) k];
                 }
             }
-            startVoice (r, note, velocity, channel, settings, noteId, lower, upper, join.from >= 0 ? &join : nullptr);
+            // 0.10.0, PLAYERS: the first as ever; the others a little out of tune, later, further in and elsewhere across.
+            static constexpr std::array<float, 4> detunes { 0.0f, 0.7f, -0.9f, 0.35f };
+            static constexpr std::array<std::array<float, 4>, 4> pansFor { { { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f },
+                                                                             { 0.0f, -0.6f, 0.6f, 0.0f }, { 0.0f, -0.6f, 0.6f, 0.0f } } };
+            const auto players = juce::jlimit (1, 4, settings.players);
+            const auto& pans = pansFor[(size_t) (players - 1)];
+            auto sumLeft = 0.0f, sumRight = 0.0f;   // each side's players' gains, squared (their sounds unalike: powers add)
+            for (int c = 0; c < players; ++c)
+            {
+                float pl, pr;
+                balance (pans[(size_t) c], pl, pr);
+                sumLeft += pl * pl;
+                sumRight += pr * pr;
+            }
+            for (int c = 0; c < players; ++c)
+            {
+                Copy copy;
+                copy.owner = extras.owner >= 0 ? extras.owner : note;
+                copy.isDouble = extras.isDouble;
+                copy.gainLeft = extras.gain / std::sqrt (sumLeft);
+                copy.gainRight = extras.gain / std::sqrt (sumRight);
+                if (c > 0)
+                {
+                    copy.cents = settings.detuneCents * (detunes[(size_t) c] + 0.5f * (nextRandom() - 0.5f));
+                    copy.delay = (int) std::lround ((0.25 + 0.75 * nextRandom()) * settings.timingMs * 0.001 * rate);
+                    copy.offsetSeconds = 0.008 * nextRandom();
+                    copy.pan = pans[(size_t) c];
+                }
+                startVoice (r, note, velocity, channel, settings, noteId, lower, upper, join.from >= 0 ? &join : nullptr, 1.0f, &copy);
+            }
         }
         return join.from >= 0;
     }
@@ -432,10 +527,20 @@ namespace sampler
     }
 
     void Sampler::startVoice (const Region& r, int note, int velocity, int channel, const Settings& settings, std::uint64_t noteId,
-                              float lowerMiddle, float upperMiddle, const Join* join) noexcept
+                              float lowerMiddle, float upperMiddle, const Join* join, float extraGain, const Copy* copy) noexcept
     {
         if (r.sample == nullptr || r.sample->length() < 2)
             return;
+        // 0.9.0, GROUPS: a note in a group stops the voices that group turns off (off_by), as they say (off_mode).
+        if (r.group != 0)
+            for (auto& w : voices)
+                if (w.active && ! w.fading && w.noteId != noteId && w.region != nullptr && w.region->offBy == r.group)
+                {
+                    if (w.region->offMode == Region::OffMode::normal)
+                        release (w);
+                    else
+                        fadeOut (w, w.region->offMode == Region::OffMode::time ? (double) w.region->offTime : 0.006);
+                }
         // A free slot (none: the oldest fading voice gives up its slot at once, else the oldest of all).
         Voice* slot = nullptr;
         for (auto& v : voices)
@@ -451,6 +556,7 @@ namespace sampler
                     slot = &v;
 
         auto& v = *slot;
+        endStream (v);
         v = Voice {};
         v.active = true;
         v.region = &r;
@@ -461,15 +567,69 @@ namespace sampler
         v.age = ++counter;
         v.position = (double) r.offset;
         v.lastFrame = r.lastFrame();
-        const auto cents = ((float) note - (float) r.keyCenter) * r.keytrack + r.tuneCents;
+        v.velocity = velocity;
+        if (r.offsetRandom > 0)   // 0.9.0: offset_random
+            v.position = juce::jmin ((double) (v.lastFrame - 2), v.position + (double) nextRandom() * (double) r.offsetRandom);
+        const auto cents = ((float) note - (float) r.keyCenter) * r.keytrack + r.tuneCents + r.pitchVeltrack * (float) velocity / 127.0f;
         v.baseIncrement = std::pow (2.0, (double) cents / 1200.0) * v.sample->sampleRate / rate;
         // Level: the region's, its pan; its velocity through amp_veltrack (on the wheel: the wheel's, below).
         balance (r.pan, v.gainLeft, v.gainRight);
-        v.onWheel = settings.dynamics == Dynamics::modWheel && r.held;
+        // (0.9.0: a file that follows the mod wheel itself, its crossfades or gain_cc1, keeps it: MOD WHEEL leaves it be)
+        v.onWheel = settings.dynamics == Dynamics::modWheel && r.held && ! r.usesController (1);
         v.velTrack = r.velTrack;
-        const auto velocityGain = v.onWheel ? 1.0f : velocityCurve (r.velTrack, (float) velocity);
+        auto velocityGain = v.onWheel ? 1.0f : velocityCurve (r.velTrack, (float) velocity);
+        if (! v.onWheel && ! r.velCurve.empty())   // 0.9.0: amp_velcurve_N, straight lines between its points
+            for (size_t i = 1; i < r.velCurve.size(); ++i)
+                if (velocity <= r.velCurve[i].first)
+                {
+                    const auto& [v0, g0] = r.velCurve[i - 1];
+                    const auto& [v1, g1] = r.velCurve[i];
+                    velocityGain = v1 > v0 ? g0 + (g1 - g0) * (float) (velocity - v0) / (float) (v1 - v0) : g1;
+                    break;
+                }
+        // 0.9.0: crossfades on velocity and keys (equal power or straight), level by key, and what the caller adds (a
+        // release sample's rt_decay).
+        const auto fadeOf = [] (int value, int lo, int hi, bool in, bool power)
+        {
+            if (lo < 0 && hi < 0)
+                return 1.0f;
+            auto t = hi > lo ? juce::jlimit (0.0f, 1.0f, (float) (value - lo) / (float) (hi - lo)) : (value >= hi ? 1.0f : 0.0f);
+            if (! in)
+                t = 1.0f - t;
+            return power ? std::sqrt (t) : t;
+        };
+        if (r.xfinLoVel >= 0 || r.xfinHiVel >= 0)
+            velocityGain *= fadeOf (velocity, juce::jmax (0, r.xfinLoVel), r.xfinHiVel < 0 ? 0 : r.xfinHiVel, true, r.velFadePower);
+        if (r.xfoutLoVel >= 0 || r.xfoutHiVel >= 0)
+            velocityGain *= fadeOf (velocity, r.xfoutLoVel < 0 ? 127 : r.xfoutLoVel, r.xfoutHiVel < 0 ? 127 : r.xfoutHiVel, false, r.velFadePower);
+        if (r.xfinLoKey >= 0 || r.xfinHiKey >= 0)
+            velocityGain *= fadeOf (note, juce::jmax (0, r.xfinLoKey), r.xfinHiKey < 0 ? 0 : r.xfinHiKey, true, r.keyFadePower);
+        if (r.xfoutLoKey >= 0 || r.xfoutHiKey >= 0)
+            velocityGain *= fadeOf (note, r.xfoutLoKey < 0 ? 127 : r.xfoutLoKey, r.xfoutHiKey < 0 ? 127 : r.xfoutHiKey, false, r.keyFadePower);
+        velocityGain *= juce::Decibels::decibelsToGain (r.ampKeytrack * (float) (note - r.ampKeycenter), -144.0f) * extraGain;
         v.gainLeft *= r.gain * velocityGain;
         v.gainRight *= r.gain * velocityGain;
+        v.controlGain = v.controlTarget = controlGainOf (v);
+        // 0.9.0: a start held back (delay, delay_random), its filters, its level LFO.
+        v.waiting = (int) std::lround ((r.startDelay + nextRandom() * r.startDelayRandom) * rate);
+        for (size_t f = 0; f < 2; ++f)
+        {
+            const auto& filter = r.filters[f];
+            auto& state = v.filters[f];
+            state = {};
+            if (filter.type == Region::Filter::Type::none)
+                continue;
+            state.on = true;
+            state.type = filter.type;
+            state.onePole = filter.type == Region::Filter::Type::lowpass1 || filter.type == Region::Filter::Type::highpass1;
+            state.baseHz = filter.cutoff * (float) std::pow (2.0, (filter.keytrack * (float) (note - filter.keycenter) + filter.veltrack * (float) velocity / 127.0f) / 1200.0);
+            state.k = 1.0f / (0.70710678f * juce::Decibels::decibelsToGain (filter.resonance));
+        }
+        updateFilters (v);
+        v.lfoPhase = 0.0;
+        v.lfoStep = juce::MathConstants<double>::twoPi * (double) r.lfoFreq / rate;
+        v.lfoAge = 0;
+        v.lfoGain = 1.0f;
         if (v.onWheel)
         {
             v.layerMiddle = 0.5f * (float) (r.loVel + r.hiVel);
@@ -477,8 +637,10 @@ namespace sampler
             v.upperMiddle = upperMiddle;
             v.wheelGain = v.wheelTarget = wheelGainOf (v);
         }
-        // The loop: the file's, or AUTO SUSTAIN's while it's on.
-        if (r.loop != Region::Loop::none || (r.autoLoop && settings.autoSustain))
+        // The loop: the file's, or AUTO SUSTAIN's while it's on (0.9.0: never a release sample's: its key is already up,
+        // nothing would end it).
+        const auto isRelease = r.trigger == Region::Trigger::release || r.trigger == Region::Trigger::releaseKey;
+        if (! isRelease && (r.loop != Region::Loop::none || (r.autoLoop && settings.autoSustain)))
         {
             v.looping = true;
             v.loopStart = r.loopStart;
@@ -494,15 +656,23 @@ namespace sampler
             v.tiltEnd = juce::Decibels::decibelsToGain (r.loopTilt);
             v.tiltK = std::log ((double) v.tiltEnd) / (double) (v.loopEnd - v.loopStart);
         }
-        // The envelope.
-        v.countdown = (int) std::lround (r.delay * rate);
+        // The envelope (0.9.0: each stage moved by velocity and by controllers as the note starts).
+        std::array<float, 6> stage { r.delay, r.attack, r.hold, r.decay, r.sustain, r.release };
+        for (size_t i = 0; i < 6; ++i)
+        {
+            stage[i] += r.velToEnvelope[i] * (float) velocity / 127.0f;
+            for (const auto& [number, amount] : r.ccToEnvelope[i])
+                stage[i] += amount * cc[(size_t) juce::jlimit (0, 127, number)] / 127.0f;
+            stage[i] = i == 4 ? juce::jlimit (0.0f, 1.0f, stage[i]) : juce::jmax (0.0f, stage[i]);
+        }
+        v.countdown = (int) std::lround (stage[0] * rate);
         v.stage = v.countdown > 0 ? Voice::Stage::delay : Voice::Stage::attack;
-        const auto attackSamples = r.attack * rate;
+        const auto attackSamples = stage[1] * rate;
         v.attackStep = attackSamples >= 1.0 ? (float) (1.0 / attackSamples) : 1.0f;
-        v.holdSamples = (int) std::lround (r.hold * rate);
-        v.sustain = r.sustain;
-        v.decayCoef = fallCoef (-60.0f, r.decay * rate);
-        v.releaseCoef = fallCoef (-80.0f, juce::jmax (minReleaseSeconds, r.release * settings.releaseScale) * rate);
+        v.holdSamples = (int) std::lround (stage[2] * rate);
+        v.sustain = stage[4];
+        v.decayCoef = fallCoef (-60.0f, stage[3] * rate);
+        v.releaseCoef = fallCoef (-80.0f, juce::jmax (minReleaseSeconds, stage[5] * settings.releaseScale) * rate);
         // LEGATO: a joined held recording starts past its attack, fading in over the join (equal power), its pitch
         // gliding from the note it joins.
         if (join != nullptr && r.held && r.legatoStart >= 0)
@@ -521,7 +691,98 @@ namespace sampler
                 v.glideCount = count;
             }
         }
+        // 0.10.0: this player's own pitch, place across, level, lateness and start; the key that ends it.
+        v.owner = copy != nullptr && copy->owner >= 0 ? copy->owner : note;
+        v.isDouble = copy != nullptr && copy->isDouble;
+        if (copy != nullptr)
+        {
+            v.baseIncrement *= std::pow (2.0, (double) copy->cents / 1200.0);
+            float panLeft, panRight;
+            balance (copy->pan, panLeft, panRight);
+            v.gainLeft *= panLeft * copy->gainLeft;
+            v.gainRight *= panRight * copy->gainRight;
+            v.waiting += copy->delay;
+            if (copy->offsetSeconds > 0.0)
+                v.position = juce::jmin ((double) (v.lastFrame - 2), v.position + copy->offsetSeconds * v.sample->sampleRate);
+        }
         updatePitch (settings);
+        startStream (v);
+    }
+
+    void Sampler::startStream (Voice& v) noexcept
+    {
+        // 0.11.0: a whole recording reads straight from memory; a streamed one claims a stream from where it starts.
+        const auto& s = *v.sample;
+        v.ahead = v.behind = {};
+        v.lap = 0;
+        if (! s.streamed())
+        {
+            v.inMemory = { s.channels[0].data(), s.channels[s.channels.size() > 1 ? 1 : 0].data(), 0, (juce::int64) s.length() };
+            return;
+        }
+        v.inMemory = {};
+        if (streamer == nullptr)
+            return;
+        StreamPlan plan;
+        plan.start = (juce::int64) v.position - 2;
+        plan.looping = v.looping;
+        plan.loopStart = v.loopStart;
+        plan.loopEnd = v.loopEnd;
+        plan.crossfade = v.crossfade;
+        v.stream = streamer->claim (s.stream, plan);
+    }
+
+    void Sampler::endStream (Voice& v) noexcept
+    {
+        if (v.stream >= 0 && streamer != nullptr)
+            streamer->release (v.stream);
+        v.stream = -1;
+    }
+
+    void Sampler::leaveLoop (Voice& v) noexcept
+    {
+        // Its timeline went back to the loop's start at each loop end; from the next one it goes on past it.
+        if (v.stream >= 0 && streamer != nullptr)
+            streamer->stopLooping (v.stream, v.loopEnd + v.lap);
+        v.ahead = v.behind = {};
+    }
+
+    float Sampler::streamedFrame (Voice& v, int channel, juce::int64 frame, bool back, bool wait) noexcept
+    {
+        // A frame not where the voice read last: in another piece in memory, else the stream's ring (by its timeline
+        // frame), else not there yet (live: silent and counted; bouncing: read now).
+        const auto& s = *v.sample;
+        if (frame < 0 || frame >= (juce::int64) s.length() || ! s.streamed())
+            return 0.0f;
+        if (const auto* p = s.pieceAt (frame))
+        {
+            v.inMemory = { p->channels[0].data(), p->channels[p->channels.size() > 1 ? 1 : 0].data(), p->start, p->end() };
+            return (channel == 0 ? v.inMemory.left : v.inMemory.right)[frame - p->start];
+        }
+        if (streamer == nullptr)
+            return 0.0f;
+        const auto t = (back ? frame + (v.loopEnd - v.loopStart) : frame) + v.lap;
+        auto& w = back ? v.behind : v.ahead;
+        if (t >= w.from && t < w.to)
+            return (channel == 0 ? w.left : w.right)[t - w.from];
+        // (bouncing: read until it's there; once more after a read with nothing to do, as the disk thread may have
+        // read it in between)
+        if (v.stream >= 0)
+            for (auto last = false;;)
+            {
+                const float* l = nullptr;
+                const float* r = nullptr;
+                if (const auto n = streamer->span (v.stream, t, back, l, r); n > 0)
+                {
+                    w = { l, r, t, t + n };
+                    return (channel == 0 ? l : r)[0];
+                }
+                if (! wait || last)
+                    break;
+                last = ! streamer->fillNow (v.stream);
+            }
+        streamer->countUnderrun();
+        return 0.0f;
     }
 
     float Sampler::wheelGainOf (const Voice& v) const noexcept
@@ -571,10 +832,10 @@ namespace sampler
             for (const auto& v : voices)
                 sounding = sounding || (v.active && v.note == note && ! v.released && ! v.fading && v.region != nullptr && v.region->held);
             if (sounding)   // (the join's length follows how long this note played)
-                playNote (*program, back, keyVelocity[(size_t) back], keyChannel[(size_t) back], settings, note);
+                playNote (*program, back, keyVelocity[(size_t) back], keyChannel[(size_t) back], settings, note, NoteExtras {});
         }
         for (auto& v : voices)
-            if (v.active && ! v.released && v.note == note && v.channel == channel)
+            if (v.active && ! v.released && v.owner == note && v.channel == channel)   // (0.10.0: its doubled octaves too)
             {
                 if (v.region->oneShot)
                     continue;
@@ -583,6 +844,13 @@ namespace sampler
                 else
                     release (v);
             }
+        // 0.9.0: its release samples (release_key at once; release after the pedal), started after the note's own
+        // voices are let go (else they'd be let go with them).
+        if (program != nullptr)
+        {
+            releaseDue[(size_t) note] = pedal;
+            playReleases (*program, note, channel, settings);
+        }
     }
 
     void Sampler::release (Voice& v) noexcept
@@ -602,7 +870,10 @@ namespace sampler
             if (v.crossfade > 0 && v.position >= (double) (v.loopEnd - v.crossfade))
                 v.stopAtWrap = true;
             else
+            {
                 v.looping = false;
+                leaveLoop (v);
+            }
         }
     }
 
@@ -611,6 +882,106 @@ namespace sampler
         v.fadeStep = (float) (1.0 / juce::jmax (1.0, seconds * rate));
         v.fading = true;
         v.released = true;
+    }
+
+    bool Sampler::conditionsMet (const Region& r) const noexcept
+    {
+        for (const auto& c : r.ccConditions)
+            if (cc[(size_t) juce::jlimit (0, 127, c.cc)] < (float) c.lo || cc[(size_t) juce::jlimit (0, 127, c.cc)] > (float) c.hi)
+                return false;
+        return true;
+    }
+
+    void Sampler::playReleases (const Program& program, int note, int channel, const Settings& settings, bool pedalLifted) noexcept
+    {
+        if (note < 0 || note > 127)
+            return;
+        const auto velocity = juce::jmax (1, keyVelocity[(size_t) note]);
+        const auto heldSeconds = (float) ((double) juce::jmax<juce::int64> (0, now - keyStart[(size_t) note]) / rate);
+        auto started = false;
+        std::uint64_t noteId = 0;
+        for (const auto index : program.byKey[(size_t) note])
+        {
+            const auto& r = program.regions[(size_t) index];
+            const auto wanted = pedalLifted ? r.trigger == Region::Trigger::release
+                                            : r.trigger == Region::Trigger::releaseKey || (r.trigger == Region::Trigger::release && ! pedal);
+            if (! wanted || ! r.covers (note, velocity, channel) || ! r.playsUnder (keyswitch) || ! conditionsMet (r))
+                continue;
+            auto turn = 0;
+            if (index < (int) program.sequence.size())
+                turn = program.sequence[(size_t) index]++ % r.seqLength;
+            if (turn != r.seqPosition - 1)
+                continue;
+            const auto chance = nextRandom();
+            if (chance < r.loRand || (chance >= r.hiRand && r.hiRand < 1.0f))
+                continue;
+            if (! started)
+            {
+                makeRoom (settings);
+                noteId = ++notes;
+                started = true;
+            }
+            // Quieter the longer the key was held (rt_decay dB a second).
+            startVoice (r, note, velocity, channel, settings, noteId, -1.0f, -1.0f, nullptr,
+                        juce::Decibels::decibelsToGain (-r.rtDecay * heldSeconds, -144.0f));
+        }
+    }
+
+    float Sampler::controlGainOf (const Voice& v) const noexcept
+    {
+        // The file's controllers: gain_ccN (dB), amplitude_onccN (%), and its crossfades on controllers.
+        if (v.region == nullptr)
+            return 1.0f;
+        const auto& r = *v.region;
+        auto db = 0.0f, amplitude = 1.0f, fade = 1.0f;
+        for (const auto& [number, amount] : r.gainCC)
+            db += amount * cc[(size_t) juce::jlimit (0, 127, number)] / 127.0f;
+        if (! r.amplitudeCC.empty())
+        {
+            amplitude = 0.0f;
+            for (const auto& [number, amount] : r.amplitudeCC)
+                amplitude += amount / 100.0f * cc[(size_t) juce::jlimit (0, 127, number)] / 127.0f;
+            amplitude = juce::jlimit (0.0f, 1.0f, amplitude);
+        }
+        for (const auto& f : r.ccFades)
+        {
+            const auto value = cc[(size_t) juce::jlimit (0, 127, f.cc)];
+            auto t = f.hi > f.lo ? juce::jlimit (0.0f, 1.0f, (value - (float) f.lo) / (float) (f.hi - f.lo)) : (value >= (float) f.hi ? 1.0f : 0.0f);
+            if (! f.in)
+                t = 1.0f - t;
+            fade *= r.ccFadePower ? std::sqrt (t) : t;
+        }
+        return juce::Decibels::decibelsToGain (db, -144.0f) * amplitude * fade;
+    }
+
+    void Sampler::updateFilters (Voice& v) noexcept
+    {
+        // Each filter's cutoff: its own, moved by the controllers now (key and velocity were taken at the note's start).
+        for (size_t f = 0; f < 2; ++f)
+        {
+            auto& state = v.filters[f];
+            if (! state.on || v.region == nullptr)
+                continue;
+            auto cents = 0.0f;
+            for (const auto& [number, amount] : v.region->filters[f].cc)
+                cents += amount * cc[(size_t) juce::jlimit (0, 127, number)] / 127.0f;
+            const auto hz = juce::jlimit (10.0, 0.45 * rate, (double) state.baseHz * std::pow (2.0, cents / 1200.0));
+            state.g = (float) std::tan (juce::MathConstants<double>::pi * hz / rate);
+            state.G = state.g / (1.0f + state.g);
+            state.a1 = 1.0f / (1.0f + state.g * (state.g + state.k));
+            state.a2 = state.g * state.a1;
+            state.a3 = state.g * state.a2;
+        }
+    }
+
+    void Sampler::controllersChanged() noexcept
+    {
+        for (auto& v : voices)
+            if (v.active)
+            {
+                v.controlTarget = controlGainOf (v);
+                updateFilters (v);
+            }
     }
 
     void Sampler::renderVoices (int numSamples, int numParts) noexcept
@@ -623,16 +994,68 @@ namespace sampler
             auto* left = scratchLeft[(size_t) part].data();
             auto* right = scratchRight[(size_t) part].data();
             const auto& s = *v.sample;
-            const auto* l = s.channels[0].data();
-            const auto* r = s.channels[s.channels.size() > 1 ? 1 : 0].data();
-            const auto length = (juce::int64) s.length();
-            const auto stereo = s.channels.size() > 1;
-            const auto at = [length] (const float* c, juce::int64 i) noexcept { return i >= 0 && i < length ? c[i] : 0.0f; };
-            const auto read = [&] (const float* c, double position) noexcept
+            const auto stereo = s.numChannels() > 1;
+            // 0.11.0: frames from where the voice read last (memory), else found (another piece, the stream's ring).
+            const auto wait = waitForDisk;
+            // (the stream's windows never cover frames in memory, so the two are looked in either way round)
+            const auto loopLength = v.loopEnd - v.loopStart;
+            const auto at = [&] (int c, juce::int64 i, bool back) noexcept
+            {
+                const auto& w = v.inMemory;
+                if (i >= w.from && i < w.to)
+                    return (c == 0 ? w.left : w.right)[i - w.from];
+                const auto t = (back ? i + loopLength : i) + v.lap;
+                const auto& ring = back ? v.behind : v.ahead;
+                if (t >= ring.from && t < ring.to)
+                    return (c == 0 ? ring.left : ring.right)[t - ring.from];
+                return streamedFrame (v, c, i, back, wait);
+            };
+            const auto readAt = [&] (int c, double position, bool back) noexcept
             {
                 const auto index = (juce::int64) position;
                 const auto t = (float) (position - (double) index);
-                return hermite (at (c, index - 1), at (c, index), at (c, index + 1), at (c, index + 2), t);
+                return hermite (at (c, index - 1, back), at (c, index, back), at (c, index + 1, back), at (c, index + 2, back), t);
+            };
+            constexpr int l = 0, r = 1;
+            // 0.12.1: both sides at once (the place worked out once), straight from memory when all four frames the
+            // interpolation needs are in the stretch read last (nearly always); else frame by frame as before.
+            const auto readBoth = [&] (double position, bool back, float& a, float& b) noexcept
+            {
+                const auto index = (juce::int64) position;
+                const auto& w = v.inMemory;
+                if (index - 1 >= w.from && index + 2 < w.to)
+                {
+                    const auto t = (float) (position - (double) index);
+                    const auto* pl = w.left + (index - 1 - w.from);
+                    a = hermite (pl[0], pl[1], pl[2], pl[3], t);
+                    if (stereo)
+                    {
+                        const auto* pr = w.right + (index - 1 - w.from);
+                        b = hermite (pr[0], pr[1], pr[2], pr[3], t);
+                    }
+                    else
+                        b = a;
+                    return;
+                }
+                // (the same from the stream's ring: its windows never hold frames that are in memory, so all four in
+                // it means all four streamed, in a row)
+                const auto& ring = back ? v.behind : v.ahead;
+                if (const auto t0 = (back ? index - 1 + loopLength : index - 1) + v.lap; t0 >= ring.from && t0 + 3 < ring.to)
+                {
+                    const auto t = (float) (position - (double) index);
+                    const auto* pl = ring.left + (t0 - ring.from);
+                    a = hermite (pl[0], pl[1], pl[2], pl[3], t);
+                    if (stereo)
+                    {
+                        const auto* pr = ring.right + (t0 - ring.from);
+                        b = hermite (pr[0], pr[1], pr[2], pr[3], t);
+                    }
+                    else
+                        b = a;
+                    return;
+                }
+                a = readAt (l, position, back);
+                b = stereo ? readAt (r, position, back) : a;
             };
             const auto wheelStep = (v.wheelTarget - v.wheelGain) / (float) numSamples;
             const auto tilted = v.tilted;
@@ -649,8 +1072,37 @@ namespace sampler
                 v.tiltGain = tiltAt (v.position);
                 v.tiltStep = (float) std::exp (v.tiltK * v.increment * v.glideRatio);
             }
+            // 0.9.0: the file's controllers' level (ramped across the piece) and its level LFO (from where it was to where
+            // it'll be at the piece's end: depth dB x sin, faded in after its delay).
+            const auto controlStep = (v.controlTarget - v.controlGain) / (float) numSamples;
+            const auto& region = *v.region;
+            auto lfoStep = 0.0f;
+            if (region.lfoDepth != 0.0f && region.lfoFreq > 0.0f)
+            {
+                const auto ageEnd = v.lfoAge + numSamples;
+                const auto delaySamples = region.lfoDelay * (float) rate, fadeSamples = juce::jmax (1.0f, region.lfoFade * (float) rate);
+                const auto amount = juce::jlimit (0.0f, 1.0f, ((float) ageEnd - delaySamples) / fadeSamples);
+                const auto phaseEnd = v.lfoPhase + v.lfoStep * (double) numSamples;
+                const auto target = juce::Decibels::decibelsToGain (region.lfoDepth * amount * (float) std::sin (phaseEnd));
+                lfoStep = (target - v.lfoGain) / (float) numSamples;
+                v.lfoPhase = std::fmod (phaseEnd, juce::MathConstants<double>::twoPi);
+                v.lfoAge = ageEnd;
+            }
+            const auto width = region.width;
+            const auto filtering = v.filters[0].on || v.filters[1].on;
+            // 0.12.1: a layer the mod wheel has at nothing for the whole piece (DYNAMICS ON THE MOD WHEEL starts every
+            // layer; those away from the wheel get exactly 0) isn't read or mixed: only kept moving (its place, envelope,
+            // loop), so it's where it should be when the wheel brings it in. (Not with filters: theirs would go stale.)
+            const auto muted = v.onWheel && v.wheelGain == 0.0f && v.wheelTarget == 0.0f && ! filtering;
             for (int i = 0; i < numSamples; ++i)
             {
+                v.controlGain += controlStep;
+                v.lfoGain += lfoStep;
+                if (v.waiting > 0)   // 0.9.0: its start held back (delay): nothing yet, the recording not moving
+                {
+                    --v.waiting;
+                    continue;
+                }
                 // The envelope.
                 switch (v.stage)
                 {
@@ -694,10 +1146,15 @@ namespace sampler
                 if (done)
                 {
                     v.active = false;
+                    endStream (v);
                     break;
                 }
-                auto x = read (l, v.position) * v.tiltGain;
-                auto y = stereo ? read (r, v.position) * v.tiltGain : x;
+                if (! muted)
+                {
+                float x, y;
+                readBoth (v.position, false, x, y);
+                x *= v.tiltGain;
+                y = stereo ? y * v.tiltGain : x;
                 // Going round a loop: its last `crossfade` frames fade into the frames before its start.
                 if (v.looping && v.crossfade > 0 && v.position >= (double) (v.loopEnd - v.crossfade))
                 {
@@ -706,17 +1163,62 @@ namespace sampler
                     const auto norm = 1.0f / std::sqrt (juce::jmax (1.0e-6f, w1 * w1 + w2 * w2 + 2.0f * v.likeness * w1 * w2));
                     const auto from = w1 * norm, to = w2 * norm;
                     const auto back = v.position - (double) (v.loopEnd - v.loopStart);
-                    x = x * from + read (l, back) * to;
-                    y = stereo ? y * from + read (r, back) * to : x;
+                    float bx, by;
+                    readBoth (back, true, bx, by);
+                    x = x * from + bx * to;
+                    y = stereo ? y * from + by * to : x;
                 }
+                // 0.9.0: its stereo width, then its filters.
+                if (stereo && width != 1.0f)
+                {
+                    const auto middle = 0.5f * (x + y), side = 0.5f * (x - y) * width;
+                    x = middle + side;
+                    y = middle - side;
+                }
+                if (filtering)
+                    for (auto& f : v.filters)
+                    {
+                        if (! f.on)
+                            continue;
+                        const auto run = [&f] (float in, int c) noexcept
+                        {
+                            using T = Region::Filter::Type;
+                            auto& s1 = f.ic1[(size_t) c];
+                            if (f.onePole)
+                            {
+                                const auto vv = (in - s1) * f.G;
+                                const auto low = vv + s1;
+                                s1 = low + vv;
+                                return f.type == T::lowpass1 ? low : in - low;
+                            }
+                            auto& s2 = f.ic2[(size_t) c];
+                            const auto v3 = in - s2;
+                            const auto v1 = f.a1 * s1 + f.a2 * v3;
+                            const auto v2 = s2 + f.a2 * s1 + f.a3 * v3;
+                            s1 = 2.0f * v1 - s1;
+                            s2 = 2.0f * v2 - s2;
+                            switch (f.type)
+                            {
+                                case T::lowpass2:  return v2;
+                                case T::highpass2: return in - f.k * v1 - v2;
+                                case T::bandpass2: return v1;
+                                case T::notch2:    return in - f.k * v1;
+                                case T::none: case T::lowpass1: case T::highpass1: break;
+                            }
+                            return in;
+                        };
+                        x = run (x, 0);
+                        y = stereo ? run (y, 1) : x;
+                    }
                 auto level = v.level, fade = v.fade;
                 if (v.legatoIn && v.stage == Voice::Stage::attack)   // LEGATO's equal-power crossfade
                     level = std::sin (juce::MathConstants<float>::halfPi * level);
                 if (v.legatoOut)
                     fade = std::sin (juce::MathConstants<float>::halfPi * juce::jmax (0.0f, fade));
-                const auto gain = level * fade * (v.onWheel ? v.wheelGain : 1.0f);
+                const auto gain = level * fade * (v.onWheel ? v.wheelGain : 1.0f) * v.controlGain * v.lfoGain;
                 left[i] += x * gain * v.gainLeft;
                 right[i] += y * gain * v.gainRight;
+                }
                 v.position += v.increment * v.glideRatio;
                 if (v.glideCount > 0 && --v.glideCount == 0)
                     v.glideRatio = v.glideTarget;
@@ -725,8 +1227,12 @@ namespace sampler
                 if (v.looping && v.position >= (double) v.loopEnd)
                 {
                     v.position -= (double) (v.loopEnd - v.loopStart);
+                    v.lap += v.loopEnd - v.loopStart;
                     if (v.stopAtWrap)
+                    {
                         v.looping = v.stopAtWrap = false;
+                        leaveLoop (v);
+                    }
                     if (tilted)
                         v.tiltGain = tiltAt (v.position);
                 }
@@ -741,7 +1247,12 @@ namespace sampler
                 }
             }
             if (v.active)
+            {
                 v.wheelGain = v.wheelTarget;
+                v.controlGain = v.controlTarget;
+                if (v.stream >= 0 && streamer != nullptr)   // 0.11.0: the ring may reuse what's behind it
+                    streamer->consumed (v.stream, (juce::int64) v.position + v.lap - 2);
+            }
         }
     }
 }

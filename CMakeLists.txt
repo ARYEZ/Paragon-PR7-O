@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures")
 
-project(ParagonX1 VERSION 0.8.0 LANGUAGES C CXX)
+project(ParagonX1 VERSION 0.13.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +61,16 @@ juce_add_binary_data(ParagonX1Orchestra
         resources/orchestra/brass-section.jpg
         resources/orchestra/brass-section-lit.jpg
         resources/orchestra/stage.jpg
+        resources/orchestra/flute.jpg
+        resources/orchestra/piccolo.jpg
+        resources/orchestra/oboe.jpg
+        resources/orchestra/englishhorn.jpg
+        resources/orchestra/clarinet.jpg
+        resources/orchestra/bassclarinet.jpg
+        resources/orchestra/bassoon.jpg
+        resources/orchestra/contrabassoon.jpg
+        resources/orchestra/woodwind-section.jpg
+        resources/orchestra/woodwind-section-lit.jpg
         resources/orchestra/orchestra.json)
 
 target_sources(ParagonX1
@@ -74,6 +84,8 @@ target_sources(ParagonX1
         source/dsp/sampler/Sfz.cpp
         source/dsp/sampler/Section.cpp
         source/dsp/stage/Seating.cpp
+        source/library/Library.cpp
+        source/library/Downloads.cpp
         source/dsp/stage/Stage.cpp
         source/dsp/sampler/Sampler.cpp
         source/dsp/sampler/DiskStreamer.cpp    # PR7-D's disk streaming, kept for the libraries (plan stage 3)
@@ -119,6 +131,7 @@ target_sources(ParagonX1
         source/ui/InstrumentRack.cpp
         source/ui/OrchestraView.cpp
         source/ui/StageView.cpp
+        source/ui/LibraryBrowser.cpp
         source/ui/SynthDisplays.cpp
         source/ui/InstrumentPage.cpp
         source/ui/ProgressBox.cpp

@@ -22,7 +22,7 @@ the owner, a release per stage. Siblings: PR7-G (guitar), PR7-B (bass), PR7-V (v
   MIDI learn, the default preset, look-and-feel, progress box, PaintCache, the test set-up. **Kept but unused yet**
   (compiled and tested, for later stages): `dsp/mixer/Mixer.h` (trimmed to the generic strip / bus / send / effect-slot
   pieces: the drum-mic channels, bleed and mic routing are gone; 16 channels + 8 buses) and `dsp/mixer/MixerEffects.*`
-  (stage 6's per-section strips); `dsp/sampler/DiskStreamer.*` (namespace `sampler`; stage 3's streaming).
+  (stage 6's per-section strips); `dsp/sampler/DiskStreamer.*` (namespace `sampler`; reworked and used in 0.11.0).
   0.1.0 fixed a race in `Streamer::sample`'s wait-for-disk path (a stale `written` after `fill` returned false because
   the disk thread had filled the ring: silence, about 1 run in 3 of its test).
 
@@ -284,14 +284,164 @@ and AUTO SUSTAIN (`Sfz.cpp`), fitted on all 1914 distinct recordings (outside GM
   0.7 dB of STAGE off, rooms ringing as set; demo WAVs sent. Not checked: listening. Ensemble stacking and octave
   doubling (the plan's stage 6 too) not done: ask.
 
+## 0.9.0: the rest of SFZ's sound (the owner: "Let's implement what's left on the plan"; step 1 of an order told to them:
+0.9.0 SFZ engine, 0.10.0 stacking / doubling, 0.11.0 browser + streaming, 0.12.0 woodwind pictures, then the writing
+tools, which need the owner's riffs)
+
+- **Sonatina Symphonic Orchestra** (`github.com/peastman/sso`, CC Sampling Plus 1.0: read from the user's disk only):
+  cloned into the scratchpad with `--filter=blob:none` and the 762 SFZ files checked out; opcodes counted
+  (`/tmp/claude-0/probes/sso/count.py`). **Never `git ls-tree -l` on that clone** (sizes fetch every blob: it started
+  downloading all 3062 samples). Sample paths are relative to the top-level file, not an #include's.
+- `Sfz`: `Region::Trigger` (attack / release / releaseKey / first / legato), `rtDecay`, `ccConditions` (locc / hicc),
+  `filters[2]` (type, cutoff, resonance dB, keytrack, keycenter, veltrack, cc cents), `gainCC`, `amplitudeCC`,
+  `ccFades` (xfin / xfout_loccN / hiccN), vel / key fades, `*FadePower` (xf_*curve, power default), `velCurve`
+  (amp_velcurve_N), `velToEnvelope` / `ccToEnvelope` ([delay, attack, hold, decay, sustain, release]), `ampKeytrack`,
+  `pitchVeltrack`, `startDelay` / `startDelayRandom`, `offsetRandom`, `width`, `group` / `offBy` / `offMode` /
+  `offTime`, `lfo*` (amplfo), `usesController`; `Program::initialCC` (set_ccN), `sustainCC`, `ccLabels`, `ownWheel`;
+  group_ / master_ / global_ volume, amplitude, tune added; `isNumbered` (opcodes with a controller number); `readMore`.
+- `Sampler`: `cc[128]` (set_cc on a program change; CC 1 / 11 into wheel / expression); the pedal on `sustainCC`;
+  `releaseDue` (keys let go under the pedal), `playReleases` (after the note's own voices are let go: before, they were
+  let go with them), release voices never loop; `phraseGoingOn` for first / legato; `conditionsMet`; per voice
+  `controlGain` (gain / amplitude / cc fades, ramped), `waiting` (delay), `FilterState` x2 (TPT state-variable, 1-pole
+  for lpf_1p / hpf_1p; cutoffs re-set by `updateFilters` on `controllersChanged`), width (mid / side), LFO (block-rate,
+  ramped); groups in `startVoice` (off_by voices: normal = release, else fade 6 ms / off_time); `onWheel` only when
+  the region doesn't follow CC 1 itself.
+- Checked on SSO (probes, not committed): 5 instruments, 0 problems, unread only lfo01_ / eq1_ (CC 21 vibrato, default
+  0); violins +17 dB and brighter on the wheel; organ release tails. Demo WAVs. Not checked: listening.
+
+## 0.10.0: THE ENSEMBLE (the owner: "Build it" after the mock-up; "Release it as 0.10.0" after the demos)
+
+- Parameters (hint 46, `pr7o0100`): `ensPlayers` (x1-4), `ensDetune` (0-30 ct, 8), `ensTiming` (0-40 ms, 12),
+  `ensDouble` (`doubleNames`: Off, Octave Up, Octave Down, Octaves Up + Down), `ensDoubleLevel` (-24..0 dB, -6).
+- Rack: `Page::ensemble`, four PAGE keys (40 px wide, names 6.5 pt); its knobs in `routingKnobCell`, DOUBLE in
+  `menuCell`. Snapshot: `PARAGON_SNAPSHOT_ENSEMBLE=1`.
+- `Sampler`: `Settings::players / detuneCents / timingMs / doubleMode / doubleGain`. In `playNote` each region starts
+  `players` voices (`Copy`: copy 0 untouched; others detune `detunes[c]` x DETUNE plus +-25% random, delay 25-100% of
+  TIMING via `waiting` (never earlier: no look-ahead; the mock-up said "early or late", corrected), up to 8 ms
+  `offsetSeconds`, pans `pansFor` (x2: both centred; x3 / x4: +-0.6), each side scaled 1 / sqrt (sum of its balance
+  gains squared): a plain 1 / sqrt N left three players 1.85 dB down). DOUBLE in `noteOn`: `playNote` for key +-12 with
+  `NoteExtras` (owner = the played key, the main note's `noteId` shared: no `makeRoom`, one note for POLYPHONY; legato
+  `joinFrom` = from +-12, join time from the played key's start); `Voice::owner` (noteOff releases by it),
+  `Voice::isDouble` (never joined from). GCC refuses `const NoteExtras& = {}` as a default inside the class: pass it.
+- Checked on VSCO (probes, not committed): RMS held within 0.2 dB (solo violin x4, violins x3); the strings section's
+  line doubled down +0.6 dB. Demo WAVs. Not checked: listening.
+
+## 0.11.0: THE LIBRARY and DISK STREAMING (the owner: "Build it" after the browser mock-up)
+
+- **`library/Library.*`**: `Section` (strings, brass, woodwinds, percussion, keys, choir, other), `Entry`,
+  `instrumentOf` / `sectionOf` (our word table from VSCO's / Sonatina's names; VSCO's "S" prefix = solo; a name that
+  says nothing takes its folder's), `scan` (sorted; `include*` / `inc` folders skipped), `folders` / `setFolders` (key
+  "libraryFolders" in the "Paragon PR7-O" settings file). **`ui/LibraryBrowser.*`**: over the INSTRUMENT page below the
+  rack (LOAD toggles it): libraries, sections, instruments (grouped; folder labels), the chosen file's details (read
+  with `audio = false`), LOAD, ADD TO SECTION / LOAD SECTION / CLEAR, search (every section), OPEN FILE...
+  Snapshot: `PARAGON_SNAPSHOT_LIBRARY=<folders>` (+ `_LIBRARY_SECTION`, `_SEARCH`). Tests: `tests/LibraryTests.cpp`.
+- **Streaming** (`DiskStreamer.*` reworked; PR7-D's multi-mic API gone): `Sample` is whole (`channels`) or streamed
+  (`pieces` in memory, `frames`, `streamedChannels`, `stream` = its `StreamSource` with `resident` ranges);
+  `sampleFiles::streamedFrom`. `sfz::keptInMemory (region)`: 0.5 s (`streamHeadSeconds`) from the offset (+ offset
+  random + 8 ms), from `legatoStart`, from the loop end (the tail when let go), and +-4 frames round the loop start;
+  `sfz::streamSamples (program)` makes each recording of 2 s or more (`shortestStreamedSeconds`: CI failed with 1 s ones played faster than real time) streamed if that keeps < 70% of it, carries its `Analysis` to
+  the new pointer (loop likeness cached by loop in `Analysis::likeness`; a streamed sample never analysed again),
+  sets `Program::bytes` / `wholeBytes`. The processor's loader calls it on every load (`setStreamFromDisk`, on); the
+  streamer (`getStreamer`) is made with the first streamed instrument (rings 64 MB), declared last.
+- `Streamer`: 256 streams, ring 1 << 14 frames x (main L/R + back L/R). A stream follows its voice's TIMELINE
+  (`StreamPlan` start / loop / crossfade; `fileFrame (plan, t, exitAt)`: linear, then round the loop, then past its
+  end from `exitAt`); `back` holds the crossfade's back reads (file frame - loop length) for frames in the zone
+  `inBackZone` (loopEnd - crossfade - 4 to loopEnd). `pastResident` skips frames in memory (never through the back
+  zone); **room = pastResident (min (need, written)) + ring - written** (two wrong rules first: from `need` alone the
+  ring had no room after the 0.5 s head; a skip-raised floor lost the frames just before a piece). `span` stops at the
+  next resident piece and at the timeline's next going-back (so a window never covers memory's frames), checks
+  t >= need and t < written, and refuses t >= exitAt until the disk thread has applied `stopLooping` (written rewound
+  to exitAt). `fillNow` for bouncing; `waitUntilFilled` for tests.
+- `Sampler`: `setStreamer` (atomic, taken per render), `Settings::waitForDisk` (the processor: `isNonRealtime()`).
+  Voice: `stream`, `lap` (timeline - position: + loop length at each wrap), `Window inMemory / ahead / behind`;
+  `startStream` at the end of `startVoice` (plan start = position - 2), `endStream` (done, slot reused, `reset`),
+  `leaveLoop` (release outside the crossfade, or the wrap after `stopAtWrap`: `stopLooping (loopEnd + lap)`, windows
+  cleared), `consumed (position + lap - 2)` at each block's end. Reads: memory window by file frame, ring window by
+  timeline (inline), else `streamedFrame` (another piece, `span`; bouncing: `fillNow` until there, one more look after
+  an idle read: the disk thread may have read it in between; live: silent and counted in `getUnderruns`).
+- Info: "MEMORY x MB in memory, y MB streamed from disk as it plays". Snapshot: `PARAGON_SNAPSHOT_STREAM=0`.
+- Checked (probe `/tmp/claude-0/probes/ScratchStream.cpp`, not committed): all 75 VSCO files 5615 MB -> 811 MB in
+  memory; the strings section 450 -> 73 MB (trim 14 ms); a 14 s passage (10-note chord x4 players on the wheel, a
+  legato line: 92 streams) bounced and played live at real-time pace from a cold file cache: **identical sample for
+  sample, 0 underruns**; audio-thread time 0.9-1.1 s vs 0.74 s whole. Sonatina's 1st violins, looped horn, organ
+  (FLAC, release samples, pedal): identical. Not checked: a slow hard disk, Windows' disk.
+
+## 0.12.0: THE WOODWINDS (the owner: "Build it, and add the three Sonatina ones too" after the mock-up)
+
+- **Pictures** (`resources/orchestra/woodwinds3d.py`: brass3d.py's helpers, `Builder` and tail copied in; `Wind`: `lathe`
+  bodies along u, `cup` (neon rim; `ring_key` for clarinet / bassoon holes), `pad`, `rod`, `lever`, `heights` so the
+  geometry is at each key's top (the mock-up's dots sat 3 px low)). Eight singles (flute, piccolo, oboe, clarinet at
+  0.745 m across; English horn, bass clarinet, bassoon, contrabassoon whole) and `woodwind-section(-lit).jpg` (flute +
+  piccolo, oboe + clarinet, bassoon). `process_orchestra.py - <out> - - <winds>` keeps the rest (`kept`); JSON
+  `keys` = thumb, L1-L3, R1-R3, extra (Eb / octave / register / whisper), `woodwindSection.<kind>`.
+- **`OrchestraView`**: `Kind` flute / piccolo / oboe / englishHorn / clarinet / bassClarinet / bassoon / contrabassoon
+  (`kindOf` checks them first: a contrabassoon isn't a double bass); `isWoodwind`, `familyOf`, `sectionKindOf` (English
+  horn -> oboe, bass clarinet -> clarinet, contrabassoon -> bassoon in the section picture; an instrument's own part
+  first), `displayNameOf`; `windFingeringFor` (our simplified chart, bits thumb / L1-3 / R1-3 / extra; flute C4-A6,
+  oboe Bb3-C6, clarinet written E3-C6 (upper register = low + register key, the extension all down), bassoon Bb1-D3 and
+  G3-A3; transposers read it written: piccolo -12, English horn +7, clarinet +2, bass clarinet +14, contrabassoon +12;
+  `charted` false elsewhere: nothing lit); `paintKeys`; `Family` and `section (lit, Family)`, `sectionFamily` (most
+  pictured parts; ties strings, brass), `partKinds` (the part's real kind for its chart). Titles "THE FLUTE: EACH
+  NOTE'S FINGERING LIT". The mock-up's clarinet showed concert C as T + L1-3 + R1-2: wrong (that's written A3 / B3
+  territory); the chart's written D4 is T + L1 + L2.
+- `Seating`: contrabassoon with the bassoons (it went to the basses: "contrabass" in its name).
+
+## 0.12.1: a crash fixed, a round of optimization (the owner's PR7-S log; "run another round of optimization")
+
+- **Crash** (PR7-S log: access violation reading 0x6567617473 = "stage", the screen's thread, 7 s after reopening the
+  window): matched to the released 0.12.0 Windows build (13 / 14 return addresses after a call there, none in 0.2.0:
+  PR7-S shows the version from its first scan) and its .pdata function table (`objdump -p`): `LibraryBrowser`'s
+  SECTIONS `paintRow` -> `library::nameOf (row)` with row 7+ (JUCE's lists paint the empty rows under the last one,
+  `row` past `getNumRows`: documented). Every browser list now returns past its count (and clicks); `nameOf` checks
+  its table. **When a list's model paints, check `row` against the count.** To map a Windows crash: download the
+  release zip, `objdump -p` (ImageBase, Function Table), find the function holding each RVA, disassemble it and the
+  strings it uses (`/tmp/claude-0/wwscripts/match.py`, `strings_near.py`).
+- **Optimization** (probe `/tmp/claude-0/probes/ScratchBench.cpp`, not committed: `[bench]` scenarios on VSCO's strings
+  section, `[reference]` dumps a long passage to compare old / new sample for sample; callgrind needs the probe's
+  `CALLGRIND_TOGGLE_COLLECT` (name filters never matched) and a long load timeout under valgrind; build
+  `build-prof` RelWithDebInfo for lines). Before: chord x4 on the wheel 8.9% of a core, + STAGE 10.0%, + double both
+  20.9%; after: ~5.7 / 6.3 / 13%. `renderVoices`: `readBoth` (both sides, the place once; four frames straight from
+  `inMemory`, else from the ring window by timeline: ring windows never hold resident frames, so that's equivalent;
+  else `readAt` frame by frame); `muted` voices (on the wheel, `wheelGain` and target exactly 0 for the piece, no
+  filters) skip reading and mixing, still move. Output identical (the reference: 0 samples differ). Left: Hermite
+  arithmetic ~14%, per-voice bookkeeping, STAGE ~9% (its tap loop's ring mask): a SIMD / batched voice loop would be
+  the next step (not asked yet).
+
+## 0.13.0: GET the libraries, then the section presets (the owner: "Release 0.12.1, then do both libraries with GET buttons"; before that, expansion banks "with pre-built layouts where it's the entire string section or the entire woodwind section or the entire brass section")
+
+- **`library/Downloads.*`** (namespace `downloads`; PR7-K 0.71.0's `SampleLibraries` ported: its tar.gz reader and
+  `Download` thread unchanged but for names): `vsco()` (the SFZ branch pinned to commit 6dd651d: GitHub archive of the
+  commit, folder `VSCO-2-CE-<sha>`, marker `ViolinEns-KS.sfz`; it has no release), `sonatina()` (PR7-K's: tag v4.0,
+  `sso-4.0`, `browse` "Sonatina Symphonic Orchestra"); `folder()` = "Libraries" beside the presets' `Rigs` folder
+  (`setFolder` for tests); `isInstalled`, `installedFolders`; references `{sfz:<folder>}/<path>` (`refFor`, `isRef`,
+  `libraryFor`), `resolve (ref, userFolders)` (the download, else the path or its tail in a user's library folder),
+  `portable (path)` (a file in a download made a reference). This session's proxy refuses GitHub's archive URLs for
+  other people's repos (git reads work): the real downloads are untested here; `tests/DownloadTests.cpp` uses a
+  stand-in archive from a file:// URL (PR7-K's `TarWriter`).
+- Processor: `getDownload`, `getLibrary (library, url)`; `loadInstrument` / `loadSection` store `portable` names; the
+  loader resolves each (section parts too) and says "needs VSCO 2 CE: GET it in the library (LOAD)" when a library's
+  missing. `section::nameOf` / `describe` / `folderOf` read references by text (a juce::File can't hold one).
+- `LibraryBrowser`: `userFolders` (remembered) + the downloads (`folders`, listed by `displayName`: "VSCO 2 CE"; REMOVE
+  off for them; entries' `library` renamed to match); GET buttons (one a library not installed, VSCO on top), the
+  download's line (DOWNLOADING / UNPACKING n%, or why it failed) and CANCEL; a 5 Hz timer; the list rescans when it's
+  done. Snapshot: `PARAGON_SNAPSHOT_DOWNLOAD=<0-100>` (with LIBRARY). SETTINGS' THE SOUNDS credits both libraries.
+
+- **Expansions** (the owner: "Build it" after the preset mock-up; PR7-K's system): `rigs/Expansions.h` (`list`: VSCO
+  ORCHESTRA "VO", SONATINA "SO", descriptions); `Rig::numBanksWithExpansions`, `isExpansionBank` (bank >= 5),
+  `bankName` / `getSlotName` ("VO01"); `toXml` writes A for an expansion bank (user files never hold one); Save As
+  from an expansion preset files in bank A. `FactoryRigs.cpp`: `sectionRig` (parts as library references; one part
+  over 0-127: a plain reference), `layoutOf` (notes written from the splits, "C1 to B1", middle C = C3); VO01-VO08,
+  SO01-SO06 (instLevel -6, mod wheel, STAGE on). **Factory presets are found by name** (`findFactory`: projects,
+  THE DEFAULT): names must be unique ("Sonatina Strings", not a second "String Section"). `RigBrowser`: A-E on one
+  row, EXPANSIONS heading (`expansionsHeading`), bankBox lists the expansions disabled, the details add the bank's
+  description and, when a part's library isn't found (`resolve`), "PLAYS X: NOT DOWNLOADED YET" + `getButton` (GET,
+  progress through a 4 Hz timer). Tests `[expansions]` in `RigTests.cpp`; the ordering tests now end at SO06.
+
 ## The plan (`PR7-O PLAN.md`), next
 
-Still from stage 2: release samples (`trigger=release`, `rt_decay`) and the files' own crossfades (`xfin_*` /
-`xfout_*`, `amp_velcurve`), for libraries that use them (VSCO uses neither). Sections are split only (0.4.0; layered
-was offered too: not asked for). Then (ask the owner): stage 3's library browser by
-section and disk streaming (DiskStreamer: VSCO's string keyswitch files take 190-300 MB each in memory), Sonatina /
-VPO, the woodwinds' pictures, stage 4's CC / channel articulations, stage 6's ensemble stacking / octave doubling and
-mixer strips (dsp/mixer), then the writing tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE).
+Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:
+stage 4's CC / channel articulations, mixer strips (dsp/mixer), then the writing
+tools (ORCHESTRATE MY RIFF, CHORDS, SONG STRUCTURE: the owner's riffs asked for).
 
 ## Rules (from the owner and the family's CLAUDE.md files)
 
@@ -334,6 +484,8 @@ mixer strips (dsp/mixer), then the writing tools (ORCHESTRATE MY RIFF, CHORDS, S
   - `tests/PluginTestUtils.h`: `testkit::sine`, `saw`, `useSample` (a one-region instrument rooted at 60, amp_veltrack
     0: note 60 plays it sample for sample), `useTones` (a region per key with its own pan / level), `keyFor
     (semitones)`, `writeWav`. `tests/TestUtils.h`: `levelAt`, `rms`, `frequencyOf`, `Spectrum`...
+  - **Paths in tests: build absolute ones from a temp folder** (`"/x/y.sfz"` isn't absolute on Windows: 0.4.0 and
+    0.13.0 both failed CI's Windows job on this). After a push, check CI passed even when no release is due.
   - Notes in tests go in as MIDI at a sample position, not through the keyboard state (it spreads presses by the clock).
   - `tests/SamplerTests.cpp`: the SFZ reader and the sampler on invented files; also the kept MixerEffects and
     DiskStreamer.

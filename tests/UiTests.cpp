@@ -485,10 +485,10 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: which instrument a file is; each note's st
     CHECK (orchestra::kindOf ("CelloEns-KS") == Kind::cello);
     CHECK (orchestra::kindOf ("Contrabass-KS") == Kind::bass);
     CHECK (orchestra::kindOf ("Double Bass Pizz") == Kind::bass);
-    CHECK (orchestra::kindOf ("BassoonSus") == Kind::none);
+    CHECK (orchestra::kindOf ("BassoonSus") == Kind::bassoon);     // 0.12.0: the woodwinds
     CHECK (orchestra::kindOf ("TromboneSus") == Kind::trombone);   // 0.6.0: the brass
     CHECK (orchestra::kindOf ("GM-StylePerc bassdrum") == Kind::none);
-    CHECK (orchestra::kindOf ("FluteSusVib") == Kind::none);
+    CHECK (orchestra::kindOf ("FluteSusVib") == Kind::flute);
 
     // A cello: C2 G2 D3 A3. The snapshot's chord C2 G2 E3 C4: two open strings, E3 two up the D, C4 three up the A.
     auto stops = orchestra::stopsFor (Kind::cello, { 36, 43, 52, 60 });
@@ -570,8 +570,8 @@ TEST_CASE ("THE INSTRUMENT page 0.5.0: PR7-I's rack holds its knobs, menus and k
     page.chooseRegions (false);
     CHECK (page.isShowingPicture());
 
-    // A flute: no picture (not modelled yet): the region map.
-    w.processor.setProgram (make ("FluteSusVib", 60, 96), "/libraries/FluteSusVib.sfz");
+    // Timpani: no picture (not modelled yet; 0.12.0: the flute has one now): the region map.
+    w.processor.setProgram (make ("Timpani-Rolls", 40, 60), "/libraries/Timpani-Rolls.sfz");
     page.refresh();
     CHECK (page.getOrchestraView().getMode() == OrchestraView::Mode::none);
     CHECK_FALSE (page.isShowingPicture());
@@ -667,6 +667,11 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.5.0: every picture's colours sit inside 322-38 
         pictures.push_back ({ orchestra::nameOf (k), OrchestraView::getPicture (k) });
     pictures.push_back ({ "brass section", OrchestraView::getSectionPicture (false, true) });
     pictures.push_back ({ "brass section lit", OrchestraView::getSectionPicture (true, true) });
+    for (const auto k : { orchestra::Kind::flute, orchestra::Kind::piccolo, orchestra::Kind::oboe, orchestra::Kind::englishHorn,
+                          orchestra::Kind::clarinet, orchestra::Kind::bassClarinet, orchestra::Kind::bassoon, orchestra::Kind::contrabassoon })
+        pictures.push_back ({ orchestra::nameOf (k), OrchestraView::getPicture (k) });
+    pictures.push_back ({ "woodwind section", OrchestraView::getSectionPicture (false, orchestra::Family::woodwinds) });
+    pictures.push_back ({ "woodwind section lit", OrchestraView::getSectionPicture (true, orchestra::Family::woodwinds) });
     for (const auto& [name, image] : pictures)
     {
         REQUIRE (image.isValid());
@@ -709,7 +714,7 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.6.0: the brass, which a file is, and each note'
     CHECK (orchestra::kindOf ("FHornStac") == Kind::horn);
     CHECK (orchestra::kindOf ("Tuba-KS") == Kind::tuba);
     CHECK (orchestra::kindOf ("Bass Trombone") == Kind::trombone);   // not a double bass
-    CHECK (orchestra::kindOf ("English Horn") == Kind::none);        // a woodwind
+    CHECK (orchestra::kindOf ("English Horn") == Kind::englishHorn);   // a woodwind (0.12.0), not a horn
     CHECK (orchestra::isBrass (Kind::horn));
     CHECK_FALSE (orchestra::isBrass (Kind::cello));
     CHECK (orchestra::stopsFor (Kind::trumpet, { 60 }).empty());
@@ -846,4 +851,161 @@ TEST_CASE ("THE ORCHESTRA VIEW 0.6.0: a brass instrument shows its note's finger
     CHECK (view.getBrassNote (orchestra::Kind::trombone) == 50);
     CHECK (orchestra::fingeringFor (orchestra::Kind::trombone, view.getBrassNote (orchestra::Kind::trombone)).position == 4);
     CHECK (view.getBrassNote (orchestra::Kind::horn) == -1);
+}
+
+TEST_CASE ("THE ORCHESTRA VIEW 0.12.0: the woodwinds, which a file is, and each note's keys", "[ui][orchestra][woodwinds]")
+{
+    using orchestra::Kind;
+    // VSCO 2 CE's names and Sonatina's.
+    CHECK (orchestra::kindOf ("FluteSusVib") == Kind::flute);
+    CHECK (orchestra::kindOf ("PiccoloSus") == Kind::piccolo);
+    CHECK (orchestra::kindOf ("OboeSusVib") == Kind::oboe);
+    CHECK (orchestra::kindOf ("ClarinetStac") == Kind::clarinet);
+    CHECK (orchestra::kindOf ("BassoonSus") == Kind::bassoon);
+    CHECK (orchestra::kindOf ("English Horn Sustain") == Kind::englishHorn);
+    CHECK (orchestra::kindOf ("Bass Clarinet Sustain") == Kind::bassClarinet);
+    CHECK (orchestra::kindOf ("Contrabassoon Sustain") == Kind::contrabassoon);   // not a double bass
+    CHECK (orchestra::kindOf ("Alto Flute Solo Sustain") == Kind::altoFlute);   // the flute's picture, its chart a fourth down
+    CHECK (orchestra::sectionKindOf (Kind::altoFlute) == Kind::flute);
+    CHECK (orchestra::kindOf ("Contrabass") == Kind::bass);
+    CHECK (orchestra::isWoodwind (Kind::englishHorn));
+    CHECK_FALSE (orchestra::isWoodwind (Kind::horn));
+    CHECK (orchestra::sectionKindOf (Kind::contrabassoon) == Kind::bassoon);
+    CHECK (orchestra::stopsFor (Kind::flute, { 67 }).empty());
+
+    const auto keys = [] (Kind k, int note)
+    {
+        const auto f = orchestra::windFingeringFor (k, note);
+        return f.charted ? f.keys : -1;
+    };
+    // (bits: 0 thumb, 1-3 left hand, 4-6 right hand, 7 the octave / register / whisper / E-flat key)
+    constexpr int sixFingers = 0b01111110;
+    CHECK (keys (Kind::flute, 67) == 0b10001111);   // G4: thumb, the left hand, E-flat
+    CHECK (keys (Kind::flute, 74) == 0b01111101);   // D5: the left forefinger up (and the little finger)
+    CHECK (keys (Kind::flute, 72) == 0b10000010);   // C5: the left forefinger (and E-flat) only
+    CHECK (keys (Kind::flute, 94) == -1);           // B-flat6: not in our chart
+    CHECK (keys (Kind::oboe, 67) == 0b00001110);    // G4: the left hand
+    CHECK (keys (Kind::oboe, 79) == 0b10001110);    // G5: the same with the octave key
+    CHECK (keys (Kind::clarinet, 60) == 0b00000111);   // concert C4 = written D4: thumb, L1, L2
+    CHECK (keys (Kind::clarinet, 53) == 0b01111111);   // concert F3 = written G3: every finger down
+    CHECK (keys (Kind::bassoon, 43) == 0b10111110);    // G2: the right hand's third up, the whisper key
+    // The transposing ones read the same chart at their written pitch.
+    for (int n = 40; n < 110; ++n)
+    {
+        CHECK (keys (Kind::piccolo, n + 12) == keys (Kind::flute, n));
+        CHECK (keys (Kind::altoFlute, n - 5) == keys (Kind::flute, n));
+        CHECK (keys (Kind::englishHorn, n - 7) == keys (Kind::oboe, n));
+        CHECK (keys (Kind::bassClarinet, n - 12) == keys (Kind::clarinet, n));
+        CHECK (keys (Kind::contrabassoon, n - 12) == keys (Kind::bassoon, n));
+    }
+    // The clarinet's upper register (written B4-C6) is its low one (written E3-F4) a twelfth down, plus the register key.
+    for (int written = 71; written <= 84; ++written)
+        CHECK (keys (Kind::clarinet, written - 2) == (keys (Kind::clarinet, written - 2 - 19) | 0b10000000));
+    // Every chart's lowest note has all six fingers down; nothing under it is charted (the clarinets' extension apart).
+    CHECK ((keys (Kind::flute, 60) & sixFingers) == sixFingers);
+    CHECK ((keys (Kind::oboe, 58) & sixFingers) == sixFingers);
+    CHECK ((keys (Kind::bassoon, 34) & sixFingers) == sixFingers);
+    CHECK (keys (Kind::flute, 59) == -1);
+    CHECK (keys (Kind::oboe, 57) == -1);
+    CHECK (keys (Kind::bassoon, 33) == -1);
+
+    // The pictures' keys: eight each, inside the picture, the left hand's three left of the right hand's (the mouthpiece
+    // at the left; the bassoons' left hand on the wing joint, right of the boot's right hand).
+    for (const auto k : { Kind::flute, Kind::piccolo, Kind::oboe, Kind::englishHorn, Kind::clarinet, Kind::bassClarinet, Kind::bassoon, Kind::contrabassoon })
+        for (const auto inSection : { false, true })
+        {
+            INFO (orchestra::nameOf (k) << (inSection ? " in the section" : ""));
+            const auto points = OrchestraView::getKeys (k, inSection);
+            REQUIRE (points.size() == 8);
+            const auto& image = inSection ? OrchestraView::getSectionPicture (false, orchestra::Family::woodwinds) : OrchestraView::getPicture (k);
+            for (const auto& p : points)
+                CHECK (image.getBounds().toFloat().contains (p));
+            const auto bassoons = orchestra::sectionKindOf (k) == Kind::bassoon;
+            CHECK ((points[1].x < points[2].x) != bassoons);
+            CHECK ((points[3].x < points[4].x) != bassoons);
+        }
+}
+
+TEST_CASE ("THE ORCHESTRA VIEW 0.12.0: a woodwind shows its note's keys; a woodwind section lights each part", "[ui][orchestra][woodwinds]")
+{
+    juce::TemporaryFile folder;
+    const auto dir = folder.getFile();
+    dir.createDirectory();
+    testkit::writeWav (dir.getChildFile ("t.wav"), *testkit::sine (220.0, 2.0), 24);
+    const auto file = [&dir] (const char* name, int low, int high)
+    {
+        const auto f = dir.getChildFile (name);
+        f.replaceWithText ("<region> sample=t.wav lokey=" + juce::String (low) + " hikey=" + juce::String (high) + " pitch_keycenter=60\n");
+        return f.getFullPathName();
+    };
+    Window w;
+    auto& page = w.view->getInstrumentPage();
+    auto& view = page.getOrchestraView();
+    w.processor.setPlayConfigDetails (0, 2, 48000.0, 256);
+    w.processor.prepareToPlay (48000.0, 256);
+    juce::AudioBuffer<float> buffer (2, 256);
+    const auto play = [&] (juce::MidiBuffer midi)
+    {
+        w.processor.processBlock (buffer, midi);
+        juce::Timer::callPendingTimersSynchronously();
+        juce::Thread::sleep (60);
+        juce::Timer::callPendingTimersSynchronously();
+    };
+
+    // One flute: its picture; G4 held lights its thumb key, not its right hand's first.
+    w.processor.loadInstrument (juce::File (file ("FluteSusVib.sfz", 60, 96)));
+    REQUIRE (w.processor.waitForInstrument());
+    page.refresh();
+    CHECK (view.getMode() == OrchestraView::Mode::single);
+    CHECK (view.getKind() == orchestra::Kind::flute);
+    CHECK (view.showsWoodwinds());
+    CHECK (page.isShowingPicture());
+    view.setBounds (0, 0, 1100, 450);
+    const auto without = view.createComponentSnapshot (view.getLocalBounds(), true, 1.0f);
+    juce::MidiBuffer on;
+    on.addEvent (juce::MidiMessage::noteOn (1, 67, (juce::uint8) 100), 0);
+    play (on);
+    const auto withNote = view.createComponentSnapshot (view.getLocalBounds(), true, 1.0f);
+    const auto& picture = OrchestraView::getPicture (orchestra::Kind::flute);
+    const auto scale = juce::jmax (1100.0f / (float) picture.getWidth(), 450.0f / (float) picture.getHeight());
+    const auto offset = juce::Point<float> ((1100.0f - (float) picture.getWidth() * scale) * 0.5f, (450.0f - (float) picture.getHeight() * scale) * 0.5f);
+    const auto difference = [&] (juce::Point<float> p)
+    {
+        const auto at = (p * scale + offset).toInt();
+        return std::abs (withNote.getPixelAt (at.x, at.y).getBrightness() - without.getPixelAt (at.x, at.y).getBrightness());
+    };
+    const auto points = OrchestraView::getKeys (orchestra::Kind::flute, false);
+    REQUIRE (points.size() == 8);
+    CHECK (difference (points[0]) > 0.1f);    // the thumb key: closed
+    CHECK (difference (points[3]) > 0.1f);    // L3: closed
+    CHECK (difference (points[4]) < 0.02f);   // R1: open
+    juce::MidiBuffer off;
+    off.addEvent (juce::MidiMessage::noteOff (1, 67), 0);
+    play (off);
+
+    // A section of flute, oboe, English horn, clarinet and bassoon (and a cello part): the woodwinds shown (four
+    // pictured parts to one), the English horn left unpictured (the oboe has its own part); a clarinet note lights the
+    // clarinet.
+    w.processor.loadSection (sampler::section::fromFiles ({ file ("BassoonSus.sfz", 34, 60), file ("CelloEns.sfz", 36, 60),
+                                                            file ("ClarinetSus.sfz", 50, 70), file ("English Horn Sustain.sfz", 52, 72),
+                                                            file ("OboeSusVib.sfz", 58, 80), file ("FluteSusVib.sfz", 60, 96) }));
+    REQUIRE (w.processor.waitForInstrument());
+    page.refresh();
+    CHECK (view.getMode() == OrchestraView::Mode::section);
+    CHECK (view.showsWoodwinds());
+    CHECK (view.getSectionFamily() == orchestra::Family::woodwinds);
+    const auto section = w.processor.getSection();
+    REQUIRE (section.has_value());
+    auto clarinetKey = -1;
+    for (const auto& part : section->parts)
+        if (sampler::section::nameOf (part).containsIgnoreCase ("clarinet"))
+            clarinetKey = (part.low + part.high) / 2;
+    REQUIRE (clarinetKey >= 0);
+    juce::MidiBuffer note;
+    note.addEvent (juce::MidiMessage::noteOn (1, clarinetKey, (juce::uint8) 100), 0);
+    play (note);
+    CHECK (view.getGlow (orchestra::Kind::clarinet) > 0.9f);
+    CHECK (view.getGlow (orchestra::Kind::flute) == 0.0f);
+    CHECK (view.getGlow (orchestra::Kind::englishHorn) == 0.0f);
+    dir.deleteRecursively();
 }

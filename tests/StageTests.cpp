@@ -395,3 +395,17 @@ TEST_CASE ("STAGE 0.8.0: a wide part's two sides don't cancel each other at any 
     INFO ("from " << *lo << " to " << *hi << " dB");
     CHECK (*hi - *lo < 1.5);
 }
+
+TEST_CASE ("THE STAGE 0.12.0: the woodwinds' relatives sit with their families", "[stage]")
+{
+    const auto same = [] (const char* a, const char* b)
+    {
+        const auto x = stage::seatFor (a), y = stage::seatFor (b);
+        return std::abs (x.x - y.x) < 1.0e-4f && std::abs (x.y - y.y) < 1.0e-4f;
+    };
+    CHECK (same ("Contrabassoon Sustain", "BassoonSus"));   // not with the double basses
+    CHECK_FALSE (same ("Contrabassoon Sustain", "Contrabass-Sus"));
+    CHECK (same ("English Horn Sustain", "OboeSusVib"));
+    CHECK (same ("Bass Clarinet Sustain", "ClarinetSus"));
+    CHECK (same ("PiccoloSus", "FluteSusVib"));
+}

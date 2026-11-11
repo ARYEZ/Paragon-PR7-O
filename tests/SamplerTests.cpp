@@ -141,20 +141,22 @@ TEST_CASE ("SFZ: what isn't read yet is listed; missing files, release samples a
     Folder f;
     f.wav ("a.wav", 220.0);
     const auto program = sampler::sfz::load (f.sfz ("i.sfz",
-        "<region> sample=a.wav loop_mode=loop_continuous loop_start=100 loop_end=2000 xfin_locc1=0 xfin_hicc1=64\n"
+        "<region> sample=a.wav loop_mode=loop_continuous loop_start=100 loop_end=2000 xfin_locc1=0 xfin_hicc1=64 lfo01_freq=5\n"
         "<region> sample=a.wav loop_mode=one_shot region_label=hit\n"
         "<region> sample=gone.wav\n"
         "<region> sample=a.wav trigger=release\n"
         "<region> sample=*sine\n"));
-    CHECK (program->regions.size() == 2);
+    CHECK (program->regions.size() == 3);   // 0.9.0: the release sample is read
     CHECK (program->regions[1].oneShot);
     CHECK (program->problems.joinIntoString ("|").contains ("missing: gone.wav"));
     const auto unread = program->unread.joinIntoString ("|");
     INFO (unread);
     CHECK (program->regions[0].loop == sampler::Region::Loop::continuous);   // 0.2.0: loops are read
     CHECK_FALSE (unread.contains ("loop_"));
-    CHECK (unread.contains ("xfin_locc1 (1)"));
-    CHECK (unread.contains ("release / legato samples (1)"));
+    CHECK_FALSE (unread.contains ("xfin_locc1"));     // 0.9.0: read
+    CHECK_FALSE (unread.contains ("release"));
+    CHECK (program->regions[2].trigger == sampler::Region::Trigger::release);
+    CHECK (unread.contains ("lfo01_freq (1)"));        // the newer numbered LFOs: still not
     CHECK (unread.contains ("*sine"));
     CHECK_FALSE (unread.contains ("region_label"));   // names change nothing
     CHECK_FALSE (unread.contains ("one_shot"));       // read
@@ -410,30 +412,6 @@ TEST_CASE ("Kept for later stages: the mixer's effects still run (every type, fi
         CHECK (finite);
         CHECK (sound);
     }
-}
-
-TEST_CASE ("Kept for later stages: disk streaming reads a file as it is", "[streaming]")
-{
-    Folder f;
-    const auto file = f.wav ("long.wav", 220.0, 1.0);
-    sampler::StreamSource source;
-    source.file = file;
-    source.sampleRate = sampleRate;
-    source.length = 48000;
-    source.headFrames = 0;
-    source.parts = { { 0, 0, 0, 1.0f, 0 }, { 0, 0, 1, 1.0f, 0 } };
-    source.numOutputs = 1;
-    sampler::Streamer streamer;
-    const auto stream = streamer.claim (source);
-    REQUIRE (stream >= 0);
-    streamer.attach (stream, 0);
-    for (juce::int64 frame = 0; frame < 30000; frame += 997)
-    {
-        const auto expected = 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * (double) frame / sampleRate);
-        CHECK_THAT (streamer.sample (stream, 0, 0, frame, true), WithinAbs (expected, 1.0e-6));
-        streamer.consumed (stream, 0, frame);
-    }
-    CHECK (streamer.getUnderruns() == 0);
 }
 
 //==============================================================================
@@ -1252,4 +1230,646 @@ TEST_CASE ("SAMPLER 0.7.0: GLIDE slides a joined note's pitch from the old note'
     none.legato = true;
     const auto straight = render (*program, notes ({ { true, 60, 0.0 }, { true, 62, 1.0 } }), 1.6, none)[0];
     CHECK_THAT (frequencyOf (straight, (size_t) (1.16 * sampleRate), (size_t) (1.19 * sampleRate)), WithinAbs (330.0, 4.0));
+}
+
+// ================================================================ 0.9.0: the rest of SFZ's sound (Sonatina's files)
+namespace
+{
+    // Tones summed (each peak 0.25), `seconds` long, both sides (the right one's tones `rightScale` x).
+    std::shared_ptr<sampler::Sample> tones (std::initializer_list<double> hz, double seconds, float rightScale = 1.0f)
+    {
+        auto s = std::make_shared<sampler::Sample>();
+        s->name = "tones";
+        s->sampleRate = sampleRate;
+        const auto n = (size_t) (seconds * sampleRate);
+        s->channels.assign (2, std::vector<float> (n));
+        for (size_t i = 0; i < n; ++i)
+            for (const auto f : hz)
+            {
+                const auto x = 0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * f * (double) i / sampleRate);
+                s->channels[0][i] += x;
+                s->channels[1][i] += x * rightScale;
+            }
+        return s;
+    }
+
+    // A program of regions written as SFZ text over one generated sample (the reader's own parsing, the sample swapped in).
+    std::shared_ptr<sampler::Program> withSample (Folder& f, const juce::String& text, std::shared_ptr<const sampler::Sample> sample)
+    {
+        f.wav ("t.wav", 220.0, 0.1);
+        auto program = sampler::sfz::load (f.sfz ("i.sfz", text));
+        for (auto& r : program->regions)
+            r.sample = sample;
+        sampler::prepareRegions (*program);
+        program->index();
+        return program;
+    }
+
+    juce::MidiBuffer events (std::initializer_list<juce::MidiMessage> messages, std::initializer_list<double> seconds)
+    {
+        juce::MidiBuffer m;
+        auto at = seconds.begin();
+        for (const auto& message : messages)
+            m.addEvent (message, (int) std::lround (*at++ * sampleRate));
+        return m;
+    }
+}
+
+TEST_CASE ("SFZ 0.9.0: FILTERS: low-pass and high-pass with their slopes; the cutoff moved by key, velocity and a controller", "[sfz][sampler][filter]")
+{
+    Folder f;
+    const auto both = tones ({ 200.0, 5000.0 }, 1.0);
+    const auto measure = [&] (const juce::String& opcodes, juce::MidiBuffer midi = noteOn (60))
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 " + opcodes + "\n", both);
+        const auto out = render (*program, midi, 0.5)[0];
+        return std::pair { db (levelOver (out, 200.0, 0.3, 0.1) / 0.25), db (levelOver (out, 5000.0, 0.3, 0.1) / 0.25) };
+    };
+    // Read: the type, cutoff, tracking.
+    const auto read = withSample (f, "<region> sample=t.wav fil_type=hpf_1p cutoff=800 resonance=3 fil_keytrack=100 fil_keycenter=c4 fil_veltrack=1200 cutoff_cc1=2400\n", both);
+    REQUIRE (read->regions.size() == 1);
+    const auto& filter = read->regions[0].filters[0];
+    CHECK (filter.type == sampler::Region::Filter::Type::highpass1);
+    CHECK ((filter.cutoff == 800.0f && filter.resonance == 3.0f && filter.keytrack == 100.0f && filter.keycenter == 60 && filter.veltrack == 1200.0f));
+    REQUIRE (filter.cc.size() == 1);
+    CHECK ((filter.cc[0].first == 1 && filter.cc[0].second == 2400.0f));
+    // A 2-pole low-pass at 1 kHz: 200 Hz through, 5 kHz (2.3 octaves up) about 28 dB down; 1-pole: about 14 dB.
+    const auto [low2, high2] = measure ("fil_type=lpf_2p cutoff=1000");
+    CHECK_THAT (low2, WithinAbs (0.0, 0.5));
+    CHECK_THAT (high2, WithinAbs (-28.0, 3.0));
+    const auto [low1, high1] = measure ("fil_type=lpf_1p cutoff=1000");
+    CHECK_THAT (high1, WithinAbs (-14.0, 2.0));
+    CHECK (low1 > -0.5);
+    // A high-pass at 2 kHz: the reverse.
+    const auto [lowH, highH] = measure ("fil_type=hpf_2p cutoff=2000");
+    CHECK (lowH < -30.0);
+    CHECK (highH > -1.0);
+    // The mod wheel up 4 octaves (cutoff_cc1=4800 cents): 5 kHz through again.
+    juce::MidiBuffer wheelUp;
+    wheelUp.addEvent (juce::MidiMessage::controllerEvent (1, 1, 127), 0);
+    wheelUp.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+    CHECK (measure ("fil_type=lpf_2p cutoff=1000 cutoff_cc1=4800", wheelUp).second > -3.0);
+    // Key tracking: an octave up the cutoff follows (fil_keytrack=100): the note at 72 lets more of 5 kHz through.
+    const auto program = withSample (f, "<region> sample=t.wav lokey=48 hikey=84 pitch_keycenter=60 pitch_keytrack=0 amp_veltrack=0 fil_type=lpf_2p cutoff=1000 fil_keytrack=100\n", both);
+    const auto at60 = render (*program, noteOn (60), 0.5)[0], at72 = render (*program, noteOn (72), 0.5)[0];
+    CHECK_THAT (db (levelOver (at72, 5000.0, 0.3, 0.1) / levelOver (at60, 5000.0, 0.3, 0.1)), WithinAbs (12.0, 2.0));
+}
+
+TEST_CASE ("SFZ 0.9.0: controllers: gain_cc, crossfades between layers on the mod wheel (equal power), set_cc as the start", "[sfz][sampler][cc]")
+{
+    Folder f;
+    const auto a = tones ({ 220.0 }, 1.0), b = tones ({ 330.0 }, 1.0);
+    f.wav ("t.wav", 220.0, 0.1);
+    auto program = sampler::sfz::load (f.sfz ("i.sfz",
+        "<control> set_cc1=0 label_cc1=Dynamics\n"
+        "<group> key=60 amp_veltrack=0 xf_cccurve=power\n"
+        "<region> sample=t.wav xfout_locc1=32 xfout_hicc1=96\n"
+        "<region> sample=t.wav xfin_locc1=32 xfin_hicc1=96 gain_cc7=-12\n"));
+    REQUIRE (program->regions.size() == 2);
+    program->regions[0].sample = a;
+    program->regions[1].sample = b;
+    program->index();
+    CHECK (program->initialCC[1] == 0);
+    CHECK (program->ccLabels[1] == "Dynamics");
+    CHECK (program->ownWheel);
+    const auto at = [&] (int wheel, int seven = 0)
+    {
+        juce::MidiBuffer m;
+        m.addEvent (juce::MidiMessage::controllerEvent (1, 1, wheel), 0);
+        m.addEvent (juce::MidiMessage::controllerEvent (1, 7, seven), 0);
+        m.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+        const auto out = render (*program, m, 0.5)[0];
+        return std::pair { levelOver (out, 220.0, 0.3, 0.1) / 0.25, levelOver (out, 330.0, 0.3, 0.1) / 0.25 };
+    };
+    const auto [lowA, lowB] = at (0);
+    CHECK_THAT (lowA, WithinAbs (1.0, 0.02));
+    CHECK (lowB < 1.0e-3);
+    const auto [midA, midB] = at (64);   // half way: each at equal power (sqrt 0.5, -3 dB)
+    CHECK_THAT (db (midA), WithinAbs (-3.0, 0.3));
+    CHECK_THAT (db (midB), WithinAbs (-3.0, 0.3));
+    const auto [highA, highB] = at (127);
+    CHECK (highA < 1.0e-3);
+    CHECK_THAT (highB, WithinAbs (1.0, 0.02));
+    CHECK_THAT (db (at (127, 127).second), WithinAbs (-12.0, 0.3));   // gain_cc7=-12: CC 7 at the top, 12 dB down
+    // Moving the wheel while the note is held moves the crossfade (and PR7-O's own MOD WHEEL dynamics leaves the file's be).
+    sampler::Sampler::Settings wheelMode;
+    wheelMode.dynamics = sampler::Sampler::Dynamics::modWheel;
+    juce::MidiBuffer moving;
+    moving.addEvent (juce::MidiMessage::controllerEvent (1, 1, 0), 0);
+    moving.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+    moving.addEvent (juce::MidiMessage::controllerEvent (1, 1, 127), 24000);
+    const auto moved = render (*program, moving, 1.0, wheelMode)[0];
+    CHECK (levelOver (moved, 220.0, 0.3, 0.1) > 0.2);
+    CHECK (levelOver (moved, 330.0, 0.8, 0.1) > 0.2);
+    CHECK (levelOver (moved, 220.0, 0.8, 0.1) < 0.01);
+}
+
+TEST_CASE ("SFZ 0.9.0: velocity crossfades, amp_velcurve, pitch_veltrack, amp_keytrack, width, delay", "[sfz][sampler]")
+{
+    Folder f;
+    const auto a = tones ({ 440.0 }, 1.0);
+    const auto levelAtVelocity = [&] (const juce::String& opcodes, int velocity)
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 " + opcodes + "\n", a);
+        return levelOver (render (*program, noteOn (60, velocity), 0.4)[0], 440.0, 0.2, 0.1) / 0.25;
+    };
+    // xfin over velocity 32-96 (power): at 64 half in power (-3 dB), at 96 all, at 20 none (amp_veltrack 0).
+    CHECK_THAT (db (levelAtVelocity ("amp_veltrack=0 xfin_lovel=32 xfin_hivel=96", 64)), WithinAbs (-3.0, 0.3));
+    CHECK_THAT (levelAtVelocity ("amp_veltrack=0 xfin_lovel=32 xfin_hivel=96", 100), WithinAbs (1.0, 0.02));
+    CHECK (levelAtVelocity ("amp_veltrack=0 xfin_lovel=32 xfin_hivel=96", 20) < 1.0e-3);
+    CHECK_THAT (levelAtVelocity ("amp_veltrack=0 xfout_lovel=32 xfout_hivel=96 xf_velcurve=gain", 64), WithinAbs (0.5, 0.03));
+    // amp_velcurve: its points, straight between them (velocity 64 at 0.5 here, 32 a quarter).
+    CHECK_THAT (levelAtVelocity ("amp_velcurve_64=0.5 amp_velcurve_127=1", 32), WithinAbs (0.25, 0.02));
+    CHECK_THAT (levelAtVelocity ("amp_velcurve_64=0.5 amp_velcurve_127=1", 64), WithinAbs (0.5, 0.02));
+    // amp_keytrack: -1 dB a key from 60 (the note at 66: -6 dB).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav lokey=48 hikey=84 pitch_keycenter=60 pitch_keytrack=0 amp_veltrack=0 amp_keytrack=-1\n", a);
+        CHECK_THAT (db (levelOver (render (*program, noteOn (66), 0.4)[0], 440.0, 0.2, 0.1) / 0.25), WithinAbs (-6.0, 0.3));
+    }
+    // pitch_veltrack: 1200 cents at velocity 127 (an octave up).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 pitch_veltrack=1200\n", a);
+        CHECK_THAT (frequencyOf (render (*program, noteOn (60, 127), 0.4)[0], 4800, 14400), WithinAbs (880.0, 3.0));
+    }
+    // width 0: both sides the same (a sample whose right side is half its left).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 width=0\n", tones ({ 440.0 }, 1.0, 0.5f));
+        const auto out = render (*program, noteOn (60), 0.4);
+        CHECK_THAT (db (levelOver (out[0], 440.0, 0.2, 0.1) / levelOver (out[1], 440.0, 0.2, 0.1)), WithinAbs (0.0, 0.05));
+    }
+    // delay=0.1: nothing for 0.1 s, then the recording from its start (sample for sample).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 delay=0.1\n", a);
+        const auto out = render (*program, noteOn (60), 0.3)[0];
+        CHECK (peakOf (out, 0, 4799) == 0.0);
+        CHECK_THAT (out[4800 + 10], WithinAbs (a->channels[0][10], 1.0e-5));
+    }
+}
+
+TEST_CASE ("SFZ 0.9.0: RELEASE samples after the key (and the pedal), quieter the longer it was held; first and legato samples", "[sfz][sampler][release]")
+{
+    Folder f;
+    const auto body = tones ({ 220.0 }, 3.0), tail = tones ({ 660.0 }, 1.0);
+    f.wav ("t.wav", 220.0, 0.1);
+    auto program = sampler::sfz::load (f.sfz ("i.sfz",
+        "<group> key=60 amp_veltrack=0\n"
+        "<region> sample=t.wav ampeg_release=0.05\n"
+        "<region> sample=t.wav trigger=release rt_decay=6\n"));
+    REQUIRE (program->regions.size() == 2);
+    program->regions[0].sample = body;
+    program->regions[1].sample = tail;
+    program->index();
+    using M = juce::MidiMessage;
+    const auto out = render (*program, events ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOff (1, 60) }, { 0.0, 1.0 }), 1.5)[0];
+    CHECK (levelOver (out, 660.0, 0.5, 0.1) < 1.0e-3);   // not while held
+    CHECK (levelOver (out, 660.0, 1.1, 0.1) > 0.1);      // after
+    // rt_decay 6 dB a second: held 2 s, 6 dB quieter than held 1 s.
+    const auto later = render (*program, events ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOff (1, 60) }, { 0.0, 2.0 }), 2.5)[0];
+    CHECK_THAT (db (levelOver (later, 660.0, 2.1, 0.1) / levelOver (out, 660.0, 1.1, 0.1)), WithinAbs (-6.0, 0.3));
+    // Under the pedal: let go of the key, nothing yet; lift the pedal, the release sample.
+    const auto pedal = render (*program, events ({ M::controllerEvent (1, 64, 127), M::noteOn (1, 60, (juce::uint8) 100), M::noteOff (1, 60),
+                                                   M::controllerEvent (1, 64, 0) }, { 0.0, 0.01, 0.5, 1.0 }), 1.5)[0];
+    CHECK (levelOver (pedal, 660.0, 0.7, 0.1) < 1.0e-3);
+    CHECK (levelOver (pedal, 660.0, 1.1, 0.1) > 0.05);
+    // release_key: at the key, whatever the pedal.
+    program->regions[1].trigger = sampler::Region::Trigger::releaseKey;
+    const auto keyOnly = render (*program, events ({ M::controllerEvent (1, 64, 127), M::noteOn (1, 60, (juce::uint8) 100), M::noteOff (1, 60) },
+                                                   { 0.0, 0.01, 0.5 }), 1.0)[0];
+    CHECK (levelOver (keyOnly, 660.0, 0.6, 0.1) > 0.1);
+
+    // first / legato: the first note of a phrase plays one, a note while another's held the other.
+    auto phrase = sampler::sfz::load (f.sfz ("p.sfz",
+        "<group> lokey=60 hikey=62 pitch_keycenter=60 pitch_keytrack=0 amp_veltrack=0\n"
+        "<region> sample=t.wav trigger=first\n"
+        "<region> sample=t.wav trigger=legato\n"));
+    REQUIRE (phrase->regions.size() == 2);
+    phrase->regions[0].sample = body;
+    phrase->regions[1].sample = tail;
+    phrase->index();
+    const auto played = render (*phrase, events ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOn (1, 62, (juce::uint8) 100) }, { 0.0, 0.5 }), 1.0)[0];
+    CHECK (levelOver (played, 220.0, 0.2, 0.1) > 0.2);   // the first note: first's
+    CHECK (levelOver (played, 660.0, 0.2, 0.1) < 1.0e-3);
+    CHECK (levelOver (played, 660.0, 0.7, 0.1) > 0.2);   // the second, over it: legato's
+}
+
+TEST_CASE ("SFZ 0.9.0: GROUPS turn notes off (off_by, off_mode); locc / hicc; envelope by velocity; the level LFO", "[sfz][sampler]")
+{
+    Folder f;
+    const auto a = tones ({ 220.0 }, 2.0), b = tones ({ 330.0 }, 2.0);
+    f.wav ("t.wav", 220.0, 0.1);
+    using M = juce::MidiMessage;
+    // An open hi-hat cut by a closed one, as drum kits do: here A (group 1, off_by 2) stops when B (group 2) starts.
+    auto choke = sampler::sfz::load (f.sfz ("c.sfz",
+        "<region> sample=t.wav key=60 amp_veltrack=0 group=1 off_by=2\n"
+        "<region> sample=t.wav key=62 amp_veltrack=0 group=2\n"));
+    REQUIRE (choke->regions.size() == 2);
+    choke->regions[0].sample = a;
+    choke->regions[1].sample = b;
+    choke->index();
+    const auto cut = render (*choke, events ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOn (1, 62, (juce::uint8) 100) }, { 0.0, 0.5 }), 1.0)[0];
+    CHECK (levelOver (cut, 220.0, 0.3, 0.1) > 0.2);
+    CHECK (levelOver (cut, 220.0, 0.6, 0.1) < 1.0e-3);   // gone 6 ms after B starts
+    CHECK (levelOver (cut, 330.0, 0.6, 0.1) > 0.2);
+    // locc / hicc: a region only while CC 20 is 64 or more.
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 locc20=64 hicc20=127\n", a);
+        CHECK (peakOf (render (*program, noteOn (60), 0.2)[0]) == 0.0);
+        juce::MidiBuffer m;
+        m.addEvent (M::controllerEvent (1, 20, 100), 0);
+        m.addEvent (M::noteOn (1, 60, (juce::uint8) 100), 1);
+        CHECK (peakOf (render (*program, m, 0.2)[0]) > 0.1);
+    }
+    // ampeg_vel2attack: 0.2 s more attack at velocity 127: half way up at 0.1 s (a soft note: at once).
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 ampeg_vel2attack=0.2\n", a);
+        CHECK_THAT (levelOver (render (*program, noteOn (60, 127), 0.4)[0], 220.0, 0.095, 0.01) / 0.25, WithinAbs (0.5, 0.06));
+        CHECK (levelOver (render (*program, noteOn (60, 1), 0.4)[0], 220.0, 0.095, 0.01) / 0.25 > 0.95);
+    }
+    // amplfo: +-3 dB at 2 Hz: the level swings 6 dB over half a second.
+    {
+        const auto program = withSample (f, "<region> sample=t.wav key=60 amp_veltrack=0 amplfo_depth=3 amplfo_freq=2\n", a);
+        const auto out = render (*program, noteOn (60), 1.6)[0];
+        auto lo = 1.0e9, hi = 0.0;
+        for (double t = 0.6; t < 1.5; t += 0.02)
+        {
+            const auto level = db (levelOver (out, 220.0, t, 0.02) / 0.25);
+            lo = std::min (lo, level);
+            hi = std::max (hi, level);
+        }
+        CHECK_THAT (hi - lo, WithinAbs (6.0, 0.8));
+    }
+}
+
+// ================================================================ 0.10.0: THE ENSEMBLE
+namespace
+{
+    std::shared_ptr<sampler::Sample> monoNoise (double seconds)
+    {
+        auto s = std::make_shared<sampler::Sample>();
+        s->name = "noise";
+        s->sampleRate = sampleRate;
+        s->channels.assign (1, std::vector<float> ((size_t) (seconds * sampleRate)));
+        juce::Random random (7);
+        for (auto& v : s->channels[0])
+            v = 0.5f * (random.nextFloat() - 0.5f);
+        return s;
+    }
+
+    std::shared_ptr<sampler::Program> keyboardOf (std::shared_ptr<const sampler::Sample> sample, int low = 24, int high = 108)
+    {
+        auto program = sampler::programFrom (std::move (sample), 60);
+        program->regions[0].loKey = low;
+        program->regions[0].hiKey = high;
+        program->regions[0].velTrack = 0.0f;
+        program->index();
+        return program;
+    }
+}
+
+TEST_CASE ("SAMPLER 0.10.0: PLAYERS: as loud as one, the first on time, the others later, out of tune and across", "[sampler][ensemble]")
+{
+    const auto noise = monoNoise (2.0);
+    const auto program = keyboardOf (noise);
+    sampler::Sampler::Settings one, three;
+    three.players = 3;
+    const auto a = render (*program, noteOn (60), 1.5, one), b = render (*program, noteOn (60), 1.5, three);
+    // The level holds (each player at 1 / sqrt 3; their sounds unalike), within 1.5 dB.
+    CHECK_THAT (db (rms (b[0], 24000, 72000) / rms (a[0], 24000, 72000)), WithinAbs (0.0, 1.5));
+    // Spread across: one player, both sides the same; three, they differ.
+    const auto correlation = [] (const std::vector<float>& x, const std::vector<float>& y)
+    {
+        double xy = 0, xx = 0, yy = 0;
+        for (size_t i = 24000; i < 72000; ++i) { xy += x[i] * y[i]; xx += x[i] * x[i]; yy += y[i] * y[i]; }
+        return xy / std::sqrt (xx * yy);
+    };
+    CHECK (correlation (a[0], a[1]) > 0.999);
+    CHECK (correlation (b[0], b[1]) < 0.95);
+    // The first player on time, the others later (at least a quarter of TIMING): the first 5 ms are the recording alone,
+    // at its share (three players, the others either side: each side 1 / sqrt (1 + 1 + 0.16)).
+    sampler::Sampler::Settings late = three;
+    late.timingMs = 20.0f;
+    const auto c = render (*program, noteOn (60), 0.1, late)[0];
+    for (size_t i = 0; i < 230; ++i)
+    {
+        INFO (i);
+        REQUIRE_THAT (c[i], WithinAbs (noise->channels[0][i] / std::sqrt (2.16f), 1.0e-5));
+    }
+    // Out of tune: two players of a steady tone, DETUNE 30 cents and no lateness, beat (the level swings); one doesn't.
+    const auto toneProgram = keyboardOf (tones ({ 440.0 }, 2.0));
+    sampler::Sampler::Settings two;
+    two.players = 2;
+    two.detuneCents = 30.0f;
+    two.timingMs = 0.0f;
+    const auto swing = [] (const std::vector<float>& x)
+    {
+        auto lo = 1.0e9, hi = -1.0e9;
+        for (double t = 0.3; t < 1.4; t += 0.02)
+        {
+            const auto level = db (rms (x, (size_t) (t * sampleRate), (size_t) ((t + 0.02) * sampleRate)));
+            lo = std::min (lo, level);
+            hi = std::max (hi, level);
+        }
+        return hi - lo;
+    };
+    CHECK (swing (render (*toneProgram, noteOn (60), 1.5, two)[0]) > 6.0);
+    CHECK (swing (render (*toneProgram, noteOn (60), 1.5, one)[0]) < 0.5);
+}
+
+TEST_CASE ("SAMPLER 0.10.0: DOUBLE: the octaves at DOUBLE LEVEL, ended by the key played, counted as one note; a join takes them along", "[sampler][ensemble]")
+{
+    const auto program = keyboardOf (tones ({ 220.0 }, 3.0));   // key 60 plays 220 Hz
+    const auto levels = [&] (int mode, juce::MidiBuffer midi = noteOn (60), double seconds = 0.6)
+    {
+        sampler::Sampler::Settings settings;
+        settings.doubleMode = mode;
+        settings.doubleGain = 0.5f;
+        return render (*program, midi, seconds, settings)[0];
+    };
+    const auto up = levels (1), down = levels (2), both = levels (3), none = levels (0);
+    CHECK (levelOver (none, 440.0, 0.3, 0.1) < 1.0e-3);
+    CHECK_THAT (db (levelOver (up, 440.0, 0.3, 0.1) / levelOver (up, 220.0, 0.3, 0.1)), WithinAbs (-6.0, 0.3));
+    CHECK (levelOver (up, 110.0, 0.3, 0.1) < 1.0e-3);
+    CHECK_THAT (db (levelOver (down, 110.0, 0.3, 0.1) / levelOver (down, 220.0, 0.3, 0.1)), WithinAbs (-6.0, 0.3));
+    CHECK ((levelOver (both, 110.0, 0.3, 0.1) > 0.05 && levelOver (both, 440.0, 0.3, 0.1) > 0.05));
+    // Ended by the key played; one note for POLYPHONY.
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    sampler::Sampler::Settings settings;
+    settings.doubleMode = 3;
+    std::vector<float> l (24000), r (24000);
+    s.render (program.get(), l.data(), r.data(), 24000, noteOn (60), 0, settings);
+    CHECK (s.getActiveNotes() == 1);
+    auto off = juce::MidiBuffer();
+    off.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+    std::vector<float> l2 (48000), r2 (48000);
+    s.render (program.get(), l2.data(), r2.data(), 48000, off, 0, settings);
+    CHECK (s.getActiveVoices() == 0);
+    // A key the instrument doesn't have isn't doubled (an instrument of keys 55-65: 60 up is 72, not there).
+    const auto narrow = keyboardOf (tones ({ 220.0 }, 1.0), 55, 65);
+    sampler::Sampler::Settings upOnly;
+    upOnly.doubleMode = 1;
+    CHECK (levelOver (render (*narrow, noteOn (60), 0.4, upOnly)[0], 440.0, 0.2, 0.1) < 1.0e-3);
+}
+
+TEST_CASE ("SAMPLER 0.10.0: LEGATO carries the doubled octave along", "[sampler][ensemble][legato]")
+{
+    // A held instrument (the legato tests' bowed shape) over the keyboard, 220 Hz at key 60: 60 then 62 joined, an
+    // octave up doubled: the old octave (72, 440 Hz) goes with its note, the new one (74, 493.9 Hz) comes.
+    auto program = sampler::programFrom (shaped (220.0, 4.0, curve ({ { 0.0, -30.0 }, { 0.4, 0.0 }, { 4.0, 0.0 } })), 60);
+    program->regions[0].velTrack = 0.0f;
+    program->regions[0].loKey = 36;
+    program->regions[0].hiKey = 96;
+    sampler::prepareRegions (*program);
+    program->index();
+    REQUIRE (program->regions[0].held);
+    sampler::Sampler::Settings settings;
+    settings.legato = true;
+    settings.doubleMode = 1;
+    juce::MidiBuffer m;
+    m.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    m.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100), 48000);
+    const auto out = render (*program, m, 1.6, settings)[0];
+    CHECK (levelOver (out, 440.0, 0.8, 0.1) > 0.05);
+    // (gone: the 440 Hz reading no more than the new note's own leak into it, 62 and its octave played alone)
+    juce::MidiBuffer alone;
+    alone.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100), 0);
+    const auto baseline = render (*program, alone, 1.0, settings)[0];
+    CHECK (db (levelOver (out, 440.0, 1.3, 0.1)) < db (levelOver (baseline, 440.0, 0.7, 0.1)) + 1.0);
+    CHECK (levelOver (out, 493.88, 1.3, 0.1) > 0.05);
+}
+
+//==============================================================================
+// 0.11.0: DISK STREAMING. A long recording keeps a few stretches in memory and the rest is read from its file as it
+// plays: what comes out must be what the whole recording in memory gives, sample for sample.
+namespace
+{
+    // 6 s of a sound no two stretches of which are alike (gliding tones, a different one each side), 32-bit float.
+    juce::File unlikeTones (Folder& f, const juce::String& name, double seconds = 6.0, int channels = 2)
+    {
+        const auto file = f.dir.getChildFile (name);
+        juce::AudioBuffer<float> buffer (channels, (int) (seconds * sampleRate));
+        for (int c = 0; c < channels; ++c)
+        {
+            double phase = 0.0, phase2 = 0.0;
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            {
+                const auto t = (double) i / sampleRate;
+                phase += juce::MathConstants<double>::twoPi * (180.0 + 70.0 * t + 40.0 * c) / sampleRate;
+                phase2 += juce::MathConstants<double>::twoPi * (1300.0 - 90.0 * t) / sampleRate;
+                buffer.setSample (c, i, (float) (0.3 * std::sin (phase) + 0.1 * std::sin (phase2) * (c == 0 ? 1.0 : -1.0)));
+            }
+        }
+        testkit::writeWav (file, buffer, sampleRate);
+        return file;
+    }
+
+    // Plays through `s` (prepared by the caller) for `seconds`; `beforeEachBlock` runs first each block.
+    std::array<std::vector<float>, 2> renderWith (sampler::Sampler& s, const sampler::Program& program, const juce::MidiBuffer& midi,
+                                                  double seconds, const sampler::Sampler::Settings& settings,
+                                                  const std::function<void()>& beforeEachBlock = {})
+    {
+        std::array<std::vector<float>, 2> out;
+        const auto total = (int) (seconds * sampleRate);
+        out[0].assign ((size_t) total, 0.0f);
+        out[1].assign ((size_t) total, 0.0f);
+        for (int start = 0; start < total; start += blockSize)
+        {
+            if (beforeEachBlock)
+                beforeEachBlock();
+            const auto n = juce::jmin (blockSize, total - start);
+            s.render (&program, out[0].data() + start, out[1].data() + start, n, midi, start, settings);
+        }
+        return out;
+    }
+
+    float largestDifference (const std::array<std::vector<float>, 2>& a, const std::array<std::vector<float>, 2>& b)
+    {
+        auto most = 0.0f;
+        for (size_t c = 0; c < 2; ++c)
+            for (size_t i = 0; i < a[c].size(); ++i)
+                most = std::max (most, std::abs (a[c][i] - b[c][i]));
+        return most;
+    }
+}
+
+TEST_CASE ("Disk streaming: the stream follows the voice's timeline round its loop and out of it", "[streaming]")
+{
+    Folder f;
+    const auto file = unlikeTones (f, "long.wav");
+    const auto whole = sampler::sampleFiles::load (file);
+    REQUIRE (whole != nullptr);
+    sampler::StreamSource source;
+    source.file = file;
+    source.length = whole->length();
+    source.numChannels = 2;
+    source.resident = { { 0, 1000 }, { 49996, 50004 } };
+    sampler::StreamPlan plan;
+    plan.start = 0;
+    plan.looping = true;
+    plan.loopStart = 50000;
+    plan.loopEnd = 90000;
+    plan.crossfade = 5000;
+    sampler::Streamer streamer;
+    const auto stream = streamer.claim (source, plan);
+    REQUIRE (stream >= 0);
+    // Each timeline frame: the file's frame the plan says (back: a loop's length earlier, in the crossfade).
+    const auto check = [&] (juce::int64 t, juce::int64 exitAt)
+    {
+        for (int k = 0; k < 2; ++k)
+        {
+            const float* l = nullptr;
+            const float* r = nullptr;
+            int n = 0;
+            for (auto last = false; (n = streamer.span (stream, t, k == 1, l, r)) == 0 && ! last;)
+                last = ! streamer.fillNow (stream);
+            REQUIRE (n > 0);
+            const auto frame = sampler::Streamer::fileFrame (plan, t, exitAt) - (k == 1 ? plan.loopEnd - plan.loopStart : 0);
+            CHECK (l[0] == whole->channels[0][(size_t) frame]);
+            CHECK (r[0] == whole->channels[1][(size_t) frame]);
+            if (k == 0 && ! (t < exitAt && frame >= plan.loopEnd - plan.crossfade && frame < plan.loopEnd))
+                break;   // (back reads only in the crossfade)
+        }
+    };
+    // Up to the loop's end, then round twice (into its crossfade each time), then out past its end.
+    for (juce::int64 t = 1000; t < 90000 + 2 * 40000; t += 777)
+    {
+        if (sampler::Streamer::fileFrame (plan, t, sampler::Streamer::never) >= plan.loopStart - 4
+            && sampler::Streamer::fileFrame (plan, t, sampler::Streamer::never) < plan.loopStart + 4)
+            continue;
+        check (t, sampler::Streamer::never);
+        streamer.consumed (stream, t - 2);
+    }
+    // Let go in the third time round: from that time's end, the file past the loop's end.
+    const auto exitAt = (juce::int64) 90000 + 3 * 40000;
+    streamer.stopLooping (stream, exitAt);
+    for (juce::int64 t = 90000 + 2 * 40000 + 100; t < exitAt + 100000; t += 613)
+    {
+        check (t, exitAt);
+        streamer.consumed (stream, t - 2);
+    }
+    CHECK (sampler::Streamer::fileFrame (plan, exitAt + 10, exitAt) == 90010);
+    streamer.release (stream);
+}
+
+TEST_CASE ("Disk streaming: a streamed recording plays as the whole one does, sample for sample", "[streaming]")
+{
+    Folder f;
+    unlikeTones (f, "long.wav");
+    const auto sfzFile = f.sfz ("long.sfz", "<region> sample=long.wav pitch_keycenter=60 amp_veltrack=0 ampeg_release=0.4\n"
+                                            "loop_mode=loop_sustain loop_start=96000 loop_end=180000 loop_crossfade=0.3\n");
+    const auto whole = sampler::sfz::load (sfzFile);
+    auto streamed = sampler::sfz::load (sfzFile);
+    sampler::streamSamples (*streamed);
+    REQUIRE (whole->regions.size() == 1);
+    REQUIRE (streamed->regions[0].sample->streamed());
+    // In memory: the start, the tail after the loop (0.5 s each), a few frames round the loop's start.
+    INFO ("in memory " << streamed->bytes << " of " << streamed->wholeBytes);
+    CHECK (streamed->wholeBytes == whole->bytes);
+    CHECK ((double) streamed->bytes < 0.2 * (double) streamed->wholeBytes);
+    {
+        // A short one (1.5 s) stays whole: little to save.
+        const auto shortFile = f.sfz ("short.sfz", "<region> sample=short.wav\n");
+        unlikeTones (f, "short.wav", 1.5);
+        auto shortProgram = sampler::sfz::load (shortFile);
+        sampler::streamSamples (*shortProgram);
+        REQUIRE (shortProgram->regions.size() == 1);
+        CHECK (! shortProgram->regions[0].sample->streamed());
+    }
+
+    // Two notes: one at its root, one a tone up (between frames), held through several times round the loop; let go
+    // inside the loop (the stream told to go on past it) and inside its crossfade (once more round first).
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    midi.addEvent (juce::MidiMessage::noteOn (1, 62, (juce::uint8) 90), 3000);
+    midi.addEvent (juce::MidiMessage::noteOff (1, 60), (int) (5.3 * sampleRate));
+    midi.addEvent (juce::MidiMessage::noteOff (1, 62), (int) (6.95 * sampleRate));
+    sampler::Sampler::Settings settings;
+    sampler::Sampler plain;
+    plain.prepare (sampleRate);
+    const auto expected = renderWith (plain, *whole, midi, 9.0, settings);
+    CHECK (peakOf (expected[0], (size_t) (7.0 * sampleRate), (size_t) (7.3 * sampleRate)) > 0.01);   // (sounding past the loop's end)
+
+    SECTION ("bouncing: what the disk hasn't read yet is read there and then")
+    {
+        sampler::Streamer streamer;
+        sampler::Sampler s;
+        s.prepare (sampleRate);
+        s.setStreamer (&streamer);
+        settings.waitForDisk = true;
+        const auto got = renderWith (s, *streamed, midi, 9.0, settings);
+        CHECK (largestDifference (expected, got) < 1.0e-6f);
+        CHECK (streamer.getUnderruns() == 0);
+    }
+    SECTION ("live, with the disk keeping up")
+    {
+        sampler::Streamer streamer;
+        sampler::Sampler s;
+        s.prepare (sampleRate);
+        s.setStreamer (&streamer);
+        const auto got = renderWith (s, *streamed, midi, 9.0, settings, [&] { CHECK (streamer.waitUntilFilled (2000)); });
+        CHECK (largestDifference (expected, got) < 1.0e-6f);
+        CHECK (streamer.getUnderruns() == 0);
+    }
+    SECTION ("with no streamer, only what's in memory plays (and nothing breaks)")
+    {
+        sampler::Sampler s;
+        s.prepare (sampleRate);
+        const auto got = renderWith (s, *streamed, midi, 9.0, settings);
+        for (int i = 0; i < 20000; ++i)   // (the start is in memory)
+            CHECK (got[0][(size_t) i] == expected[0][(size_t) i]);
+        // Past the start, nothing but the few frames kept round the loop's start (each note goes by them once).
+        auto sounding = 0;
+        for (size_t i = (size_t) (0.6 * sampleRate); i < (size_t) (3.5 * sampleRate); ++i)
+            sounding += std::abs (got[0][i]) > 1.0e-6f ? 1 : 0;
+        CHECK (sounding > 0);
+        CHECK (sounding < 30);
+    }
+}
+
+TEST_CASE ("Disk streaming: legato joins, AUTO SUSTAIN and the ensemble stream as they play from memory", "[streaming]")
+{
+    // A held recording (steady after its attack, a bow-off at its end): AUTO SUSTAIN loops it, a join starts it past
+    // its attack, players start a little into it: all places the stream must start from.
+    Folder f;
+    {
+        auto bowedNote = bowed (220.0, 9.0, 0.4, 0.8);
+        bowedNote->channels.push_back (bowedNote->channels[0]);
+        for (size_t i = 0; i < bowedNote->channels[1].size(); ++i)   // (the sides differ: noise on the right)
+            bowedNote->channels[1][i] += 0.02f * (float) std::sin ((double) i * 0.731 + std::sin ((double) i * 0.0017) * 9.0);
+        testkit::writeWav (f.dir.getChildFile ("held.wav"), *bowedNote);
+    }
+    const auto sfzFile = f.sfz ("held.sfz", "<region> sample=held.wav lokey=50 hikey=70 pitch_keycenter=57 amp_veltrack=0 ampeg_release=0.3\n");
+    const auto whole = sampler::sfz::load (sfzFile);
+    auto streamed = sampler::sfz::load (sfzFile);
+    sampler::streamSamples (*streamed);
+    REQUIRE (whole->regions.size() == 1);
+    REQUIRE (whole->regions[0].autoLoop);
+    REQUIRE (whole->regions[0].legatoStart > 0);
+    REQUIRE (streamed->regions[0].sample->streamed());
+    CHECK (streamed->regions[0].loopStart == whole->regions[0].loopStart);
+    CHECK ((double) streamed->bytes < 0.35 * (double) streamed->wholeBytes);
+
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 100), 0);
+    midi.addEvent (juce::MidiMessage::noteOn (1, 59, (juce::uint8) 100), (int) (1.0 * sampleRate));   // joins 57
+    midi.addEvent (juce::MidiMessage::noteOff (1, 57), (int) (1.1 * sampleRate));
+    midi.addEvent (juce::MidiMessage::noteOff (1, 59), (int) (11.0 * sampleRate));
+    sampler::Sampler::Settings settings;
+    settings.legato = true;
+    settings.players = 3;
+    settings.doubleMode = 1;
+    sampler::Sampler plain;
+    plain.prepare (sampleRate);
+    plain.seedRandom (7);
+    const auto expected = renderWith (plain, *whole, midi, 12.5, settings);
+    sampler::Streamer streamer;
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    s.seedRandom (7);
+    s.setStreamer (&streamer);
+    settings.waitForDisk = true;
+    const auto got = renderWith (s, *streamed, midi, 12.5, settings);
+    CHECK (largestDifference (expected, got) < 1.0e-6f);
+    CHECK (streamer.getUnderruns() == 0);
+    CHECK (peakOf (expected[0], (size_t) (11.0 * sampleRate) - 2000, (size_t) (11.0 * sampleRate)) > 0.05);   // (looped)
 }
