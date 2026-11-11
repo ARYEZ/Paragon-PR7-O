@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.12.1
+
+**A crash fixed, and the orchestra takes about a third less of your computer** (your PR7-S log; you: "run another round
+of optimization").
+
+- **The crash:** the window could crash a few seconds after you opened the library browser (LOAD), on a window tall
+  enough for its SECTIONS list to show empty rows under the seven sections. Those empty rows asked for an eighth
+  section's name from a list of seven, which read whatever was next in memory and crashed. Found by matching your log's
+  crash addresses against the released 0.12.0 Windows build. Every list in the browser now ignores rows past its
+  contents. (PR7-S shows PR7-O as "0.2.0": that's the version it remembers from its first scan, not what you have; a
+  plugin rescan in PR7-S should update it.)
+- **Faster, sounding exactly the same:** measured on VSCO's string section, a dense ten-note chord with four players
+  on the mod wheel went from 8.9% to about 5.7% of one CPU core; with STAGE from 10% to about 6.3%; with both octave
+  doublings from 21% to about 13%. A long test passage (strings with every feature on, a Sonatina organ with release
+  samples, a flute) came out identical to 0.12.0, sample for sample.
+  - Each recording's two sides are now read together, straight from memory or the disk stream's buffer, instead of
+    one frame at a time through a safety check each.
+  - With DYNAMICS on the mod wheel, every velocity layer of a held note plays and the wheel fades between them; the
+    layers the wheel has at nothing are no longer read and mixed, only kept moving, so they're in the right place when
+    the wheel brings them in.
+
 ## 0.12.0
 
 **THE WOODWINDS: pictures, and each note's fingering lit** (you: "Build it, and add the three Sonatina ones too" after

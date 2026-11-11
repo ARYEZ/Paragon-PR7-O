@@ -386,6 +386,27 @@ tools, which need the owner's riffs)
   territory); the chart's written D4 is T + L1 + L2.
 - `Seating`: contrabassoon with the bassoons (it went to the basses: "contrabass" in its name).
 
+## 0.12.1: a crash fixed, a round of optimization (the owner's PR7-S log; "run another round of optimization")
+
+- **Crash** (PR7-S log: access violation reading 0x6567617473 = "stage", the screen's thread, 7 s after reopening the
+  window): matched to the released 0.12.0 Windows build (13 / 14 return addresses after a call there, none in 0.2.0:
+  PR7-S shows the version from its first scan) and its .pdata function table (`objdump -p`): `LibraryBrowser`'s
+  SECTIONS `paintRow` -> `library::nameOf (row)` with row 7+ (JUCE's lists paint the empty rows under the last one,
+  `row` past `getNumRows`: documented). Every browser list now returns past its count (and clicks); `nameOf` checks
+  its table. **When a list's model paints, check `row` against the count.** To map a Windows crash: download the
+  release zip, `objdump -p` (ImageBase, Function Table), find the function holding each RVA, disassemble it and the
+  strings it uses (`/tmp/claude-0/wwscripts/match.py`, `strings_near.py`).
+- **Optimization** (probe `/tmp/claude-0/probes/ScratchBench.cpp`, not committed: `[bench]` scenarios on VSCO's strings
+  section, `[reference]` dumps a long passage to compare old / new sample for sample; callgrind needs the probe's
+  `CALLGRIND_TOGGLE_COLLECT` (name filters never matched) and a long load timeout under valgrind; build
+  `build-prof` RelWithDebInfo for lines). Before: chord x4 on the wheel 8.9% of a core, + STAGE 10.0%, + double both
+  20.9%; after: ~5.7 / 6.3 / 13%. `renderVoices`: `readBoth` (both sides, the place once; four frames straight from
+  `inMemory`, else from the ring window by timeline: ring windows never hold resident frames, so that's equivalent;
+  else `readAt` frame by frame); `muted` voices (on the wheel, `wheelGain` and target exactly 0 for the piece, no
+  filters) skip reading and mixing, still move. Output identical (the reference: 0 samples differ). Left: Hermite
+  arithmetic ~14%, per-voice bookkeeping, STAGE ~9% (its tap loop's ring mask): a SIMD / batched voice loop would be
+  the next step (not asked yet).
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:

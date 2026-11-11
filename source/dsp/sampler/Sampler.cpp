@@ -1017,7 +1017,46 @@ namespace sampler
                 return hermite (at (c, index - 1, back), at (c, index, back), at (c, index + 1, back), at (c, index + 2, back), t);
             };
             constexpr int l = 0, r = 1;
-            const auto read = [&] (int c, double position) noexcept { return readAt (c, position, false); };
+            // 0.12.1: both sides at once (the place worked out once), straight from memory when all four frames the
+            // interpolation needs are in the stretch read last (nearly always); else frame by frame as before.
+            const auto readBoth = [&] (double position, bool back, float& a, float& b) noexcept
+            {
+                const auto index = (juce::int64) position;
+                const auto& w = v.inMemory;
+                if (index - 1 >= w.from && index + 2 < w.to)
+                {
+                    const auto t = (float) (position - (double) index);
+                    const auto* pl = w.left + (index - 1 - w.from);
+                    a = hermite (pl[0], pl[1], pl[2], pl[3], t);
+                    if (stereo)
+                    {
+                        const auto* pr = w.right + (index - 1 - w.from);
+                        b = hermite (pr[0], pr[1], pr[2], pr[3], t);
+                    }
+                    else
+                        b = a;
+                    return;
+                }
+                // (the same from the stream's ring: its windows never hold frames that are in memory, so all four in
+                // it means all four streamed, in a row)
+                const auto& ring = back ? v.behind : v.ahead;
+                if (const auto t0 = (back ? index - 1 + loopLength : index - 1) + v.lap; t0 >= ring.from && t0 + 3 < ring.to)
+                {
+                    const auto t = (float) (position - (double) index);
+                    const auto* pl = ring.left + (t0 - ring.from);
+                    a = hermite (pl[0], pl[1], pl[2], pl[3], t);
+                    if (stereo)
+                    {
+                        const auto* pr = ring.right + (t0 - ring.from);
+                        b = hermite (pr[0], pr[1], pr[2], pr[3], t);
+                    }
+                    else
+                        b = a;
+                    return;
+                }
+                a = readAt (l, position, back);
+                b = stereo ? readAt (r, position, back) : a;
+            };
             const auto wheelStep = (v.wheelTarget - v.wheelGain) / (float) numSamples;
             const auto tilted = v.tilted;
             const auto tiltAt = [&v] (double position) noexcept
@@ -1051,6 +1090,10 @@ namespace sampler
             }
             const auto width = region.width;
             const auto filtering = v.filters[0].on || v.filters[1].on;
+            // 0.12.1: a layer the mod wheel has at nothing for the whole piece (DYNAMICS ON THE MOD WHEEL starts every
+            // layer; those away from the wheel get exactly 0) isn't read or mixed: only kept moving (its place, envelope,
+            // loop), so it's where it should be when the wheel brings it in. (Not with filters: theirs would go stale.)
+            const auto muted = v.onWheel && v.wheelGain == 0.0f && v.wheelTarget == 0.0f && ! filtering;
             for (int i = 0; i < numSamples; ++i)
             {
                 v.controlGain += controlStep;
@@ -1106,8 +1149,12 @@ namespace sampler
                     endStream (v);
                     break;
                 }
-                auto x = read (l, v.position) * v.tiltGain;
-                auto y = stereo ? read (r, v.position) * v.tiltGain : x;
+                if (! muted)
+                {
+                float x, y;
+                readBoth (v.position, false, x, y);
+                x *= v.tiltGain;
+                y = stereo ? y * v.tiltGain : x;
                 // Going round a loop: its last `crossfade` frames fade into the frames before its start.
                 if (v.looping && v.crossfade > 0 && v.position >= (double) (v.loopEnd - v.crossfade))
                 {
@@ -1116,8 +1163,10 @@ namespace sampler
                     const auto norm = 1.0f / std::sqrt (juce::jmax (1.0e-6f, w1 * w1 + w2 * w2 + 2.0f * v.likeness * w1 * w2));
                     const auto from = w1 * norm, to = w2 * norm;
                     const auto back = v.position - (double) (v.loopEnd - v.loopStart);
-                    x = x * from + readAt (l, back, true) * to;
-                    y = stereo ? y * from + readAt (r, back, true) * to : x;
+                    float bx, by;
+                    readBoth (back, true, bx, by);
+                    x = x * from + bx * to;
+                    y = stereo ? y * from + by * to : x;
                 }
                 // 0.9.0: its stereo width, then its filters.
                 if (stereo && width != 1.0f)
@@ -1169,6 +1218,7 @@ namespace sampler
                 const auto gain = level * fade * (v.onWheel ? v.wheelGain : 1.0f) * v.controlGain * v.lfoGain;
                 left[i] += x * gain * v.gainLeft;
                 right[i] += y * gain * v.gainRight;
+                }
                 v.position += v.increment * v.glideRatio;
                 if (v.glideCount > 0 && --v.glideCount == 0)
                     v.glideRatio = v.glideTarget;
