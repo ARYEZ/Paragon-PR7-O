@@ -83,7 +83,7 @@ TEST_CASE ("PR7-O is an instrument: no audio in, MIDI in, mono or stereo out", "
     CHECK (processor.getMainBusNumOutputChannels() == 2);
     CHECK (processor.getBus (false, 0)->getName() == "Main");
     CHECK (juce::String (JucePlugin_Name) == "Paragon PR7-O");
-    CHECK (juce::String (JucePlugin_VersionString) == "0.15.0");
+    CHECK (juce::String (JucePlugin_VersionString) == "0.16.0");
 
     juce::AudioProcessor::BusesLayout layout;
     layout.outputBuses.add (juce::AudioChannelSet::stereo());
