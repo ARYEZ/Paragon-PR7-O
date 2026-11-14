@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.17.0
+
+**Virtual Playing Orchestra 3: a third free library, with its own GET button and preset bank** (you: "Add virtual
+playing Orchestra 3 to the pr7-o").
+
+- **GET VPO 3** (0.7 GB) in the library (LOAD), beside VSCO 2 CE and Sonatina. VPO is Paul Battersby's free orchestra,
+  built from Sonatina, VSCO 2 CE, No Budget Orchestra, the Philharmonia Orchestra's and others' samples: free to use
+  and share with credit (SETTINGS' THE SOUNDS credits it), the music you make yours to sell. PR7-O downloads version
+  3.2.1.1 from a copy on GitHub.
+- **The VIRTUAL PLAYING bank** (VP01-VP10) in PRESETS: five-part strings (sustain, tremolo, staccato, pizzicato on
+  keyswitches from C7), pizzicato strings, brass, woodwinds, the woodwinds' relatives (contrabassoon, bass clarinet,
+  English horn, alto flute, piccolo), **staccato strings** and **brass stabs** (doubled an octave down) for heavy
+  riffs, choir, timpani and harp, each on the stage. VPO's files set the level from the mod wheel themselves (it starts
+  half way up); play harder for a quicker attack.
+- **What VPO's files use that PR7-O didn't read before** (all 454 load now, nothing missing or skipped):
+  - an **EQ on each sample** (up to three bands): VPO cuts and lifts its sources by up to 12 dB so they match;
+  - **vibrato** fading in after the note starts;
+  - each note a **little different** in level and pitch, as real players are;
+  - the mod wheel holding the start back a moment (an accent), and the sustain pedal's own threshold.
+- **Fixed: a section lost its files' own controller settings** (since 0.4.0). Every controller started at 0, so
+  files whose level follows the mod wheel started far too quiet in a section: VPO's by 17 dB. **Sonatina's sections**
+  (its keyswitch files start the wheel at 96) now start where Sonatina meant them to.
+- Measured: VPO's string section with its EQ uses 1.8% of one core for a 10-note chord (VSCO's: 1.5%). Not checked
+  here: listening, and the download itself (this machine can't reach GitHub's archives).
+
 ## 0.16.0
 
 **Articulations switched by a controller or by MIDI channel, not only by keyswitch keys** (you: "Do the articulations",

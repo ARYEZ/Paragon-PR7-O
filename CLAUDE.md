@@ -505,7 +505,7 @@ tools, which need the owner's riffs)
   0.1 -> 0.4%, chord 5.3 -> 5.6, + STAGE 5.2 -> 4.7, + double 10.0 -> 9.2, + mixer effects 12.4. Idle fixed: only
   `2 x numParts` part channels cleared, the stage's pair only when it runs (`Stage::process` adds into it).
 
-## 0.17.0 (not released yet): VIRTUAL PLAYING ORCHESTRA 3 (the owner: "Add virtual playing Orchestra 3 to the pr7-o")
+## 0.17.0: VIRTUAL PLAYING ORCHESTRA 3 (the owner: "Add virtual playing Orchestra 3 to the pr7-o")
 
 - **The library** (Paul Battersby; free; its license.htm: free use, free redistribution with credit, never sold; built
   from SSO, VSCO 2 CE, No Budget Orchestra, the Philharmonia's, Mattias Westlund's, Iowa's and stamperadam's samples,
