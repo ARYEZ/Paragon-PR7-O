@@ -34,6 +34,9 @@ namespace downloads
     // The Sonatina Symphonic Orchestra 4.0 (Mattias Westlund, Peter Eastman; Creative Commons Sampling Plus 1.0): the
     // release PR7-K downloads too.
     const Library& sonatina();
+    // 0.17.0: Virtual Playing Orchestra 3.2.1.1 (Paul Battersby; free, its sources' licences: see its license.htm): a copy
+    // on GitHub (open-soundfonts), pinned to its commit (virtualplaying.com's own download couldn't be reached from here).
+    const Library& vpo();
     std::vector<const Library*> all();
 
     // Where downloads go ("Libraries" beside the presets folder; tests set another), and a library's place there.

@@ -16,7 +16,7 @@ namespace expansions
         const char* description;
     };
 
-    inline constexpr std::array<Expansion, 2> list
+    inline constexpr std::array<Expansion, 3> list
     {{
         { "VSCO ORCHESTRA", "VO",
           "Whole sections from VSCO 2 Community Edition by Versilian Studios (CC0): strings, brass and woodwinds, each "
@@ -24,5 +24,8 @@ namespace expansions
         { "SONATINA", "SO",
           "Whole sections from the Sonatina Symphonic Orchestra by Mattias Westlund and Peter Eastman (Creative Commons "
           "Sampling Plus 1.0): five-part strings, brass, the woodwinds with their relatives, and a choir." },
+        { "VIRTUAL PLAYING", "VP",
+          "Whole sections from Virtual Playing Orchestra 3 by Paul Battersby (free; its sources' licences): five-part "
+          "strings, brass, woodwinds and their relatives, staccato strings and brass stabs for riffs, choir, timpani, harp." },
     }};
 }

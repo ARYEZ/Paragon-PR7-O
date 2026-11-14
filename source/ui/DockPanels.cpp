@@ -160,9 +160,9 @@ void SettingsPage::paint (juce::Graphics& g)
                                "The pitch wheel bends by each instrument's own range (two semitones unless it says), and the "
                                "sustain pedal (CC 64) holds notes.");
     section (soundsArea, "THE SOUNDS", "PR7-O ships no samples: it plays SFZ instruments from your computer, and LOAD's GET buttons "
-                                       "download two free libraries: VSCO 2 Community Edition by Versilian Studios (CC0) and the "
-                                       "Sonatina Symphonic Orchestra by Mattias Westlund and Peter Eastman (CC Sampling Plus 1.0). "
-                                       "Check a library's licence before you release music with it; never locked formats.");
+                                       "download three free ones: VSCO 2 CE (Versilian Studios, CC0), the Sonatina Symphonic "
+                                       "Orchestra (Mattias Westlund, Peter Eastman; CC Sampling Plus 1.0) and Virtual Playing "
+                                       "Orchestra 3 (Paul Battersby; its sources' licences). Check a library's licence; never locked formats.");
     section (rigsArea, "PRESETS", "Your presets are files in this folder, so you can back them up or share them:\n"
                                   + processor.getRigLibrary().getFolder().getFullPathName());
     section (midiArea, "MIDI LINKS", shownLinks.isEmpty()

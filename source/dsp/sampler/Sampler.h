@@ -178,6 +178,13 @@ namespace sampler
             double lfoPhase = 0.0, lfoStep = 0.0;
             int lfoAge = 0;
             float lfoGain = 1.0f;
+            // 0.17.0: its EQUALISER (up to three peaking biquads, both sides; `numEq` in use) and VIBRATO (the pitch LFO:
+            // the speed times vibRatio, ramped across each piece like the level LFO).
+            struct EqBand { float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f; std::array<float, 2> z1 {}, z2 {}; };
+            std::array<EqBand, 3> eq {};
+            int numEq = 0;
+            double vibPhase = 0.0, vibStep = 0.0, vibRatio = 1.0;
+            int vibAge = 0;
             // 0.10.0: the key whose note-off ends it (a doubled octave: the key played), and whether it's a doubling.
             int owner = 0;
             bool isDouble = false;

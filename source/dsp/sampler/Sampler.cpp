@@ -202,7 +202,7 @@ namespace sampler
                 // The sustain pedal: CC 64, or the file's sustain_cc (0.9.0).
                 if (number == (program != nullptr ? program->sustainCC : 64))
                 {
-                    const auto down = value >= 64;
+                    const auto down = value > (program != nullptr ? program->sustainLow : 63);   // (0.17.0: sustain_lo)
                     if (down != pedal)
                     {
                         pedal = down;
@@ -584,8 +584,10 @@ namespace sampler
         v.velocity = velocity;
         if (r.offsetRandom > 0)   // 0.9.0: offset_random
             v.position = juce::jmin ((double) (v.lastFrame - 2), v.position + (double) nextRandom() * (double) r.offsetRandom);
-        const auto cents = ((float) note - (float) r.keyCenter) * r.keytrack + r.tuneCents + r.pitchVeltrack * (float) velocity / 127.0f;
-        v.baseIncrement = std::pow (2.0, (double) cents / 1200.0) * v.sample->sampleRate / rate;
+        auto startCents = ((float) note - (float) r.keyCenter) * r.keytrack + r.tuneCents + r.pitchVeltrack * (float) velocity / 127.0f;
+        if (r.pitchRandom > 0.0f)   // 0.17.0: pitch_random, up to that many cents either way
+            startCents += r.pitchRandom * (2.0f * nextRandom() - 1.0f);
+        v.baseIncrement = std::pow (2.0, (double) startCents / 1200.0) * v.sample->sampleRate / rate;
         // Level: the region's, its pan; its velocity through amp_veltrack (on the wheel: the wheel's, below).
         balance (r.pan, v.gainLeft, v.gainRight);
         // (0.9.0: a file that follows the mod wheel itself, its crossfades or gain_cc1, keeps it: MOD WHEEL leaves it be)
@@ -621,11 +623,17 @@ namespace sampler
         if (r.xfoutLoKey >= 0 || r.xfoutHiKey >= 0)
             velocityGain *= fadeOf (note, r.xfoutLoKey < 0 ? 127 : r.xfoutLoKey, r.xfoutHiKey < 0 ? 127 : r.xfoutHiKey, false, r.keyFadePower);
         velocityGain *= juce::Decibels::decibelsToGain (r.ampKeytrack * (float) (note - r.ampKeycenter), -144.0f) * extraGain;
+        if (r.ampRandom > 0.0f)   // 0.17.0: amp_random, up to that many dB louder
+            velocityGain *= juce::Decibels::decibelsToGain (r.ampRandom * nextRandom());
         v.gainLeft *= r.gain * velocityGain;
         v.gainRight *= r.gain * velocityGain;
         v.controlGain = v.controlTarget = controlGainOf (v);
         // 0.9.0: a start held back (delay, delay_random), its filters, its level LFO.
-        v.waiting = (int) std::lround ((r.startDelay + nextRandom() * r.startDelayRandom) * rate);
+        auto startDelay = r.startDelay + nextRandom() * r.startDelayRandom;
+        for (const auto& [number, seconds] : r.delayCC)   // 0.17.0: delay_ccN, seconds at 127
+            if (number >= 0 && number < 128)
+                startDelay += seconds * cc[(size_t) number] / 127.0f;
+        v.waiting = (int) std::lround (juce::jmax (0.0f, startDelay) * rate);
         for (size_t f = 0; f < 2; ++f)
         {
             const auto& filter = r.filters[f];
@@ -644,6 +652,28 @@ namespace sampler
         v.lfoStep = juce::MathConstants<double>::twoPi * (double) r.lfoFreq / rate;
         v.lfoAge = 0;
         v.lfoGain = 1.0f;
+        // 0.17.0: the equaliser's bands (RBJ peaking, bandwidth in octaves) and vibrato.
+        v.numEq = 0;
+        for (const auto& band : r.eq)
+            if (band.gain != 0.0f && band.freq < 0.49f * (float) rate)
+            {
+                const auto A = std::pow (10.0, (double) band.gain / 40.0);
+                const auto w0 = juce::MathConstants<double>::twoPi * (double) band.freq / rate;
+                const auto sn = std::sin (w0), cs = std::cos (w0);
+                const auto alpha = sn * std::sinh (std::log (2.0) / 2.0 * (double) band.bandwidth * w0 / sn);
+                const auto a0 = 1.0 + alpha / A;
+                auto& e = v.eq[(size_t) v.numEq++];
+                e = {};
+                e.b0 = (float) ((1.0 + alpha * A) / a0);
+                e.b1 = (float) (-2.0 * cs / a0);
+                e.b2 = (float) ((1.0 - alpha * A) / a0);
+                e.a1 = e.b1;
+                e.a2 = (float) ((1.0 - alpha / A) / a0);
+            }
+        v.vibPhase = 0.0;
+        v.vibStep = juce::MathConstants<double>::twoPi * (double) r.pitchLfoFreq / rate;
+        v.vibAge = 0;
+        v.vibRatio = 1.0;
         if (v.onWheel)
         {
             v.layerMiddle = 0.5f * (float) (r.loVel + r.hiVel);
@@ -1105,8 +1135,21 @@ namespace sampler
                 v.lfoPhase = std::fmod (phaseEnd, juce::MathConstants<double>::twoPi);
                 v.lfoAge = ageEnd;
             }
+            // 0.17.0: vibrato, the same way (the speed's ratio, from where it was to where it'll be at the piece's end).
+            auto vibStep = 0.0;
+            if (region.pitchLfoDepth != 0.0f && region.pitchLfoFreq > 0.0f)
+            {
+                const auto ageEnd = v.vibAge + numSamples;
+                const auto delaySamples = region.pitchLfoDelay * (float) rate, fadeSamples = juce::jmax (1.0f, region.pitchLfoFade * (float) rate);
+                const auto amount = juce::jlimit (0.0f, 1.0f, ((float) ageEnd - delaySamples) / fadeSamples);
+                const auto phaseEnd = v.vibPhase + v.vibStep * (double) numSamples;
+                const auto target = std::pow (2.0, (double) (region.pitchLfoDepth * amount) * std::sin (phaseEnd) / 1200.0);
+                vibStep = (target - v.vibRatio) / (double) numSamples;
+                v.vibPhase = std::fmod (phaseEnd, juce::MathConstants<double>::twoPi);
+                v.vibAge = ageEnd;
+            }
             const auto width = region.width;
-            const auto filtering = v.filters[0].on || v.filters[1].on;
+            const auto filtering = v.filters[0].on || v.filters[1].on || v.numEq > 0;
             // 0.12.1: a layer the mod wheel has at nothing for the whole piece (DYNAMICS ON THE MOD WHEEL starts every
             // layer; those away from the wheel get exactly 0) isn't read or mixed: only kept moving (its place, envelope,
             // loop), so it's where it should be when the wheel brings it in. (Not with filters: theirs would go stale.)
@@ -1115,6 +1158,7 @@ namespace sampler
             {
                 v.controlGain += controlStep;
                 v.lfoGain += lfoStep;
+                v.vibRatio += vibStep;
                 if (v.waiting > 0)   // 0.9.0: its start held back (delay): nothing yet, the recording not moving
                 {
                     --v.waiting;
@@ -1227,6 +1271,21 @@ namespace sampler
                         x = run (x, 0);
                         y = stereo ? run (y, 1) : x;
                     }
+                for (int b = 0; b < v.numEq; ++b)   // 0.17.0: the equaliser (transposed direct form II)
+                {
+                    auto& e = v.eq[(size_t) b];
+                    const auto run = [&e] (float in, int c) noexcept
+                    {
+                        auto& z1 = e.z1[(size_t) c];
+                        auto& z2 = e.z2[(size_t) c];
+                        const auto out = e.b0 * in + z1;
+                        z1 = e.b1 * in - e.a1 * out + z2;
+                        z2 = e.b2 * in - e.a2 * out;
+                        return out;
+                    };
+                    x = run (x, 0);
+                    y = stereo ? run (y, 1) : x;
+                }
                 auto level = v.level, fade = v.fade;
                 if (v.legatoIn && v.stage == Voice::Stage::attack)   // LEGATO's equal-power crossfade
                     level = std::sin (juce::MathConstants<float>::halfPi * level);
@@ -1236,7 +1295,7 @@ namespace sampler
                 left[i] += x * gain * v.gainLeft;
                 right[i] += y * gain * v.gainRight;
                 }
-                v.position += v.increment * v.glideRatio;
+                v.position += v.increment * v.glideRatio * v.vibRatio;
                 if (v.glideCount > 0 && --v.glideCount == 0)
                     v.glideRatio = v.glideTarget;
                 else if (v.glideCount > 0)

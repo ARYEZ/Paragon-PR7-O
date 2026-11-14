@@ -668,7 +668,11 @@ namespace sampler
                     "amp_keytrack", "amp_keycenter", "pitch_veltrack", "delay", "delay_random", "offset_random",
                     "group_volume", "master_volume", "global_volume", "group_tune", "master_tune", "global_tune",
                     "group_amplitude", "master_amplitude", "global_amplitude", "width", "group", "off_by", "off_mode", "off_time",
-                    "amplfo_depth", "amplfo_freq", "amplfo_delay", "amplfo_fade", "sustain_cc" };
+                    "amplfo_depth", "amplfo_freq", "amplfo_delay", "amplfo_fade", "sustain_cc",
+                    // 0.17.0
+                    "eq1_freq", "eq1_bw", "eq1_gain", "eq2_freq", "eq2_bw", "eq2_gain", "eq3_freq", "eq3_bw", "eq3_gain",
+                    "pitchlfo_depth", "pitchlfo_freq", "pitchlfo_delay", "pitchlfo_fade", "amp_random", "pitch_random",
+                    "sustain_lo", "offby" };
                 return names;
             }
             // 0.9.0: the opcodes with a controller's number in their name (gain_cc1, xfin_locc1, amp_velcurve_64...).
@@ -680,12 +684,23 @@ namespace sampler
                                                           "locc", "hicc", "on_locc", "on_hicc", "set_cc",
                                                           "ampeg_delaycc", "ampeg_attackcc", "ampeg_holdcc", "ampeg_decaycc",
                                                           "ampeg_sustaincc", "ampeg_releasecc", "ampeg_delay_oncc", "ampeg_attack_oncc",
-                                                          "ampeg_hold_oncc", "ampeg_decay_oncc", "ampeg_sustain_oncc", "ampeg_release_oncc" };
+                                                          "ampeg_hold_oncc", "ampeg_decay_oncc", "ampeg_sustain_oncc", "ampeg_release_oncc",
+                                                          "delay_cc", "delay_oncc" };
                 for (const auto& prefix : prefixes)
                     if (opcode.startsWith (prefix) && opcode.length() > prefix.length()
                         && opcode.substring (prefix.length()).containsOnly ("0123456789"))
                         return true;
                 return false;
+            }
+            // 0.17.0: "lfo01_freq" / "lfo1_freq" -> "freq" ("" for anything else).
+            juce::String numberedLfo (const juce::String& opcode)
+            {
+                if (! opcode.startsWith ("lfo"))
+                    return {};
+                const auto number = opcode.substring (3).upToFirstOccurrenceOf ("_", false, false);
+                if (number.isEmpty() || ! number.containsOnly ("0123456789") || ! opcode.substring (3).contains ("_"))
+                    return {};
+                return opcode.fromFirstOccurrenceOf ("_", false, false);
             }
             bool doesNothingToSound (const juce::String& opcode)
             {
@@ -758,7 +773,7 @@ namespace sampler
                 r.offsetRandom = juce::jmax<juce::int64> (0, (juce::int64) number (op, "offset_random", 0.0f));
                 r.width = juce::jlimit (-1.0f, 1.0f, number (op, "width", 100.0f) / 100.0f);
                 r.group = (int) number (op, "group", 0.0f);
-                r.offBy = (int) number (op, "off_by", 0.0f);
+                r.offBy = (int) number (op, "off_by", number (op, "offby", 0.0f));   // (0.17.0: VPO writes "offby" twice)
                 if (const auto* mode = find (op, "off_mode"))
                     r.offMode = mode->toLowerCase() == "normal" ? Region::OffMode::normal : mode->toLowerCase() == "time" ? Region::OffMode::time : Region::OffMode::fast;
                 if (r.offMode == Region::OffMode::time)
@@ -769,6 +784,48 @@ namespace sampler
                 r.lfoFade = juce::jmax (0.0f, number (op, "amplfo_fade", 0.0f));
                 if (const auto* pedal = find (op, "sustain_cc"))
                     program.sustainCC = juce::jlimit (0, 127, pedal->getIntValue());
+                // 0.17.0: the equaliser, vibrato, the numbered LFOs (lfoN_: sine; their level and pitch), random level
+                // and pitch, the pedal's threshold.
+                static const char* eqNames[] = { "eq1_", "eq2_", "eq3_" };
+                for (size_t b = 0; b < 3; ++b)
+                {
+                    const juce::String n (eqNames[b]);
+                    auto& band = r.eq[b];
+                    band.freq = juce::jlimit (10.0f, 20000.0f, number (op, (n + "freq").toRawUTF8(), band.freq));
+                    band.bandwidth = juce::jlimit (0.01f, 8.0f, number (op, (n + "bw").toRawUTF8(), band.bandwidth));
+                    band.gain = juce::jlimit (-96.0f, 24.0f, number (op, (n + "gain").toRawUTF8(), band.gain));
+                }
+                r.pitchLfoDepth = number (op, "pitchlfo_depth", 0.0f);
+                r.pitchLfoFreq = juce::jmax (0.0f, number (op, "pitchlfo_freq", 0.0f));
+                r.pitchLfoDelay = juce::jmax (0.0f, number (op, "pitchlfo_delay", 0.0f));
+                r.pitchLfoFade = juce::jmax (0.0f, number (op, "pitchlfo_fade", 0.0f));
+                for (int l = 1; l <= 9; ++l)
+                {
+                    const auto n = "lfo" + juce::String (l).paddedLeft ('0', 2) + "_", m = "lfo" + juce::String (l) + "_";
+                    const auto lfo = [&] (const char* what, float otherwise)
+                    {
+                        if (const auto* v = find (op, (n + what).toRawUTF8())) return v->getFloatValue();
+                        if (const auto* v = find (op, (m + what).toRawUTF8())) return v->getFloatValue();
+                        return otherwise;
+                    };
+                    const auto freq = lfo ("freq", 0.0f), volume = lfo ("volume", 0.0f), pitch = lfo ("pitch", 0.0f);
+                    if (freq <= 0.0f || (volume == 0.0f && pitch == 0.0f))
+                        continue;
+                    if (volume != 0.0f && r.lfoDepth == 0.0f)
+                    {
+                        r.lfoDepth = volume; r.lfoFreq = freq;
+                        r.lfoDelay = juce::jmax (0.0f, lfo ("delay", 0.0f)); r.lfoFade = juce::jmax (0.0f, lfo ("fade", 0.0f));
+                    }
+                    if (pitch != 0.0f && r.pitchLfoDepth == 0.0f)
+                    {
+                        r.pitchLfoDepth = pitch; r.pitchLfoFreq = freq;
+                        r.pitchLfoDelay = juce::jmax (0.0f, lfo ("delay", 0.0f)); r.pitchLfoFade = juce::jmax (0.0f, lfo ("fade", 0.0f));
+                    }
+                }
+                r.ampRandom = juce::jlimit (0.0f, 24.0f, number (op, "amp_random", 0.0f));
+                r.pitchRandom = juce::jlimit (0.0f, 9600.0f, number (op, "pitch_random", 0.0f));
+                if (const auto* low = find (op, "sustain_lo"))
+                    program.sustainLow = juce::jlimit (0, 126, low->getIntValue());
 
                 // The numbered ones.
                 std::map<int, int> loCC, hiCC, xfinLo, xfinHi, xfoutLo, xfoutHi;
@@ -790,7 +847,9 @@ namespace sampler
                         program.ccLabels[n] = v.trim();
                     if (k.startsWith ("control."))
                         continue;
-                    if ((n = tail ("gain_cc")) >= 0 || (n = tail ("gain_oncc")) >= 0 || (n = tail ("volume_oncc")) >= 0)
+                    if ((n = tail ("delay_cc")) >= 0 || (n = tail ("delay_oncc")) >= 0)   // 0.17.0
+                        r.delayCC.push_back ({ n, value });
+                    else if ((n = tail ("gain_cc")) >= 0 || (n = tail ("gain_oncc")) >= 0 || (n = tail ("volume_oncc")) >= 0)
                         r.gainCC.push_back ({ n, value });
                     else if ((n = tail ("amplitude_cc")) >= 0 || (n = tail ("amplitude_oncc")) >= 0)
                         r.amplitudeCC.push_back ({ n, value });
@@ -881,6 +940,11 @@ namespace sampler
                         const auto mode = v.toLowerCase();
                         if (mode != "one_shot" && mode != "no_loop" && mode != "loop_continuous" && mode != "loop_sustain")
                             ++unread[k + "=" + v];
+                    }
+                    else if (const auto lfo = numberedLfo (k); lfo.isNotEmpty())   // 0.17.0: lfoN_ (sine; level, pitch)
+                    {
+                        if (lfo == "wave" ? v.trim() != "1" : ! juce::StringArray { "freq", "delay", "fade", "volume", "pitch" }.contains (lfo))
+                            ++unread[lfo == "wave" ? k + "=" + v : k];
                     }
                     else if (! readOpcodes().count (k) && ! isNumbered (k) && ! doesNothingToSound (k))
                         ++unread[k];

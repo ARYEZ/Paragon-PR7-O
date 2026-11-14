@@ -505,6 +505,39 @@ tools, which need the owner's riffs)
   0.1 -> 0.4%, chord 5.3 -> 5.6, + STAGE 5.2 -> 4.7, + double 10.0 -> 9.2, + mixer effects 12.4. Idle fixed: only
   `2 x numParts` part channels cleared, the stage's pair only when it runs (`Stage::process` adds into it).
 
+## 0.17.0 (not released yet): VIRTUAL PLAYING ORCHESTRA 3 (the owner: "Add virtual playing Orchestra 3 to the pr7-o")
+
+- **The library** (Paul Battersby; free; its license.htm: free use, free redistribution with credit, never sold; built
+  from SSO, VSCO 2 CE, No Budget Orchestra, the Philharmonia's, Mattias Westlund's, Iowa's and stamperadam's samples,
+  each under its own licence). virtualplaying.com is refused by this session's network; read from the GitHub copy
+  `open-soundfonts/Virtual_Playing_Orchestra_3` (3.2.1.1, commit b0afa0f; 454 SFZ, 1637 WAVs, 700 MB; the SFZ files at
+  the top in Strings / Brass / Woodwinds / Percussion / Vocals / Keys, samples under `libs/` by source, paths
+  `..\libs\...`), cloned into `/tmp/claude-0/vpo/repo` (checkout ~10 min). Its mirror's LICENSE file (GPL 3) is the
+  mirror owner's; VPO's own terms are in `Documentation/license.htm`.
+- Counted (`/tmp/claude-0/probes/sso/count.py`), then all 454 loaded (probe `tests/ScratchVpo.cpp`, not committed):
+  0 problems; unread only what 0.17.0 added. `Sfz`: `Region::eq` (eq1-3_ freq / bw / gain: VPO cuts up to 12 dB to
+  match its sources), `pitchLfo*` (pitchlfo_; lfoN_pitch, lfoN_volume into the level LFO; sine only: other
+  lfoN_wave listed), `ampRandom` (0..+dB: our reading, as sfizz), `pitchRandom` (+-cents), `delayCC` (delay_ccN),
+  `Program::sustainLow` (sustain_lo: the pedal is up at that value and under it, default 63, as VPO's comment says
+  Sforzando reads it), offby = off_by. `Sampler`: up to three RBJ peaking biquads per voice (TDF II,
+  coefficients at the voice's start; `numEq`), vibrato as the speed times `vibRatio` (block-rate target, ramped per
+  sample). `section::kindOf`: "Performance" = sustain. Seating / OrchestraView read VPO's hyphenated names
+  ("2nd-violin", "english-horn").
+- `downloads::vpo()` (GET "VPO 3", the GitHub archive of that commit; marker `Strings/1st-violin-SEC-PERF-KS-C2.sfz`);
+  THE SOUNDS credits it; expansion bank **VIRTUAL PLAYING** "VP" (VP01-VP10, names start "VPO": strings, pizzicato,
+  brass, woodwinds, woodwind colours, staccato strings x2 players, brass stabs + octave down, choir, timpani, harp).
+  The PERF files follow the mod wheel themselves (gain_cc1, set_cc1=64), so DYNAMICS stays on velocity. LEVEL 0 dB
+  (VP06 +6, harp -6): at the wheel's start VPO's sections sit ~6 dB under VSCO's (-29 vs -23 dBFS RMS, a 10-note
+  chord), the wheel's full lift +17 dB. Top parts end at B6 so switches land on C7 (a top note past it puts them under
+  the lowest: C-1).
+- **A section bug found on the way** (since 0.4.0): `section::load` dropped each file's `initialCC` (set_ccN),
+  `sustainCC`, labels and `ownWheel`: every controller started at 0, so files whose level follows the wheel (VPO's
+  gain_cc1, Sonatina's KS files: set_cc1=96 with crossfades on CC 1) started far too quiet in a section (VPO 17 dB).
+  Now merged from the parts (the first that sets each). Test "SECTION 0.17.0".
+- Checked (probe, not committed): all ten VP presets load from the real files, 0 problems / unread; 1.8% of a core for
+  VP01's chord vs 1.5% for VO01's; demo WAVs. Not checked: listening; the GET download itself (GitHub archives of
+  other people's repos are refused by this session's proxy, as VSCO's and Sonatina's were).
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:

@@ -12,7 +12,8 @@ namespace orchestra
     {
         // From a file's or an instrument's name (VSCO 2 CE's: ViolinEns, SViolin, ViolaEns, CelloEns, Contrabass...;
         // 0.6.0, its brass: TrumpetSus, FHornSus, TromboneSus, Tuba-KS...).
-        const auto n = name.toLowerCase();
+        // (0.17.0: Virtual Playing Orchestra's names run on hyphens: "english-horn-SOLO-PERF", "bass-clarinet-...")
+        const auto n = name.toLowerCase().replaceCharacter ('-', ' ');
         // 0.12.0, the woodwinds first (a contrabassoon isn't a double bass, an English horn isn't a horn): VSCO's
         // FluteSusVib, PiccoloSus, OboeSusVib, ClarinetSus, BassoonSus; Sonatina's "English Horn", "Bass Clarinet",
         // "Contrabassoon".

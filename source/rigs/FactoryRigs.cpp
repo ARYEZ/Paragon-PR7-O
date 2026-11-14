@@ -145,5 +145,61 @@ std::vector<Rig> makeFactoryRigs()
     rigs.push_back (sectionRig (so, 6, "Sonatina Choir", sso, "Sonatina Symphonic Orchestra/Chorus - Performance/",
                                 { { "Mixed Chorus.sfz", "choir", 0, 127 } }, "choir, voices",
                                 "Sonatina's mixed choir over the whole keyboard, in a Cathedral.", { { stageOn, 1.0f }, { stageRoom, cathedral } }));
+
+    // VIRTUAL PLAYING ORCHESTRA (0.17.0; its "performance" files: the harder a note's played, the quicker its attack,
+    // and the mod wheel sets the level, by the files' own gain_cc1, so PR7-O's DYNAMICS stays on velocity). Names start
+    // "VPO" (unique, as above). LEVEL 0 dB (the others' -6 dB): with the wheel at its start, 64, VPO's sections sit
+    // about 12 dB under VSCO's; the wheel's full lift (+17 dB) then peaks near 0 dBFS. The top parts end at B6 so each
+    // section's keyswitches land on C7 up, as VSCO's strings' do (past it they'd go under the lowest note: C-1, off an
+    // 88-key keyboard).
+    const auto& vp = downloads::vpo();
+    const auto vpo = Rig::numBanks + 2;
+    const juce::String perf = " VPO's performance files: play harder for a quicker attack; the mod wheel sets the level.";
+    const juce::String vpoSwitches = "Articulations on keyswitches (the rack's SWITCHES page lists them).";
+    rigs.push_back (sectionRig (vpo, 1, "VPO String Section", vp, "Strings/",
+                                { { "bass-SEC-PERF-KS-C6.sfz", "basses", 24, 35 }, { "cello-SEC-PERF-KS-C6.sfz", "cellos", 36, 47 },
+                                  { "viola-SEC-PERF-KS-C2.sfz", "violas", 48, 54 }, { "2nd-violin-SEC-PERF-KS-C2.sfz", "2nd violins", 55, 75 },
+                                  { "1st-violin-SEC-PERF-KS-C2.sfz", "1st violins", 76, 95 } },
+                                "strings, section", "Five parts: sustain, tremolo, staccato, pizzicato. " + vpoSwitches + perf + seated + " in a Concert Hall.",
+                                { { instLevel, 0.0f }, { stageOn, 1.0f }, { stageRoom, concertHall } }));
+    rigs.push_back (sectionRig (vpo, 2, "VPO Pizzicato Strings", vp, "Strings/",
+                                { { "bass-SEC-PERF-pizzicato.sfz", "basses", 24, 35 }, { "cello-SEC-PERF-pizzicato.sfz", "cellos", 36, 47 },
+                                  { "viola-SEC-PERF-pizzicato.sfz", "violas", 48, 54 }, { "2nd-violin-SEC-PERF-pizzicato.sfz", "2nd violins", 55, 75 },
+                                  { "1st-violin-SEC-PERF-pizzicato.sfz", "1st violins", 76, 95 } },
+                                "strings, pizzicato", "Plucked, five parts, played by velocity." + seated + " on a Scoring Stage.",
+                                { { instLevel, 0.0f }, { stageOn, 1.0f }, { stageRoom, scoringStage } }));
+    rigs.push_back (sectionRig (vpo, 3, "VPO Brass Section", vp, "Brass/",
+                                { { "tuba-SOLO-PERF-KS-C6.sfz", "tuba", 26, 45 }, { "trombone-SEC-PERF-KS-C6.sfz", "trombones", 46, 56 },
+                                  { "french-horn-SEC-PERF-KS-C6.sfz", "horns", 57, 67 }, { "trumpet-SEC-PERF-KS-C2.sfz", "trumpets", 68, 84 } },
+                                "brass, section", "Sustain and staccato. " + vpoSwitches + perf + seated + " in a Concert Hall.",
+                                { { instLevel, 0.0f }, { stageOn, 1.0f }, { stageRoom, concertHall } }));
+    rigs.push_back (sectionRig (vpo, 4, "VPO Woodwind Section", vp, "Woodwinds/",
+                                { { "bassoon-SEC-PERF-KS-C6.sfz", "bassoons", 34, 49 }, { "clarinet-SEC-PERF-KS-C2.sfz", "clarinets", 50, 57 },
+                                  { "oboe-SEC-PERF-KS-C2.sfz", "oboes", 58, 74 }, { "flute-SEC-PERF-KS-C2.sfz", "flutes", 75, 86 },
+                                  { "piccolo-SOLO-PERF-KS-C2.sfz", "piccolo", 87, 95 } },
+                                "woodwinds, section", "Sustain and staccato. " + vpoSwitches + perf + seated + " in a Concert Hall.",
+                                { { instLevel, 0.0f }, { stageOn, 1.0f }, { stageRoom, concertHall } }));
+    rigs.push_back (sectionRig (vpo, 5, "VPO Woodwind Colours", vp, "Woodwinds/",
+                                { { "contrabassoon-SOLO-PERF-KS-C6.sfz", "contrabassoon", 22, 33 }, { "bass-clarinet-SOLO-PERF-KS-C6.sfz", "bass clarinet", 34, 51 },
+                                  { "english-horn-SOLO-PERF-KS-C2.sfz", "English horn", 52, 68 }, { "alto-flute-SOLO-PERF-KS-C2.sfz", "alto flute", 69, 82 },
+                                  { "piccolo-SOLO-PERF-KS-C2.sfz", "piccolo", 83, 95 } },
+                                "woodwinds, solo, colours", "The woodwinds' relatives, one player each, low to high. " + vpoSwitches + perf
+                                    + " STAGE on, a Studio's close sound.",
+                                { { instLevel, 0.0f }, { stageOn, 1.0f }, { stageRoom, studio } }));
+    rigs.push_back (sectionRig (vpo, 6, "VPO Staccato Strings", vp, "Strings/", { { "all-strings-SEC-PERF-staccato.sfz", "strings", 0, 127 } },
+                                "strings, staccato, ostinato", "The whole string section in one, short notes for driving ostinatos: two players "
+                                    "a note, on a Scoring Stage.",
+                                { { instLevel, 6.0f }, { stageOn, 1.0f }, { stageRoom, scoringStage }, { ensPlayers, 2.0f } }));
+    rigs.push_back (sectionRig (vpo, 7, "VPO Brass Stabs", vp, "Brass/", { { "all-brass-SEC-PERF-staccato.sfz", "brass", 0, 127 } },
+                                "brass, staccato, stabs, epic", "The whole brass section in one, short, every note doubled an octave down: "
+                                    "hits for heavy riffs, on a big Scoring Stage.",
+                                { { instLevel, 0.0f }, { stageOn, 1.0f }, { stageRoom, scoringStage }, { stageDecay, 1.4f }, { ensDouble, octaveDown }, { ensDoubleLevel, -4.0f } }));
+    rigs.push_back (sectionRig (vpo, 8, "VPO Choir", vp, "Vocals/", { { "choir-MIXED-PERF.sfz", "choir", 0, 127 } }, "choir, voices",
+                                "VPO's mixed choir, in a Cathedral." + perf, { { instLevel, 0.0f }, { stageOn, 1.0f }, { stageRoom, cathedral } }));
+    rigs.push_back (sectionRig (vpo, 9, "VPO Timpani", vp, "Percussion/", { { "timpani-KS-C6.sfz", "timpani", 0, 127 } }, "percussion, timpani",
+                                "Hits and rolls on keyswitches (" + keyName (84) + " hit, " + keyName (86) + " roll), in a Concert Hall.",
+                                { { instLevel, 0.0f }, { stageOn, 1.0f }, { stageRoom, concertHall } }));
+    rigs.push_back (sectionRig (vpo, 10, "VPO Harp", vp, "Strings/", { { "harp-sustain.sfz", "harp", 0, 127 } }, "harp, keys",
+                                "The concert harp, let ring, in a Concert Hall.", { { stageOn, 1.0f }, { stageRoom, concertHall } }));
     return rigs;
 }

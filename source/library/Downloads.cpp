@@ -40,7 +40,25 @@ namespace downloads
         return library;
     }
 
-    std::vector<const Library*> all() { return { &vsco(), &sonatina() }; }
+    const Library& vpo()
+    {
+        static const Library library {
+            "Virtual Playing Orchestra 3",
+            "https://github.com/open-soundfonts/Virtual_Playing_Orchestra_3/archive/b0afa0f570e0e33c83da9bc4e626a4a239714dff.tar.gz",
+            690000000,                  // (about: its 1637 WAVs, 700 MB unpacked, hardly compress)
+            "Virtual_Playing_Orchestra_3-b0afa0f570e0e33c83da9bc4e626a4a239714dff",
+            "Strings/1st-violin-SEC-PERF-KS-C2.sfz",
+            "",
+            "Virtual Playing Orchestra 3 by Paul Battersby, virtualplaying.com (free; built from the Sonatina Symphonic "
+            "Orchestra, VSCO 2 CE, No Budget Orchestra, the Philharmonia Orchestra's and Mattias Westlund's samples, the "
+            "University of Iowa's and stamperadam's: each under its own licence, credited there)",
+            "VPO 3",
+            700
+        };
+        return library;
+    }
+
+    std::vector<const Library*> all() { return { &vsco(), &sonatina(), &vpo() }; }
 
     namespace
     {

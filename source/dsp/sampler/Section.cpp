@@ -38,7 +38,8 @@ namespace sampler::section
         if (l.contains ("trem")) return "tremolo";
         if (l.contains ("legato")) return "legato";
         if (l.contains ("marc")) return "marcato";
-        if (l.contains ("sus") || l.contains ("arco") || l.contains ("vib") || l == "long")
+        // (0.17.0: Virtual Playing Orchestra's "Performance" is its sustain, its attack quicker the harder it's played)
+        if (l.contains ("sus") || l.contains ("arco") || l.contains ("vib") || l == "long" || l.startsWith ("perf"))
         {
             const auto plain = " " + l.replaceCharacter ('-', ' ').replaceCharacter ('_', ' ') + " ";
             const auto nonVibrato = plain.contains ("non vib") || plain.contains ("nonvib") || plain.contains (" nv ")
@@ -232,6 +233,27 @@ namespace sampler::section
             parts.push_back (std::move (made));
             if (stopped)
                 break;
+        }
+
+        // 0.17.0: the files' own controller settings, which a section had lost (every part started its controllers at
+        // 0: VPO's set_cc1=64 and Sonatina's set_cc1=96 gone, so files whose level follows the mod wheel started far
+        // too quiet): each controller's start from the first part that sets it, the pedal's controller and threshold
+        // from the first that changes them, every label, and whether any follows the wheel itself.
+        for (const auto& p : parts)
+        {
+            if (p == nullptr)
+                continue;
+            for (size_t c = 0; c < p->initialCC.size(); ++c)
+                if (result->initialCC[c] < 0 && p->initialCC[c] >= 0)
+                    result->initialCC[c] = p->initialCC[c];
+            if (result->sustainCC == 64 && p->sustainCC != 64)
+                result->sustainCC = p->sustainCC;
+            if (result->sustainLow == 63 && p->sustainLow != 63)
+                result->sustainLow = p->sustainLow;
+            for (const auto& [cc, label] : p->ccLabels)
+                if (! result->ccLabels.count (cc))
+                    result->ccLabels[cc] = label;
+            result->ownWheel = result->ownWheel || p->ownWheel;
         }
 
         // The articulations: every part's, matched by kind.

@@ -141,7 +141,7 @@ TEST_CASE ("SFZ: what isn't read yet is listed; missing files, release samples a
     Folder f;
     f.wav ("a.wav", 220.0);
     const auto program = sampler::sfz::load (f.sfz ("i.sfz",
-        "<region> sample=a.wav loop_mode=loop_continuous loop_start=100 loop_end=2000 xfin_locc1=0 xfin_hicc1=64 lfo01_freq=5\n"
+        "<region> sample=a.wav loop_mode=loop_continuous loop_start=100 loop_end=2000 xfin_locc1=0 xfin_hicc1=64 lfo01_freq=5 lfo01_cutoff=1200 eg01_attack=0.2\n"
         "<region> sample=a.wav loop_mode=one_shot region_label=hit\n"
         "<region> sample=gone.wav\n"
         "<region> sample=a.wav trigger=release\n"
@@ -156,7 +156,9 @@ TEST_CASE ("SFZ: what isn't read yet is listed; missing files, release samples a
     CHECK_FALSE (unread.contains ("xfin_locc1"));     // 0.9.0: read
     CHECK_FALSE (unread.contains ("release"));
     CHECK (program->regions[2].trigger == sampler::Region::Trigger::release);
-    CHECK (unread.contains ("lfo01_freq (1)"));        // the newer numbered LFOs: still not
+    CHECK (unread.contains ("lfo01_cutoff (1)"));      // the numbered LFOs' other targets, and envelopes: still not
+    CHECK (unread.contains ("eg01_attack (1)"));
+    CHECK_FALSE (unread.contains ("lfo01_freq"));       // (0.17.0: read, for its level and pitch)
     CHECK (unread.contains ("*sine"));
     CHECK_FALSE (unread.contains ("region_label"));   // names change nothing
     CHECK_FALSE (unread.contains ("one_shot"));       // read
@@ -1978,4 +1980,147 @@ TEST_CASE ("Disk streaming: legato joins, AUTO SUSTAIN and the ensemble stream a
     CHECK (largestDifference (expected, got) < 1.0e-6f);
     CHECK (streamer.getUnderruns() == 0);
     CHECK (peakOf (expected[0], (size_t) (11.0 * sampleRate) - 2000, (size_t) (11.0 * sampleRate)) > 0.05);   // (looped)
+}
+
+// ================================================================ 0.17.0: Virtual Playing Orchestra 3's files
+TEST_CASE ("SFZ 0.17.0: the EQUALISER's three bands cut and lift their frequency; a band far off leaves it", "[sfz][sampler][vpo]")
+{
+    Folder f;
+    f.wav ("tone.wav", 1000.0, 1.0);
+    const auto levelWith = [&f] (const juce::String& eq)
+    {
+        const auto program = sampler::sfz::load (f.sfz ("eq" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)) + ".sfz",
+                                                        "<region> sample=tone.wav pitch_keycenter=60 amp_veltrack=0 " + eq + "\n"));
+        REQUIRE (program != nullptr);
+        CHECK (program->unread.isEmpty());
+        return juce::Decibels::gainToDecibels (levelAt (render (*program, noteOn (60), 0.6)[0], 1000.0, 12000, 12000));
+    };
+    const auto plain = levelWith ("");
+    CHECK (std::abs (levelWith ("eq1_freq=1000 eq1_bw=1 eq1_gain=-12") - plain - (-12.0)) < 0.3);
+    CHECK (std::abs (levelWith ("eq2_freq=1000 eq2_bw=2 eq2_gain=6") - plain - (6.0)) < 0.3);
+    CHECK (std::abs (levelWith ("eq3_freq=1000 eq3_bw=0.5 eq3_gain=-6 eq1_freq=1000 eq1_bw=1 eq1_gain=-6") - plain - (-12.0)) < 0.3);
+    CHECK (std::abs (levelWith ("eq1_freq=60 eq1_bw=1 eq1_gain=12") - plain) < 0.3);
+    CHECK (std::abs (levelWith ("eq1_freq=1000 eq1_bw=1 eq1_gain=0") - plain) < 0.01);   // (0 dB: no filter at all)
+}
+
+TEST_CASE ("SFZ 0.17.0: VIBRATO (pitchlfo_, or a numbered LFO's pitch) after its delay; the numbered LFO's level", "[sfz][sampler][vpo]")
+{
+    Folder f;
+    f.wav ("tone.wav", 440.0, 3.0);
+    const auto pitchSpread = [] (const std::vector<float>& x, double from, double to)
+    {
+        auto lo = 1.0e9, hi = 0.0;
+        for (auto t = from; t + 0.05 <= to; t += 0.025)   // 50 ms windows: a 5 Hz LFO's peaks and troughs
+        {
+            const auto hz = frequencyOf (x, (size_t) (t * sampleRate), (size_t) ((t + 0.05) * sampleRate));
+            lo = std::min (lo, hz);
+            hi = std::max (hi, hz);
+        }
+        return std::pair { lo, hi };
+    };
+    for (const auto* opcodes : { "pitchlfo_depth=50 pitchlfo_freq=5 pitchlfo_delay=1 pitchlfo_fade=0",
+                                 "lfo01_pitch=50 lfo01_freq=5 lfo01_delay=1 lfo01_fade=0 lfo01_wave=1" })
+    {
+        INFO (opcodes);
+        const auto program = sampler::sfz::load (f.sfz ("vib.sfz", juce::String ("<region> sample=tone.wav pitch_keycenter=60 amp_veltrack=0 ") + opcodes + "\n"));
+        CHECK (program->unread.isEmpty());
+        const auto out = render (*program, noteOn (60), 2.6)[0];
+        const auto [steadyLo, steadyHi] = pitchSpread (out, 0.1, 0.95);   // before its delay: the note as recorded
+        CHECK (steadyHi - steadyLo < 1.0);
+        const auto [lo, hi] = pitchSpread (out, 1.3, 2.5);                 // after: +-50 cents, 427-453 Hz (windows smooth it a little)
+        CHECK (lo < 431.0);
+        CHECK (hi > 449.0);
+        CHECK (lo > 425.0);
+        CHECK (hi < 455.0);
+    }
+    // lfo01_volume: dB of level, as amplfo_depth; another wave than a sine is listed as unread.
+    const auto level = sampler::sfz::load (f.sfz ("trem.sfz", "<region> sample=tone.wav pitch_keycenter=60 amp_veltrack=0 lfo01_volume=6 lfo01_freq=4 lfo01_wave=1\n"));
+    CHECK (level->regions[0].lfoDepth == 6.0f);
+    CHECK (level->regions[0].lfoFreq == 4.0f);
+    const auto square = sampler::sfz::load (f.sfz ("sq.sfz", "<region> sample=tone.wav lfo01_volume=6 lfo01_freq=4 lfo01_wave=3\n"));
+    CHECK (square->unread.contains ("lfo01_wave=3 (1)"));
+}
+
+TEST_CASE ("SFZ 0.17.0: amp_random and pitch_random make each note a little different, within their ranges", "[sfz][sampler][vpo]")
+{
+    Folder f;
+    f.wav ("tone.wav", 440.0, 0.5);
+    const auto program = sampler::sfz::load (f.sfz ("rand.sfz", "<region> sample=tone.wav pitch_keycenter=60 amp_veltrack=0 amp_random=6 pitch_random=100\n"));
+    const auto plain = sampler::sfz::load (f.sfz ("plain.sfz", "<region> sample=tone.wav pitch_keycenter=60 amp_veltrack=0\n"));
+    CHECK (program->unread.isEmpty());
+    const auto base = levelAt (render (*plain, noteOn (60), 0.3)[0], 440.0, 4800, 4800);
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    auto loDb = 100.0, hiDb = -100.0, loHz = 1.0e9, hiHz = 0.0;
+    for (int i = 0; i < 40; ++i)
+    {
+        s.reset();
+        const auto out = render (*program, noteOn (60), 0.3, {}, &s)[0];
+        const auto hz = frequencyOf (out, 2400, 14400);
+        const auto db = juce::Decibels::gainToDecibels (peakOf (out, 2400, 14400) / peakOf (render (*plain, noteOn (60), 0.3)[0], 2400, 14400));
+        loDb = std::min (loDb, db); hiDb = std::max (hiDb, db);
+        loHz = std::min (loHz, hz); hiHz = std::max (hiHz, hz);
+    }
+    CHECK (base > 0.1);
+    CHECK (loDb > -0.1);                 // never quieter (up to 6 dB louder)
+    CHECK (hiDb < 6.1);
+    CHECK (hiDb - loDb > 3.0);           // and they do differ
+    CHECK (loHz > 440.0 * std::pow (2.0, -100.5 / 1200.0));   // +-100 cents
+    CHECK (hiHz < 440.0 * std::pow (2.0, 100.5 / 1200.0));
+    CHECK (hiHz - loHz > 20.0);
+}
+
+TEST_CASE ("SFZ 0.17.0: delay_ccN holds the start back by the controller; sustain_lo is the pedal's threshold; offby", "[sfz][sampler][vpo]")
+{
+    Folder f;
+    f.wav ("tone.wav", 440.0, 1.5);
+    const auto program = sampler::sfz::load (f.sfz ("d.sfz", "<control> set_cc1=0\n<region> sample=tone.wav pitch_keycenter=60 amp_veltrack=0 delay_cc1=0.5 sustain_lo=100 offby=3 ampeg_release=0.001\n"));
+    CHECK (program->unread.isEmpty());
+    CHECK (program->regions[0].offBy == 3);
+    const auto firstSound = [] (const std::vector<float>& x)
+    {
+        for (size_t i = 0; i < x.size(); ++i)
+            if (std::abs (x[i]) > 1.0e-6f)
+                return (int) i;
+        return -1;
+    };
+    CHECK (firstSound (render (*program, noteOn (60), 0.3)[0]) < 4);                 // CC 1 at 0: no delay
+    juce::MidiBuffer wheel;
+    wheel.addEvent (juce::MidiMessage::controllerEvent (1, 1, 127), 0);
+    wheel.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+    CHECK (std::abs (firstSound (render (*program, wheel, 0.8)[0]) - (1 + 24000)) < 4);   // at 127: 0.5 s later
+    // The pedal at 90 doesn't hold (sustain_lo 100); at 110 it does.
+    for (const auto& [pedal, holds] : { std::pair { 90, false }, std::pair { 110, true } })
+    {
+        juce::MidiBuffer m;
+        m.addEvent (juce::MidiMessage::controllerEvent (1, 64, pedal), 0);
+        m.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 1);
+        m.addEvent (juce::MidiMessage::noteOff (1, 60), 4800);
+        const auto out = render (*program, m, 0.4)[0];
+        CHECK ((peakOf (out, 9600, 14400) > 0.1) == holds);
+    }
+    // VPO's "Performance" is a sustain to a section (its tremolo, staccato and pizzicato stay theirs).
+    CHECK (sampler::section::kindOf ("C2 Performance") == "sustain");
+    CHECK (sampler::section::kindOf ("C#2 Performance Tremolo") == "tremolo");
+    CHECK (sampler::section::kindOf ("E2 Performance Staccato") == "staccato");
+}
+
+TEST_CASE ("SECTION 0.17.0: a section keeps its files' controller starts (set_cc), pedal and labels: as loud as each file alone", "[section][sampler][vpo]")
+{
+    Folder f;
+    f.wav ("low.wav", 220.0, 0.5);
+    f.wav ("high.wav", 660.0, 0.5);
+    // Both quiet until the mod wheel lifts them (gain_cc1), the wheel starting at 127 (set_cc1), as VPO's performance files.
+    const auto low = f.sfz ("low.sfz", "<control> set_cc1=127 label_cc1=Dynamics\n<region> sample=low.wav lokey=40 hikey=59 pitch_keycenter=57 amp_veltrack=0 volume=-30 gain_cc1=30\n");
+    const auto high = f.sfz ("high.sfz", "<group> sustain_lo=90\n<region> sample=high.wav lokey=60 hikey=80 pitch_keycenter=76 amp_veltrack=0\n");
+    const auto alone = sampler::sfz::load (low);
+    const auto section = sampler::section::load (sampler::section::fromFiles ({ low.getFullPathName(), high.getFullPathName() }));
+    REQUIRE (section != nullptr);
+    CHECK (section->initialCC[1] == 127);
+    CHECK (section->sustainLow == 90);
+    CHECK (section->ccLabels.count (1) == 1);
+    const auto levelAlone = levelAt (render (*alone, noteOn (57), 0.3)[0], 220.0, 4800, 4800);
+    const auto levelInSection = levelAt (render (*section, noteOn (57), 0.3)[0], 220.0, 4800, 4800);
+    CHECK (levelAlone > 0.1);
+    CHECK (std::abs (juce::Decibels::gainToDecibels (levelInSection / levelAlone)) < 0.1);   // (before 0.17.0: 30 dB down)
 }

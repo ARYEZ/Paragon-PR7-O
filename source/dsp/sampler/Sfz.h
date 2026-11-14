@@ -30,8 +30,11 @@
 //   xf_cccurve / xf_velcurve / xf_keycurve; amp_velcurve_N; ampeg_vel2*, ampeg_*ccN; amp_keytrack / amp_keycenter;
 //   pitch_veltrack; delay / delay_random / offset_random; group_ / master_ / global_ volume and tune; width; group /
 //   off_by / off_mode / off_time; amplfo_ depth / freq / delay / fade; set_ccN, label_ccN, sustain_cc.
-// Not read yet, and listed as such (`unread`): the newer numbered LFOs and envelopes (lfo01_..., eg01_...), equalisers,
-// other curves.
+//   0.17.0 (Virtual Playing Orchestra 3's files, counted): eq1_ / eq2_ / eq3_ freq / bw / gain; pitchlfo_ depth / freq /
+//   delay / fade; lfoN_ freq / delay / fade / volume / pitch (sine: lfoN_wave other than 1 listed); amp_random,
+//   pitch_random; delay_ccN; sustain_lo; offby (as off_by).
+// Not read yet, and listed as such (`unread`): the numbered envelopes (eg01_...), the other numbered-LFO targets, other
+// curves.
 namespace sampler
 {
     struct Region
@@ -125,6 +128,21 @@ namespace sampler
         float offTime = 0.006f;
         // An LFO on its level (amplfo_depth dB, _freq Hz, starting after _delay, fading in over _fade seconds).
         float lfoDepth = 0.0f, lfoFreq = 0.0f, lfoDelay = 0.0f, lfoFade = 0.0f;
+
+        // 0.17.0 (Virtual Playing Orchestra 3's files, counted): its EQUALISER, three peaking bands (eq1_ / eq2_ / eq3_
+        // freq Hz, bw octaves, gain dB; SFZ's defaults 50 / 500 / 5000 Hz, 1 octave, 0 dB: a band at 0 dB does nothing).
+        // VPO cuts and lifts its sources by up to 12 dB so they match each other.
+        struct Eq { float freq = 50.0f, bandwidth = 1.0f, gain = 0.0f; };
+        std::array<Eq, 3> eq { { { 50.0f, 1.0f, 0.0f }, { 500.0f, 1.0f, 0.0f }, { 5000.0f, 1.0f, 0.0f } } };
+        bool hasEq() const noexcept { return eq[0].gain != 0.0f || eq[1].gain != 0.0f || eq[2].gain != 0.0f; }
+        // VIBRATO: an LFO on its pitch (pitchlfo_depth cents, _freq Hz, _delay, _fade seconds; also the numbered LFOs'
+        // lfoN_pitch, and lfoN_volume into the level LFO above when it has none of its own: sine only).
+        float pitchLfoDepth = 0.0f, pitchLfoFreq = 0.0f, pitchLfoDelay = 0.0f, pitchLfoFade = 0.0f;
+        // Each note a little different: amp_random (up to that many dB louder: our reading, as sfizz plays it),
+        // pitch_random (up to that many cents either way).
+        float ampRandom = 0.0f, pitchRandom = 0.0f;
+        // A start held back by a controller (delay_ccN: seconds at 127, added to delay).
+        std::vector<std::pair<int, float>> delayCC;
         bool usesController (int cc) const noexcept;   // its level, crossfades or filters follow controller `cc`
 
         bool playsUnder (int keyswitch) const noexcept { return swLoLast < 0 || (keyswitch >= swLoLast && keyswitch <= swHiLast); }
@@ -159,6 +177,7 @@ namespace sampler
         // leaves them be).
         std::array<int, 128> initialCC;
         int sustainCC = 64;
+        int sustainLow = 63;   // 0.17.0: the pedal is up at this value and under it (sustain_lo; MIDI's 0-63 off)
         std::map<int, juce::String> ccLabels;
         bool ownWheel = false;
         Program() { initialCC.fill (-1); }

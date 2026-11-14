@@ -279,13 +279,15 @@ TEST_CASE ("Downloads: the browser lists a downloaded library by its name, with 
     CHECK (browser.getEntries()[0].library == "VSCO 2 CE");
     CHECK (LibraryBrowser::displayName (downloads::rootOf (downloads::vsco())) == "VSCO 2 CE");
     CHECK (browser.isDownloadFolder (0));
-    auto getVsco = false, getSonatina = false;
+    auto getVsco = false, getSonatina = false, getVpo = false;
     for (auto* c : browser.getChildren())
         if (auto* b = dynamic_cast<juce::TextButton*> (c); b != nullptr && b->isVisible())
         {
             getVsco = getVsco || b->getButtonText().startsWith ("GET VSCO");
             getSonatina = getSonatina || b->getButtonText().startsWith ("GET SONATINA");
+            getVpo = getVpo || b->getButtonText().startsWith ("GET VPO 3");   // 0.17.0
         }
     CHECK_FALSE (getVsco);
     CHECK (getSonatina);
+    CHECK (getVpo);
 }

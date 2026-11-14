@@ -121,7 +121,7 @@ TEST_CASE ("Every factory rig is valid", "[rigs]")
 TEST_CASE ("PR7-O's factory presets: Init at A01, no instrument, everything at its default; nothing of PR7-D's", "[rigs]")
 {
     const auto rigs = makeFactoryRigs();
-    REQUIRE (rigs.size() == 15);   // Init, then the expansions' 14 (0.13.0)
+    REQUIRE (rigs.size() == 25);   // Init, then the expansions' 24 (0.13.0: 14; 0.17.0: VIRTUAL PLAYING's 10)
     CHECK (rigs.front().name == "Init");
     for (size_t i = 1; i < rigs.size(); ++i)
         CHECK (Rig::isExpansionBank (rigs[i].bank));
@@ -270,10 +270,10 @@ TEST_CASE ("Rigs are sorted by bank and number, and < > wrap round", "[rigs]")
     for (size_t i = 1; i < entries.size(); ++i)
         CHECK (entries[i - 1].rig.bank * 100 + entries[i - 1].rig.number <= entries[i].rig.bank * 100 + entries[i].rig.number);
 
-    CHECK (entries.back().rig.name == "Sonatina Choir");   // SO06, the last expansion's last
-    CHECK (Rig::isExpansionBank (entries[entries.size() - 14].rig.bank));
-    CHECK (entries[entries.size() - 14].rig.getSlotName() == "VO01");
-    CHECK (entries[entries.size() - 15].rig.name == "Late");
+    CHECK (entries.back().rig.name == "VPO Harp");   // VP10, the last expansion's last (0.17.0)
+    CHECK (Rig::isExpansionBank (entries[entries.size() - 24].rig.bank));
+    CHECK (entries[entries.size() - 24].rig.getSlotName() == "VO01");
+    CHECK (entries[entries.size() - 25].rig.name == "Late");
     CHECK (library.step (&entries.back(), 1) == &entries.front());
     CHECK (library.step (&entries.front(), -1) == &entries.back());
     CHECK (library.step (nullptr, 1) == &entries.front());
@@ -381,8 +381,8 @@ TEST_CASE ("< and > step through the presets in order", "[rigs]")
     r.processor.stepRig (-1);
     CHECK (r.processor.getCurrentRig().name == "Third");
     r.processor.loadRig (r.entryNamed ("Init"));
-    r.processor.stepRig (-1);   // wraps round to the last: SO06
-    CHECK (r.processor.getCurrentRig().name == "Sonatina Choir");
+    r.processor.stepRig (-1);   // wraps round to the last: VP10
+    CHECK (r.processor.getCurrentRig().name == "VPO Harp");
     r.processor.stepRig (1);   // and back to the first
     CHECK (r.processor.getCurrentRig().name == "Init");
 }
@@ -474,18 +474,21 @@ TEST_CASE ("Only .pr7rig files are rigs: the old Paragon X1 .x1rig files aren't 
 }
 
 // 0.13.0: THE EXPANSIONS, PR7-K's system: a bank per built-in expansion after A-E, named by its code, factory only.
-TEST_CASE ("Expansions: VSCO ORCHESTRA and SONATINA are banks after E, their presets named VO01..., SO01...", "[rigs][expansions]")
+TEST_CASE ("Expansions: VSCO ORCHESTRA, SONATINA and VIRTUAL PLAYING are banks after E, their presets named VO01..., SO01..., VP01...", "[rigs][expansions]")
 {
-    CHECK (Rig::numBanksWithExpansions() == Rig::numBanks + 2);
+    CHECK (Rig::numBanksWithExpansions() == Rig::numBanks + 3);
     CHECK (Rig::bankName (4) == "E");
     CHECK (Rig::bankName (Rig::numBanks) == "VSCO ORCHESTRA");
     CHECK (Rig::bankName (Rig::numBanks + 1) == "SONATINA");
-    juce::StringArray vo, so;
+    CHECK (Rig::bankName (Rig::numBanks + 2) == "VIRTUAL PLAYING");
+    juce::StringArray vo, so, vp;
     for (const auto& rig : makeFactoryRigs())
         if (rig.bank == Rig::numBanks) vo.add (rig.getSlotName());
         else if (rig.bank == Rig::numBanks + 1) so.add (rig.getSlotName());
+        else if (rig.bank == Rig::numBanks + 2) vp.add (rig.getSlotName());
     CHECK (vo.joinIntoString (" ") == "VO01 VO02 VO03 VO04 VO05 VO06 VO07 VO08");
     CHECK (so.joinIntoString (" ") == "SO01 SO02 SO03 SO04 SO05 SO06");
+    CHECK (vp.joinIntoString (" ") == "VP01 VP02 VP03 VP04 VP05 VP06 VP07 VP08 VP09 VP10");
 
     // Written to a file, an expansion's bank (which a user's preset can't be in) reads back as A: never a user's VO slot.
     auto rig = makeFactoryRigs()[1];
@@ -501,7 +504,7 @@ TEST_CASE ("Expansions: each preset plays its own library by reference, its part
         if (! Rig::isExpansionBank (rig.bank))
             continue;
         INFO (rig.name);
-        const auto& wanted = rig.bank == Rig::numBanks ? downloads::vsco() : downloads::sonatina();
+        const auto& wanted = rig.bank == Rig::numBanks ? downloads::vsco() : rig.bank == Rig::numBanks + 1 ? downloads::sonatina() : downloads::vpo();
         std::vector<sampler::section::Part> parts;
         if (const auto section = sampler::section::fromText (rig.instrument))
             parts = section->parts;
@@ -550,7 +553,7 @@ TEST_CASE ("Expansions: a copy saved from one goes to bank A; the browser lists 
         for (auto* c : browser.getChildren())
             if (auto* b = dynamic_cast<juce::TextButton*> (c); b != nullptr && b->getRadioGroupId() == 2)
                 banks.add (b->getButtonText());
-        CHECK (banks.joinIntoString ("|") == "All Banks|A|B|C|D|E|VSCO ORCHESTRA|SONATINA");
+        CHECK (banks.joinIntoString ("|") == "All Banks|A|B|C|D|E|VSCO ORCHESTRA|SONATINA|VIRTUAL PLAYING");
         CHECK_FALSE (browser.getExpansionsHeading().isEmpty());
 
         browser.selectForTest (r.processor.getRigLibrary().findFactory ("Sonatina Brass"));

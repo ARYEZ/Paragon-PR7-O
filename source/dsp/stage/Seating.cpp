@@ -55,14 +55,14 @@ namespace stage
         if (has ({ "violin", "vln" }))
         {
             if (has ({ "sviolin", "solo" }))                                 return { -1.6f, 1.6f, 0.5f };   // the leader's chair
-            if (has ({ "violin 2", "violins 2", "violin2", "violinii", "violin ii", "second" })) return place ("VIOLINS II");
+            if (has ({ "violin 2", "violins 2", "violin2", "violinii", "violin ii", "second", "2nd" })) return place ("VIOLINS II");   // (0.17.0: VPO's "2nd-violin")
             return place ("VIOLINS");
         }
         if (has ({ "cello", "vcl" }))                                        return place ("CELLOS");
         if (has ({ "trombone", "tbn" }))                                     return place ("TROMBONES");
         if (has ({ "tuba" }))                                                return place ("TUBA");
         if (has ({ "trumpet", "tpt", "cornet" }))                            return place ("TRUMPETS");
-        if (has ({ "english horn", "englishhorn", "cor anglais", "oboe" }))  return place ("OBOES");
+        if (has ({ "english horn", "english-horn", "englishhorn", "cor anglais", "oboe" }))  return place ("OBOES");
         if (has ({ "horn" }))                                                return place ("HORNS");
         if (has ({ "contrabassoon", "contra bassoon", "contrafagott" }))     return place ("BASSOONS");   // (0.12.0: not a double bass)
         if (has ({ "contrabass", "double bass", "doublebass", "string bass" }) || (n.contains ("bass") && ! has ({ "bassoon", "clarinet", "drum", "flute" })))
