@@ -32,6 +32,9 @@ namespace library
                 { "cello", "Cellos", Section::strings }, { "celli", "Cellos", Section::strings },
                 { "contrabass", "Basses", Section::strings }, { " basses ", "Basses", Section::strings },
                 { "double bass", "Basses", Section::strings }, { "string bass", "Basses", Section::strings },
+                { "orchestra hit", "Orchestra Hits", Section::other }, { "string pad", "String Pads", Section::strings },
+                { "brass pad", "Brass Pads", Section::brass }, { "brass hit", "Brass FX", Section::brass },
+                { "brass fall", "Brass FX", Section::brass }, { "brass designed", "Brass FX", Section::brass },
                 { "all strings", "All Strings", Section::strings },
                 { "piccolo", "Piccolo", Section::woodwinds }, { "alto flute", "Alto Flute", Section::woodwinds },
                 { "flute", "Flutes", Section::woodwinds }, { "english horn", "English Horn", Section::woodwinds },
@@ -40,6 +43,7 @@ namespace library
                 { "clarinet", "Clarinets", Section::woodwinds }, { "contrabassoon", "Contrabassoon", Section::woodwinds },
                 { "bassoon", "Bassoons", Section::woodwinds }, { "saxophone", "Saxophones", Section::woodwinds },
                 { "recorder", "Recorders", Section::woodwinds }, { "all woodwinds", "All Woodwinds", Section::woodwinds },
+                { "sax", "Saxophones", Section::woodwinds },
                 { "trumpet", "Trumpets", Section::brass }, { "cornet", "Cornets", Section::brass },
                 { "bass trombone", "Bass Trombone", Section::brass }, { "trombone", "Trombones", Section::brass },
                 { "tuba", "Tuba", Section::brass }, { "euphonium", "Euphonium", Section::brass },
@@ -56,6 +60,8 @@ namespace library
                 { "harp", "Harp", Section::keys }, { "piano", "Piano", Section::keys }, { "upright", "Piano", Section::keys },
                 { "organ", "Organ", Section::keys },
                 { "harpsichord", "Harpsichord", Section::keys }, { "celest", "Celesta", Section::keys },
+                { "clavichord", "Clavichord", Section::keys }, { "temple block", "Temple Blocks", Section::percussion },
+                { "shaker", "Shakers", Section::percussion },
                 { "choir", "Choir", Section::choir }, { "chorus", "Choir", Section::choir }, { "chrous", "Choir", Section::choir }, { "soprano", "Sopranos", Section::choir },
                 { "alto", "Altos", Section::choir }, { "tenor", "Tenors", Section::choir }, { "voice", "Voices", Section::choir },
             };
@@ -162,7 +168,7 @@ namespace library
         {
             if (! folder.isDirectory())
                 continue;
-            for (const auto& item : juce::RangedDirectoryIterator (folder, true, "*.sfz", juce::File::findFiles))
+            for (const auto& item : juce::RangedDirectoryIterator (folder, true, "*.sfz;*.dspreset", juce::File::findFiles))
             {
                 const auto file = item.getFile();
                 // (an #include folder's fragments aren't instruments)
@@ -175,6 +181,10 @@ namespace library
                 e.file = file;
                 e.library = folder.getFileName();
                 e.name = file.getFileNameWithoutExtension();
+                // (0.18.0: DS Orchestra Complete numbers its files, "01 Bass Trombone - Sustain": shown without)
+                if (const auto number = e.name.initialSectionContainingOnly ("0123456789-");
+                    number.isNotEmpty() && e.name.length() > number.length() && e.name[number.length()] == ' ')
+                    e.name = e.name.substring (number.length()).trim();
                 e.folder = file.getParentDirectory() == folder ? juce::String() : file.getParentDirectory().getRelativePathFrom (folder);
                 e.instrument = instrumentOf (e.name, file.getParentDirectory().getFileName());
                 e.section = sectionOf (e.name, file.getParentDirectory().getFileName());
@@ -186,7 +196,8 @@ namespace library
             if (a.section != b.section) return a.section < b.section;
             if (a.instrument != b.instrument) return a.instrument.compareNatural (b.instrument) < 0;
             if (a.library != b.library) return a.library.compareNatural (b.library) < 0;
-            if (a.name != b.name) return a.name.compareNatural (b.name) < 0;
+            // (by the file's own name: a library that numbers its files keeps their order)
+            if (a.file.getFileName() != b.file.getFileName()) return a.file.getFileName().compareNatural (b.file.getFileName()) < 0;
             return a.folder.compareNatural (b.folder) < 0;
         });
         return entries;

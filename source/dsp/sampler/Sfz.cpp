@@ -1,4 +1,5 @@
 #include "dsp/sampler/Sfz.h"
+#include "dsp/sampler/Decent.h"
 
 #include <array>
 #include <mutex>
@@ -12,6 +13,7 @@ namespace sampler
         for (const auto& f : ccFades) if (f.cc == cc) return true;
         for (const auto& g : gainCC) if (g.first == cc) return true;
         for (const auto& a : amplitudeCC) if (a.first == cc) return true;
+        for (const auto& c : ccCurves) if (c.first == cc) return true;
         return false;
     }
 
@@ -704,7 +706,7 @@ namespace sampler
             }
             bool doesNothingToSound (const juce::String& opcode)
             {
-                return opcode.startsWith ("control.") || opcode.endsWith ("_label") || opcode.startsWith ("label_cc") || opcode.startsWith ("hint_")
+                return opcode.startsWith ("control.") || opcode.startsWith ("pr7o_") || opcode.endsWith ("_label") || opcode.startsWith ("label_cc") || opcode.startsWith ("hint_")
                     || opcode == "output" || opcode == "polyphony" || opcode == "note_polyphony";
             }
         }
@@ -921,13 +923,16 @@ namespace sampler
             program->name = file.getFileNameWithoutExtension();
             program->source = file;
             std::map<juce::String, juce::String> defines;
-            const auto parsed = parse (preprocess (file, defines, 0, program->problems));
+            std::map<juce::String, int> unread;   // "opcode" or "opcode=value" -> regions
+            // 0.18.0: a Decent Sampler preset, read into the same opcodes (Decent.h).
+            const auto parsed = decent::isPreset (file) ? decent::read (file, program->problems, unread)
+                                                        : parse (preprocess (file, defines, 0, program->problems));
             if (parsed.empty() && program->problems.isEmpty())
                 program->problems.add ("no regions in " + file.getFileName());
 
-            std::map<juce::String, int> unread;   // "opcode" or "opcode=value" -> regions
             std::map<juce::String, std::shared_ptr<const Sample>> loaded;   // path -> sample (each file once)
-            struct Pending { Region region; juce::String path; float crossfadeSeconds = 0.0f; };
+            struct Pending { Region region; juce::String path; float crossfadeSeconds = 0.0f; juce::int64 crossfadeFrames = -1; };
+            std::map<juce::String, std::shared_ptr<const std::array<float, 128>>> curves;   // (0.18.0: each curve once)
             std::vector<Pending> pending;                                  // regions, their files' paths, loop crossfades
             auto skippedRelease = 0, skippedGenerators = 0;
             const auto loKeyWanted = juce::jlimit (0, 127, options.loKey), hiKeyWanted = juce::jlimit (0, 127, options.hiKey);
@@ -1066,7 +1071,34 @@ namespace sampler
                 r.hiKey = juce::jmin (r.hiKey, hiKeyWanted);
 
                 const auto path = (defaultPath + *sampleName).replaceCharacter ('\\', '/');
-                pending.push_back ({ std::move (r), path, crossfadeSeconds });
+                // 0.18.0: Decent Sampler's (Decent.h): controller curves, attack by velocity, crossfades in frames.
+                juce::int64 crossfadeFrames = -1;
+                for (const auto& [k, v] : op)
+                    if (k.startsWith ("pr7o_cccurve"))
+                    {
+                        auto& shared = curves[v];
+                        if (shared == nullptr)
+                        {
+                            auto c = std::make_shared<std::array<float, 128>>();
+                            c->fill (1.0f);
+                            const auto values = juce::StringArray::fromTokens (v, ",", "");
+                            for (int i = 0; i < juce::jmin (128, values.size()); ++i)
+                                (*c)[(size_t) i] = juce::jmax (0.0f, (float) values[i].getDoubleValue());
+                            shared = std::move (c);
+                        }
+                        r.ccCurves.push_back ({ juce::jlimit (0, 127, k.substring (12).getIntValue()), shared });
+                    }
+                    else if (k == "pr7o_velattack")
+                    {
+                        for (const auto& point : juce::StringArray::fromTokens (v, ";", ""))
+                            r.attackByVelocity.push_back ({ (float) point.upToFirstOccurrenceOf (",", false, false).getDoubleValue(),
+                                                            juce::jmax (0.0f, (float) point.fromFirstOccurrenceOf (",", false, false).getDoubleValue()) });
+                    }
+                    else if (k == "pr7o_loop_crossfade_frames")
+                        crossfadeFrames = juce::jmax<juce::int64> (0, v.getLargeIntValue());
+                if (r.usesController (1))
+                    program->ownWheel = true;
+                pending.push_back ({ std::move (r), path, crossfadeSeconds, crossfadeFrames });
             }
 
             if (! options.audio)
@@ -1118,7 +1150,8 @@ namespace sampler
                         if (r.loopEnd - r.loopStart < 2)
                             r.loop = Region::Loop::none;
                         r.loopCrossfade = (int) juce::jlimit<juce::int64> (0, (r.loopEnd - r.loopStart) / 2,
-                                                                          (juce::int64) (p.crossfadeSeconds * sample->sampleRate));
+                                                                          p.crossfadeFrames >= 0 ? p.crossfadeFrames
+                                                                                                    : (juce::int64) (p.crossfadeSeconds * sample->sampleRate));
                     }
                     r.sample = std::move (sample);
                     program->regions.push_back (std::move (r));

@@ -504,7 +504,7 @@ InstrumentPage::~InstrumentPage()
 
 bool InstrumentPage::isInstrumentFile (const juce::File& f)
 {
-    return f.hasFileExtension ("sfz;wav;aif;aiff;flac;ogg");
+    return f.hasFileExtension ("sfz;dspreset;wav;aif;aiff;flac;ogg");   // (0.18.0: Decent Sampler presets)
 }
 
 bool InstrumentPage::isInterestedInFileDrag (const juce::StringArray& files)
@@ -512,7 +512,7 @@ bool InstrumentPage::isInterestedInFileDrag (const juce::StringArray& files)
     if (files.size() == 1)
         return isInstrumentFile (juce::File (files[0]));
     for (const auto& f : files)   // 0.4.0: several SFZ: a section
-        if (! juce::File (f).hasFileExtension ("sfz"))
+        if (! juce::File (f).hasFileExtension ("sfz;dspreset"))
             return false;
     return files.size() > 1;
 }
@@ -529,7 +529,7 @@ void InstrumentPage::chooseSection()
 {
     const auto start = sampler::section::folderOf (processor.getInstrumentFile());
     chooser = std::make_unique<juce::FileChooser> ("A section: choose its SFZ files (basses, cellos, violas, violins...)",
-                                                   start.isDirectory() ? start : juce::File(), "*.sfz");
+                                                   start.isDirectory() ? start : juce::File(), "*.sfz;*.dspreset");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
                               | juce::FileBrowserComponent::canSelectMultipleItems,
                           [this] (const juce::FileChooser& c)
@@ -653,9 +653,9 @@ void InstrumentPage::showLibrary (bool show)
 void InstrumentPage::chooseFile()
 {
     const auto folder = sampler::section::folderOf (processor.getInstrumentFile());
-    chooser = std::make_unique<juce::FileChooser> ("Load an instrument (SFZ, or one audio file)",
+    chooser = std::make_unique<juce::FileChooser> ("Load an instrument (SFZ, Decent Sampler, or one audio file)",
                                                    folder.isDirectory() ? folder : juce::File(),
-                                                   "*.sfz;*.wav;*.aif;*.aiff;*.flac;*.ogg");
+                                                   "*.sfz;*.dspreset;*.wav;*.aif;*.aiff;*.flac;*.ogg");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& c)
                           {

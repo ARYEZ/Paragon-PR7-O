@@ -82,6 +82,7 @@ target_sources(ParagonX1
         # THE INSTRUMENT (PR7-O 0.1.0): SFZ instruments played by our sampler.
         source/dsp/sampler/Sample.cpp
         source/dsp/sampler/Sfz.cpp
+        source/dsp/sampler/Decent.cpp
         source/dsp/sampler/Section.cpp
         source/dsp/stage/Seating.cpp
         source/library/Library.cpp

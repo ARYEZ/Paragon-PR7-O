@@ -10,6 +10,7 @@
 #include "dsp/sampler/Sampler.h"
 #include "dsp/sampler/Section.h"
 #include "dsp/sampler/Sfz.h"
+#include "library/Library.h"
 
 #include <functional>
 #include <map>
@@ -2123,4 +2124,159 @@ TEST_CASE ("SECTION 0.17.0: a section keeps its files' controller starts (set_cc
     const auto levelInSection = levelAt (render (*section, noteOn (57), 0.3)[0], 220.0, 4800, 4800);
     CHECK (levelAlone > 0.1);
     CHECK (std::abs (juce::Decibels::gainToDecibels (levelInSection / levelAlone)) < 0.1);   // (before 0.17.0: 30 dB down)
+}
+
+// ================================================================ 0.18.0: Decent Sampler presets
+TEST_CASE ("DECENT SAMPLER 0.18.0: a .dspreset's samples play as regions: keys, velocity layers, volume, tuning, pan, envelope, loops", "[decent][sampler]")
+{
+    Folder f;
+    f.wav ("Samples/soft.wav", 220.0, 1.0);
+    f.wav ("Samples/loud.wav", 440.0, 1.0);
+    f.wav ("Samples/high.wav", 660.0, 1.0);
+    const auto preset = f.sfz ("Strings.dspreset", R"(<?xml version="1.0" encoding="UTF-8"?>
+<DecentSampler>
+  <effects><effect type="reverb" wetLevel="1.0"/></effects>
+  <ui width="812" height="375"><tab name="main"><label text="Hello"/></tab></ui>
+  <groups attack="0.0" release="0.2" ampVelTrack="0">
+    <group name="Layers" volume="-6dB">
+      <sample path="Samples/soft.wav" rootNote="57" loNote="50" hiNote="59" loVel="0" hiVel="63"/>
+      <sample path="Samples/loud.wav" rootNote="57" loNote="50" hiNote="59" loVel="64" hiVel="127" volume="0dB"/>
+    </group>
+    <group name="Top" pan="100" tuning="1.0">
+      <sample path="Samples/high.wav" rootNote="64" loNote="60" hiNote="70" loopEnabled="true" loopStart="4800" loopEnd="40000" loopCrossfade="2400"/>
+    </group>
+  </groups>
+</DecentSampler>
+)");
+    const auto program = sampler::sfz::load (preset);
+    REQUIRE (program != nullptr);
+    INFO (program->problems.joinIntoString ("|") << " / " << program->unread.joinIntoString ("|"));
+    CHECK (program->problems.isEmpty());
+    CHECK (program->unread.isEmpty());
+    REQUIRE (program->regions.size() == 3);
+    // Velocity layers, each at its own pitch from its root; the group's -6 dB.
+    CHECK (loudestOf (render (*program, noteOn (57, 40), 0.2)[0], { 220.0, 440.0 }) == 220.0);
+    CHECK (loudestOf (render (*program, noteOn (57, 100), 0.2)[0], { 220.0, 440.0 }) == 440.0);
+    CHECK_THAT (frequencyOf (render (*program, noteOn (59, 40), 0.3)[0], 2400, 12000), Catch::Matchers::WithinRel (220.0 * std::pow (2.0, 2.0 / 12.0), 0.003));
+    const auto loud = render (*program, noteOn (57, 100), 0.3)[0];
+    CHECK (std::abs (juce::Decibels::gainToDecibels (levelAt (loud, 440.0, 4800, 4800)) - juce::Decibels::gainToDecibels (0.5) - (-6.0)) < 0.3);
+    // The top group: a semitone up (tuning 1.0), hard right (pan 100), looped with its crossfade in frames.
+    const auto top = render (*program, noteOn (64, 100), 0.3);
+    CHECK_THAT (frequencyOf (top[1], 2400, 12000), Catch::Matchers::WithinRel (660.0 * std::pow (2.0, 1.0 / 12.0), 0.003));
+    CHECK (peakOf (top[0], 2400, 12000) < 0.01 * peakOf (top[1], 2400, 12000));
+    const auto& looped = program->regions[2];
+    CHECK (looped.loop == sampler::Region::Loop::continuous);
+    CHECK (looped.loopStart == 4800);
+    CHECK (looped.loopEnd == 40000);
+    CHECK (looped.loopCrossfade == 2400);
+    CHECK_THAT (program->regions[0].release, Catch::Matchers::WithinAbs (0.2, 1.0e-4));
+}
+
+TEST_CASE ("DECENT SAMPLER 0.18.0: the mod wheel through a knob crossfades dynamics by tag; a menu sets velocity tracking and the attack by velocity", "[decent][sampler]")
+{
+    Folder f;
+    f.wav ("pp.wav", 220.0, 1.8);
+    f.wav ("ff.wav", 440.0, 1.8);
+    // As DS Orchestra Complete's mod-wheel instruments: CC 1 moves the Dynamics knob (position 3 on the tab: labels
+    // count), which sets the instrument's volume and the two tags' volumes; a menu (counted from 1) turns the attack
+    // by velocity on.
+    const auto preset = f.sfz ("Dyn.dspreset", R"(<DecentSampler>
+  <ui><tab>
+    <label text="Attack"/>
+    <control parameterName="Attack" type="float" minValue="0" maxValue="4" value="0.5"><binding type="amp" level="instrument" position="0" parameter="ENV_ATTACK"/></control>
+    <label text="Dynamics"/>
+    <control parameterName="Dynamics" type="float" minValue="0" maxValue="1" value="1.0">
+      <binding type="amp" level="instrument" parameter="AMP_VOLUME" translation="linear" translationOutputMin="0" translationOutputMax="1"/>
+      <binding identifier="ff" type="amp" level="tag" parameter="TAG_VOLUME" translation="table" translationTable="0.0,0;0.5,0;1.0,1"/>
+      <binding identifier="pp" type="amp" level="tag" parameter="TAG_VOLUME" translation="table" translationTable="0.0,1;0.5,1;1.0,0"/>
+    </control>
+    <menu value="1">
+      <option name="Attack"><binding type="note" translationValue="true" midiElementIndex="1" level="midi" parameter="ENABLED" translation="fixed_value"/>
+        <binding type="amp" translationValue="0.3" level="instrument" parameter="AMP_VEL_TRACK" translation="fixed_value"/></option>
+      <option name="Volume"><binding type="note" translationValue="false" midiElementIndex="1" level="midi" parameter="ENABLED" translation="fixed_value"/>
+        <binding type="amp" translationValue="1" level="instrument" parameter="AMP_VEL_TRACK" translation="fixed_value"/></option>
+    </menu>
+  </tab></ui>
+  <groups attack="0.04" release="0.1">
+    <group tags="pp"><sample path="pp.wav" rootNote="57" loNote="40" hiNote="70"/></group>
+    <group tags="ff"><sample path="ff.wav" rootNote="57" loNote="40" hiNote="70"/></group>
+  </groups>
+  <midi>
+    <cc number="1"><binding type="control" level="ui" parameter="VALUE" position="3" translation="linear" translationOutputMin="0" translationOutputMax="1"/></cc>
+    <note note="0-127"><binding type="amp" level="instrument" parameter="ENV_ATTACK" translation="table" translationTable="0.0,1;0.75,0;1.0,0"/></note>
+  </midi>
+  <tags><tag name="pp" volume="0"/><tag name="ff" volume="1"/></tags>
+</DecentSampler>
+)");
+    const auto program = sampler::sfz::load (preset);
+    REQUIRE (program != nullptr);
+    INFO (program->problems.joinIntoString ("|") << " / " << program->unread.joinIntoString ("|"));
+    CHECK (program->unread.isEmpty());
+    CHECK (program->initialCC[1] == 127);      // the knob opens at 1.0: the wheel starts at the top
+    CHECK (program->ownWheel);                 // (PR7-O's own DYNAMICS leaves the wheel to the file)
+    CHECK (program->ccLabels.count (1) == 1);
+    CHECK_THAT (program->regions[0].velTrack, Catch::Matchers::WithinAbs (0.3, 1.0e-4));   // the menu's first option (counted from 1)
+    // At the start, ff only, at full level (velocity 127: no attack time).
+    const auto start = render (*program, noteOn (57, 127), 0.3)[0];
+    CHECK (loudestOf (start, { 220.0, 440.0 }, 4800) == 440.0);
+    CHECK (levelAt (start, 220.0, 4800, 4800) < 0.01 * levelAt (start, 440.0, 4800, 4800));
+    CHECK (std::abs (juce::Decibels::gainToDecibels (levelAt (start, 440.0, 4800, 4800) / 0.5)) < 0.3);
+    // The wheel at 0: pp only, and the instrument's volume at 0 too (as the file says: silent).
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    juce::MidiBuffer down;
+    down.addEvent (juce::MidiMessage::controllerEvent (1, 1, 32), 0);   // a quarter: pp (the table's first half), volume 0.25
+    down.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 127), 1);
+    const auto quarter = render (*program, down, 0.3, {}, &s)[0];
+    CHECK (loudestOf (quarter, { 220.0, 440.0 }, 4800) == 220.0);
+    CHECK (std::abs (juce::Decibels::gainToDecibels (levelAt (quarter, 220.0, 4800, 4800) / 0.5) - juce::Decibels::gainToDecibels (32.0f / 127.0f)) < 0.3);
+    // The attack by velocity: 127 at once, 1 over about a second (the table's 1 s at velocity 0).
+    const auto soft = render (*program, noteOn (57, 1), 1.5)[0];
+    CHECK (peakOf (soft, 0, 4800) < 0.2 * peakOf (soft, 48000, 52800));
+}
+
+TEST_CASE ("DECENT SAMPLER 0.18.0: random round robins share the dice; the library lists presets by their instrument, the number off", "[decent][sampler][library]")
+{
+    Folder f;
+    f.wav ("Strings/Resources/a.wav", 220.0, 0.3);
+    f.wav ("Strings/Resources/b.wav", 330.0, 0.3);
+    const auto preset = f.sfz ("Strings/01 1st Violin Section - Staccato.dspreset", R"(<DecentSampler><groups>
+  <group seqMode="random" seqPosition="1"><sample path="Resources/a.wav" rootNote="57" loNote="40" hiNote="70"/></group>
+  <group seqMode="random" seqPosition="2"><sample path="Resources/b.wav" rootNote="57" loNote="40" hiNote="70"/></group>
+</groups></DecentSampler>)");
+    const auto program = sampler::sfz::load (preset);
+    REQUIRE (program->regions.size() == 2);
+    CHECK_THAT (program->regions[0].loRand, Catch::Matchers::WithinAbs (0.0, 1.0e-4));
+    CHECK_THAT (program->regions[0].hiRand, Catch::Matchers::WithinAbs (0.5, 1.0e-4));
+    CHECK_THAT (program->regions[1].loRand, Catch::Matchers::WithinAbs (0.5, 1.0e-4));
+    CHECK_THAT (program->regions[1].hiRand, Catch::Matchers::WithinAbs (1.0, 1.0e-4));
+    std::set<double> heard;
+    sampler::Sampler s;
+    s.prepare (sampleRate);
+    for (int i = 0; i < 24; ++i)
+    {
+        s.reset();
+        heard.insert (loudestOf (render (*program, noteOn (57), 0.15, {}, &s)[0], { 220.0, 330.0 }));
+    }
+    CHECK (heard.size() == 2);
+    // The browser finds it, under strings, as "1st Violins".
+    const auto entries = library::scan ({ f.dir });
+    REQUIRE (entries.size() == 1);
+    CHECK (entries[0].section == library::Section::strings);
+    CHECK (entries[0].instrument == "1st Violins");
+    CHECK (library::partLabel ("01 1st Violin Section - Staccato") == "1st Violins");
+    // Several make a section (each its own keys), as SFZ files do.
+    f.wav ("Low/Resources/c.wav", 110.0, 0.3);
+    const auto low = f.sfz ("Low/Basses.dspreset", R"(<DecentSampler><groups><group><sample path="Resources/c.wav" rootNote="45" loNote="28" hiNote="50"/></group></groups></DecentSampler>)");
+    const auto section = sampler::section::fromFiles ({ preset.getFullPathName(), low.getFullPathName() });
+    REQUIRE (section.parts.size() == 2);
+    const auto both = sampler::section::load (section);
+    REQUIRE (both != nullptr);
+    CHECK (loudestOf (render (*both, noteOn (33), 0.15)[0], { 110.0 * std::pow (2.0, -12.0 / 12.0), 220.0 }) != 220.0);
+    CHECK (peakOf (render (*both, noteOn (33), 0.15)[0]) > 0.1);
+    CHECK (peakOf (render (*both, noteOn (60), 0.15)[0]) > 0.1);
+    // A broken file says so.
+    const auto broken = sampler::sfz::load (f.sfz ("bad.dspreset", "<NotDecent/>"));
+    CHECK (broken->regions.empty());
+    CHECK (broken->problems.joinIntoString ("|").contains ("not a Decent Sampler preset"));
 }

@@ -702,6 +702,23 @@ namespace sampler
         }
         // The envelope (0.9.0: each stage moved by velocity and by controllers as the note starts).
         std::array<float, 6> stage { r.delay, r.attack, r.hold, r.decay, r.sustain, r.release };
+        if (! r.attackByVelocity.empty())   // 0.18.0: Decent Sampler's attack by velocity (straight lines between points)
+        {
+            const auto x = (float) velocity / 127.0f;
+            const auto& points = r.attackByVelocity;
+            stage[1] = points.back().second;
+            if (x <= points.front().first)
+                stage[1] = points.front().second;
+            else
+                for (size_t i = 1; i < points.size(); ++i)
+                    if (x <= points[i].first)
+                    {
+                        const auto& [x0, y0] = points[i - 1];
+                        const auto& [x1, y1] = points[i];
+                        stage[1] = x1 > x0 ? y0 + (y1 - y0) * (x - x0) / (x1 - x0) : y1;
+                        break;
+                    }
+        }
         for (size_t i = 0; i < 6; ++i)
         {
             stage[i] += r.velToEnvelope[i] * (float) velocity / 127.0f;
@@ -997,6 +1014,14 @@ namespace sampler
             if (! f.in)
                 t = 1.0f - t;
             fade *= r.ccFadePower ? std::sqrt (t) : t;
+        }
+        // 0.18.0: Decent Sampler's level curves (a gain for each controller value; between two values, in between).
+        for (const auto& [number, curve] : r.ccCurves)
+        {
+            const auto value = juce::jlimit (0.0f, 127.0f, cc[(size_t) juce::jlimit (0, 127, number)]);
+            const auto i = juce::jmin (126, (int) value);
+            const auto t = value - (float) i;
+            fade *= (*curve)[(size_t) i] + ((*curve)[(size_t) i + 1] - (*curve)[(size_t) i]) * t;
         }
         return juce::Decibels::decibelsToGain (db, -144.0f) * amplitude * fade;
     }

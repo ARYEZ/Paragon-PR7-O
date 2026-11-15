@@ -143,6 +143,10 @@ namespace sampler
         float ampRandom = 0.0f, pitchRandom = 0.0f;
         // A start held back by a controller (delay_ccN: seconds at 127, added to delay).
         std::vector<std::pair<int, float>> delayCC;
+        // 0.18.0, DECENT SAMPLER's bindings (Decent.h): level curves on controllers (cc, the gain at each of its 128
+        // values; several multiply), and the attack time by velocity (velocity 0-1, seconds; straight lines between).
+        std::vector<std::pair<int, std::shared_ptr<const std::array<float, 128>>>> ccCurves;
+        std::vector<std::pair<float, float>> attackByVelocity;
         bool usesController (int cc) const noexcept;   // its level, crossfades or filters follow controller `cc`
 
         bool playsUnder (int keyswitch) const noexcept { return swLoLast < 0 || (keyswitch >= swLoLast && keyswitch <= swHiLast); }

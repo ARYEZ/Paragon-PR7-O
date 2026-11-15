@@ -112,6 +112,10 @@ namespace sampler::section
     juce::String labelOf (const juce::String& name)
     {
         auto label = name.trim();
+        // (0.18.0: DS Orchestra Complete numbers its files: "01 1st Violin Section - Staccato", "03-1 ...")
+        if (const auto number = label.initialSectionContainingOnly ("0123456789-");
+            number.isNotEmpty() && label.length() > number.length() && label[number.length()] == ' ')
+            label = label.substring (number.length()).trim();
         for (const auto* end : { "-KS", "_KS", " KS" })
             if (label.endsWithIgnoreCase (end))
                 return label.dropLastCharacters (3).trim();
@@ -152,7 +156,7 @@ namespace sampler::section
         for (const auto& f : files)
         {
             const juce::File file (f);
-            if (! file.existsAsFile() || ! file.hasFileExtension ("sfz"))
+            if (! file.existsAsFile() || ! file.hasFileExtension ("sfz;dspreset"))
                 continue;
             sfz::LoadOptions keysOnly;
             keysOnly.audio = false;

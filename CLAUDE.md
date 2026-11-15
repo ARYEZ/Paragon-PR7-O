@@ -538,6 +538,35 @@ tools, which need the owner's riffs)
   VP01's chord vs 1.5% for VO01's; demo WAVs. Not checked: listening; the GET download itself (GitHub archives of
   other people's repos are refused by this session's proxy, as VSCO's and Sonatina's were).
 
+## 0.18.0 (not released yet): DECENT SAMPLER presets (the owner: "can we load decent sampler instruments in our pr7-0?", then "Go with DS Orchestra Complete")
+
+- **`dsp/sampler/Decent.*`** (namespace `sampler::decent`): `read (preset, problems, unread)` turns a `.dspreset` (XML) into
+  SFZ opcode maps that `sfz::load` takes instead of `parse` (so streaming, sections, the stage, legato... all follow).
+  `<groups>` / `<group>` / `<sample>` attributes inherit (path, rootNote, loNote / hiNote (numbers or names, C3 = 60),
+  loVel / hiVel, start / end, volume ("dB" suffix, else linear), tuning (semitones), pan, pitchKeyTrack, attack / decay /
+  sustain (0-1) / release, ampVelTrack (0-1), loopEnabled / loopStart / loopEnd / loopCrossfade (frames: internal opcode
+  `pr7o_loop_crossfade_frames`), trigger, seqMode random (lorand / hirand by seqPosition) / round_robin, tags, enabled).
+  **Bindings**: the first `<ui><tab>`'s children by position (labels count: a cc binding's `position` 7 was the 8th
+  child); knobs (`control`, `labeled-knob`) and menus (`value` counted from 1) applied once at their starting values
+  (ENV_*, AMP_VEL_TRACK, AMP_VOLUME, TAG_VOLUME, note ENABLED by `midiElementIndex`); a `<midi><cc>` moving a knob, or
+  bound straight to AMP_VOLUME / TAG_VOLUME, becomes per-region level curves (`pr7o_cccurve<cc>`: 128 gains, curves
+  multiplied; `Region::ccCurves`, shared; `Sampler::controlGainOf` interpolates) and `set_cc` (the value putting the knob
+  where it opens; direct ones: the closest to the starting volumes) + `label_cc`; `<midi><note>` ENV_ATTACK ->
+  `pr7o_velattack` (`Region::attackByVelocity`, velocity 0-1 -> seconds). Translations: linear (outMin / outMax over the
+  source's range), table (raw input units), fixed_value, none (a knob's raw value; a cc's 0-1). Effects, GLIDE_TIME,
+  ENV_ATTACK_CURVE left out (PR7-O's STAGE / FX instead); buttons and other bindings listed as unread.
+- Everywhere SFZ was taken: LOAD / drop / NEW SECTION, the processor's loader, `section::fromFiles`, `library::scan`
+  (`*.sfz;*.dspreset`); names: `section::labelOf` and the browser drop a leading file number ("01 ", "03-1 "), the
+  browser still sorts by the file name; word table + sax, clavichord, temple blocks, shakers, orchestra hits (other),
+  string / brass pads, brass FX.
+- **DS Orchestra Complete CE** (`github.com/Thiago-Morais/DS-Orchestra-Complete-CE`, after Shovan Das's free library;
+  **no licence file**: no GET button / presets until permission is clear) cloned into `/tmp/claude-0/ds/ce` (Modwheel
+  Controlled samples checked out: 2.3 GB). Probe `/tmp/claude-0/ds/ScratchDs.cpp` (not committed): all 152 mod-wheel
+  presets load, 0 problems, unread only one file's cc binding to a missing knob; 6378 / 6508 regions follow the wheel;
+  a 5-part string section's level falls ~45 dB with the wheel and comes back. Its samples are hot: a 10-note chord of
+  the section peaks +10 dBFS at the wheel's top (DS starts it there). Demo WAVs. Not checked: listening; `.dslibrary`
+  (zipped) packages; other DS libraries' bindings (keyswitch buttons...).
+
 ## The plan (`PR7-O PLAN.md`), next
 
 Sections are split only (0.4.0; layered was offered too: not asked for). Next in the order told to the owner:

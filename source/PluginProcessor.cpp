@@ -985,7 +985,7 @@ void ParagonX1AudioProcessor::startLoading (const juce::String& file, bool undoS
                 problem = "needs " + needed.joinIntoString (" and ") + ": GET it in the library (LOAD)";
             else if (! source.existsAsFile())
                 problem = "not found: " + file;
-            else if (source.hasFileExtension ("sfz"))
+            else if (source.hasFileExtension ("sfz;dspreset"))   // (0.18.0: Decent Sampler presets read the same way)
             {
                 sampler::sfz::LoadOptions options;
                 options.reuse = reuse;
