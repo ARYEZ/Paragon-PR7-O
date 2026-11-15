@@ -538,7 +538,7 @@ tools, which need the owner's riffs)
   VP01's chord vs 1.5% for VO01's; demo WAVs. Not checked: listening; the GET download itself (GitHub archives of
   other people's repos are refused by this session's proxy, as VSCO's and Sonatina's were).
 
-## 0.18.0 (not released yet): DECENT SAMPLER presets (the owner: "can we load decent sampler instruments in our pr7-0?", then "Go with DS Orchestra Complete")
+## 0.18.0: DECENT SAMPLER presets (the owner: "can we load decent sampler instruments in our pr7-0?", then "Go with DS Orchestra Complete")
 
 - **`dsp/sampler/Decent.*`** (namespace `sampler::decent`): `read (preset, problems, unread)` turns a `.dspreset` (XML) into
   SFZ opcode maps that `sfz::load` takes instead of `parse` (so streaming, sections, the stage, legato... all follow).

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.18.0
+
+**Decent Sampler instruments load in PR7-O** (you: "can we load decent sampler instruments in our pr7-0?", then "Go
+with DS Orchestra Complete").
+
+- **LOAD, drag and drop, NEW SECTION and the library browser take `.dspreset` files** as well as SFZ. Add a Decent
+  Sampler library's folder with ADD FOLDER... and its instruments are listed by section like the others (the library's
+  own file numbers hidden, its order kept).
+- **They play the way they do in Decent Sampler:** samples, keys, velocity layers, round robins, loops and release
+  samples; the instrument's own knob settings as it opens; **dynamics on the mod wheel** where the instrument wires
+  them that way; the attack set by how hard you play where it does. Everything PR7-O adds works on them too: sections,
+  the stage, the mixer, the ensemble, legato.
+- **Left out:** Decent Sampler's own screen (PR7-O shows its own pages) and each instrument's built-in reverb, delay and
+  chorus (PR7-O's STAGE and FX do that work).
+- **Checked on DS Orchestra Complete (Community Edition)**, a free whole orchestra with orchestra hits, brass hits and
+  falls, muted brass, pads, saxophone, many choirs and percussion: all 152 of its mod-wheel instruments load with
+  nothing missing. Get it from GitHub (Thiago-Morais/DS-Orchestra-Complete-CE: Code, Download ZIP), unzip it, ADD
+  FOLDER. It's loud: a full string-section chord peaks over 0 dBFS with the wheel at the top, where it starts, so take
+  LEVEL down for big chords. No GET button for it yet: it has no licence file.
+- Not checked here: listening; zipped `.dslibrary` packages (unzip them first); other Decent Sampler libraries that work
+  differently (articulation buttons on their own screen).
+
 ## 0.17.0
 
 **Virtual Playing Orchestra 3: a third free library, with its own GET button and preset bank** (you: "Add virtual
